@@ -151,31 +151,62 @@ extension CapturePipeline {
         do {
             let result = try await write(until: deadline) { try await database.upsertRequestsCountingInserts(rows) }
             didWrite(rows, ids: result.ids, inserted: result.inserted, now: now)
-        } catch is CaptureWriteRejection {
-            let refused = try await writeRowsIndividually(rows, now: now, deadline: deadline)
+        } catch let rejection as CaptureWriteRejection {
+            let refused = try await writeRowsIndividually(rows, refusal: rejection.message, now: now, deadline: deadline)
             spool.quarantine(refused)
         }
         batch.requests = []
     }
 
-    /// Writes rows one at a time; a refused row is retried without its app and probe links (they may point
-    /// at rows another Mac deleted). Returns the rows still refused.
-    private func writeRowsIndividually(_ rows: [RequestRecord], now: Date, deadline: ContinuousClock.Instant) async throws -> [RequestRecord] {
+    /// After a refused batch of rows: writes it in halves and splits only the halves the server refuses
+    /// again, so a bad row costs a few statements rather than one per row of the batch. A single refused row
+    /// is retried without its app and probe links (they may point at rows another Mac deleted). Returns the
+    /// rows still refused. When every row is refused and no other statement of this flush succeeded, the
+    /// server is at fault: that throws, and the rows are kept for later.
+    private func writeRowsIndividually(_ rows: [RequestRecord], refusal: String, now: Date, deadline: ContinuousClock.Instant) async throws
+        -> [RequestRecord] {
+        let (refused, deeper) = try await bisectRefused(rows, now: now, deadline: deadline)
+        let message = deeper.isEmpty ? refusal : deeper
+        if !refused.isEmpty, refused.count == rows.count, rows.count > 1, !writesSucceeded {
+            throw CaptureServerRejection(message: message)
+        }
+        if !refused.isEmpty { Self.log.error("PostgreSQL refused \(refused.count) request rows: \(message, privacy: .public)") }
+        return refused
+    }
+
+    /// `rows` were refused together: their halves are tried apart (recursively), down to single rows.
+    private func bisectRefused(_ rows: [RequestRecord], now: Date, deadline: ContinuousClock.Instant) async throws
+        -> (refused: [RequestRecord], message: String) {
         let database = self.database
-        return try await individually(rows, label: "request rows") { row in
+        guard rows.count > 1 else {
+            guard let row = rows.first else { return ([], "") }
+            guard row.appID != nil || row.probeSessionID != nil else { return ([row], "") }
+            var unlinked = row
+            unlinked.appID = nil
+            unlinked.probeSessionID = nil
+            unlinked.isNew = false
             do {
-                let result = try await write(until: deadline) { try await database.upsertRequestsCountingInserts([row]) }
-                didWrite([row], ids: result.ids, inserted: result.inserted, now: now)
-            } catch let rejection as CaptureWriteRejection {
-                guard row.appID != nil || row.probeSessionID != nil else { throw rejection }
-                var unlinked = row
-                unlinked.appID = nil
-                unlinked.probeSessionID = nil
-                unlinked.isNew = false
                 let result = try await write(until: deadline) { [unlinked] in try await database.upsertRequestsCountingInserts([unlinked]) }
                 didWrite([unlinked], ids: result.ids, inserted: result.inserted, now: now)
+                return ([], "")
+            } catch let rejection as CaptureWriteRejection {
+                return ([row], rejection.message)
             }
         }
+        var refused: [RequestRecord] = []
+        var message = ""
+        let middle = rows.count / 2
+        for half in [Array(rows[..<middle]), Array(rows[middle...])] {
+            do {
+                let result = try await write(until: deadline) { try await database.upsertRequestsCountingInserts(half) }
+                didWrite(half, ids: result.ids, inserted: result.inserted, now: now)
+            } catch let rejection as CaptureWriteRejection {
+                let deeper = try await bisectRefused(half, now: now, deadline: deadline)
+                refused += deeper.refused
+                message = deeper.message.isEmpty ? rejection.message : deeper.message
+            }
+        }
+        return (refused, message)
     }
 
     private func writeInventory(_ batch: inout CaptureWriteBuffer.Batch, now: Date, deadline: ContinuousClock.Instant) async throws {
@@ -326,8 +357,9 @@ extension CapturePipeline {
                 do {
                     let result = try await write(until: deadline) { try await database.upsertRequestsCountingInserts(rows) }
                     didWrite(rows, ids: result.ids, inserted: result.inserted, now: now)
-                } catch is CaptureWriteRejection {
-                    let refused = try await writeRowsIndividually(rows, now: now, deadline: .now.advanced(by: writeTimeout * 4))
+                } catch let rejection as CaptureWriteRejection {
+                    let refused = try await writeRowsIndividually(rows, refusal: rejection.message, now: now,
+                                                                  deadline: .now.advanced(by: writeTimeout * 4))
                     spool.quarantine(refused)
                 }
             } catch {

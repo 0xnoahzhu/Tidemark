@@ -228,6 +228,24 @@ struct CaptureResilienceTests {
         #expect(await database.alertsInserted.map(\.value) == ["api.notion.com"])
     }
 
+    @Test func aRefusedRowIsFoundWithoutRewritingEveryRowAlone() async {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        await database.setRefusedHosts(["h37.example"])
+        let pipeline = makePipeline(database: database, directory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        for id in 1...64 {
+            await pipeline.ingest(CaptureFixtures.request(id: Int64(id), host: "h\(id).example", processPath: "/usr/bin/curl",
+                                                          remoteAddress: "10.0.1.\(id)", completed: true), now: base)
+        }
+        await pipeline.tick(now: base.addingTimeInterval(1))
+        #expect(await pipeline.isOnline)
+        #expect(await database.rows.count == 63)
+        #expect(await database.requestWriteCalls < 20, "the refused batch is split in halves, not written row by row")
+        let rejected = (try? String(contentsOf: temp.url.appending(path: "rejected.jsonl"), encoding: .utf8)) ?? ""
+        #expect(rejected.split(separator: "\n").count == 1 && rejected.contains("h37.example"))
+    }
+
     @Test func workQueuedBeforeADeviceSwitchKeepsItsDevice() async throws {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()

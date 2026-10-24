@@ -223,6 +223,8 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var appsDelay: Duration = .zero
     var closedSessions: [(deviceID: DeviceID, before: Int64, at: Date)] = []
     var vanishedCloses: [(deviceID: DeviceID, session: Int64, keeping: Set<Int64>, startedBefore: Date, at: Date)] = []
+    /// Number of request upsert statements (refused ones included).
+    var requestWriteCalls = 0
     var knownHostsCalls = 0
     /// Returned by `alerts(after:excluding:)` (alerts other Macs wrote).
     var otherMacAlerts: [AlertItem] = []
@@ -307,6 +309,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     }
     func upsertRequestsCountingInserts(_ rows: [RequestRecord]) async throws -> RequestUpsertResult {
         try check()
+        requestWriteCalls += 1
         if stallingRequests {
             try await Task.sleep(for: .seconds(3600))
             throw CancellationError()
