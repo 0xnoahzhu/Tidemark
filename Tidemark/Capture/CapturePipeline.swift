@@ -49,6 +49,8 @@ struct CaptureUIUpdate: Sendable {
     var signals: [CaptureSurgeSignal] = []
     /// Set once when a write failed and the pipeline went offline.
     var databaseFailure: String?
+    /// The error behind `databaseFailure` (the engine describes it in the UI language).
+    var databaseError: (any Error)?
     var databaseOnline = false
     /// Another Mac had already recorded inventory entries this Mac believed were new: the local index is stale.
     var lostInventoryRace = false

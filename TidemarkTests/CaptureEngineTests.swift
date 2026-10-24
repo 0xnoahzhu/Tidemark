@@ -358,6 +358,17 @@ struct CaptureEngineTests {
         #expect(engine.explanation(for: direct, appName: "WeChat") == nil, "an IP without a hostname has no host to explain")
     }
 
+    @Test func describesWriteFailuresInTheUILanguage() {
+        Localizer.shared.preference = .english
+        let (engine, model) = makeEngine()
+        var update = CaptureUIUpdate()
+        update.databaseFailure = "PostgreSQL refused every write: disk full"
+        update.databaseError = CaptureServerRejection(message: "disk full")
+        engine.apply(update)
+        #expect(model.live.database == .failed(message: "PostgreSQL refused every write: disk full"))
+        #expect(CaptureEngine.message(for: CaptureTimeoutError(seconds: 20)) == "PostgreSQL did not answer in time")
+    }
+
     @Test func keepsTheRecordingMacsActivityFresh() {
         let (engine, model) = makeEngine()
         let me = model.preferences.thisDeviceID

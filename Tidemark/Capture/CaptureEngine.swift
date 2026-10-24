@@ -696,7 +696,7 @@ final class CaptureEngine {
             }
         }
         if let failure = update.databaseFailure {
-            live.database = .failed(message: failure)
+            live.database = .failed(message: update.databaseError.map(Self.message(for:)) ?? failure)
             lastWriteFailureAt = now
             scheduleDatabaseReconnect()
         }
@@ -928,7 +928,12 @@ final class CaptureEngine {
         min(60, pow(2, Double(max(0, attempt - 1))))
     }
 
+    /// A failure for display; capture's own write failures are described in the UI language.
     static func message(for error: any Error) -> String {
-        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        switch error {
+        case is CaptureTimeoutError: tr("PostgreSQL did not answer in time", "Capture")
+        case let rejection as CaptureServerRejection: trf("PostgreSQL refused every write: %@", "Capture", rejection.message)
+        default: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 }

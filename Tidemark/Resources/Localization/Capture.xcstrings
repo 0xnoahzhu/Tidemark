@@ -51,6 +51,16 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有域名" } }
       }
     },
+    "PostgreSQL did not answer in time" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PostgreSQL 未及时响应" } }
+      }
+    },
+    "PostgreSQL refused every write: %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PostgreSQL 拒绝了所有写入：%@" } }
+      }
+    },
     "Remote · controller connected · streaming" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "远程 · 控制器已连接 · 正在订阅" } }

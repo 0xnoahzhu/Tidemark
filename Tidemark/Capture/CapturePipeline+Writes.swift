@@ -344,6 +344,7 @@ extension CapturePipeline {
         guard online else { return }
         online = false
         pending.databaseFailure = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        pending.databaseError = error
         Self.log.error("PostgreSQL write failed: \(error.localizedDescription, privacy: .public)")
     }
 
