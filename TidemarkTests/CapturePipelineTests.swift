@@ -1,0 +1,291 @@
+import Foundation
+import Testing
+@testable import Tidemark
+
+struct CapturePipelineTests {
+    let device = UUID()
+    let ownExecutable = "/Applications/Tidemark.app/Contents/MacOS/Tidemark"
+    let boot = Date(timeIntervalSince1970: 1_792_000_000)
+    /// Later than any internal timer start, so intervals have always elapsed.
+    let base = Date.now.addingTimeInterval(5)
+
+    /// Raycast (540) → node (1388)
+    var processes: CaptureFakeProcesses {
+        CaptureFakeProcesses([
+            LiveProcess(pid: 540, parentPID: 1, name: "Raycast", path: "/Applications/Raycast.app/Contents/MacOS/Raycast", startTime: boot),
+            LiveProcess(pid: 1388, parentPID: 540, name: "node", path: "/Users/me/Library/Application Support/com.raycast.macos/node/bin/node",
+                        startTime: boot.addingTimeInterval(5)),
+        ])
+    }
+
+    func makePipeline(database: CaptureFakeDatabase, surge: CaptureFakeSurge, spoolDirectory: URL, probes: ProbeRegistry = ProbeRegistry(),
+                      contactGrace: TimeInterval = 0.5) -> CapturePipeline {
+        CapturePipeline(
+            settings: CaptureSettings(deviceID: device, isRemote: false, batchRows: 200, batchInterval: 1, ownExecutablePath: ownExecutable),
+            database: database, surge: surge, processes: processes, classifier: CaptureFakeClassifier(), probes: probes,
+            spool: CaptureSpool(directory: spoolDirectory, limit: 10_000), contactGrace: contactGrace
+        )
+    }
+
+    /// Polls `condition` until it holds or the timeout passes.
+    func eventually(_ timeout: Duration = .seconds(3), _ condition: () async -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return await condition()
+    }
+
+    func nodeRequest(id: Int64, host: String, remoteAddress: String?, completed: Bool = false) -> SurgeRequest {
+        CaptureFixtures.request(id: id, host: host, processPath: "/Users/me/Library/Application Support/com.raycast.macos/node/bin/node",
+                                pid: 1388, remoteAddress: remoteAddress, policy: "DIRECT", completed: completed)
+    }
+
+    @Test func recordsFirstContactAndWritesInOrder() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let surge = CaptureFakeSurge()
+        surge.update { $0.geo["104.18.22.110"] = SurgeGeoIP(address: "104.18.22.110", country: "US", asn: 13335, organization: "Cloudflare, Inc.") }
+        let raycast = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
+        await database.setKnown([raycast.id: ["backend.raycast.com"]])
+        let pipeline = makePipeline(database: database, surge: surge, spoolDirectory: temp.url)
+        await pipeline.setApps([raycast], paused: [])
+        try await pipeline.loadKnownHosts()
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.beginSession(1_000)
+
+        await pipeline.ingest(nodeRequest(id: 1, host: "api.notion.com", remoteAddress: "104.18.22.110"), now: base)
+        // GeoIP arrives asynchronously; the contact waits for it (or the grace period).
+        #expect(await eventually { await pipeline.drainUpdate().records.contains { $0.geo != nil } })
+        await pipeline.tick(now: base.addingTimeInterval(2))
+
+        let chains = await database.chains
+        #expect(chains.count == 1)
+        #expect(chains.first?.appID == raycast.id)
+        #expect(chains.first?.chain.map(\.name) == ["Raycast", "node"])
+
+        let key = RequestKey(deviceID: device, session: 1_000, surgeID: 1)
+        let written = await database.rows[key]
+        #expect(written?.appID == raycast.id)
+        #expect(written?.chain.count == 2)
+        #expect(written?.bundlePath == "/Applications/Raycast.app")
+
+        let hosts = await database.appHosts
+        #expect(hosts.keys.sorted() == ["\(raycast.id.uuidString)|domain:api.notion.com", "\(raycast.id.uuidString)|ip:104.18.22.110"])
+
+        let alerts = await database.alertsInserted
+        #expect(alerts.count == 1)
+        let alert = try #require(alerts.first)
+        #expect(alert.scope == .site && alert.site == "notion.com" && alert.value == "api.notion.com")
+        #expect(alert.geo?.display == "US · AS13335 Cloudflare")
+        #expect(alert.processName == "node")
+        #expect(alert.requestRowID == (await database.rowIDs[key]))
+        #expect(alert.deviceID == device)
+
+        let update = await pipeline.drainUpdate()
+        #expect(update.alerts.map(\.id) == [alert.id])
+        #expect(update.inventoryChanged == [raycast.id])
+        #expect(update.records.first { $0.key == key }?.isNew == true)
+        #expect(update.records.first { $0.key == key }?.rowID != nil)
+
+        // The NEW flag is written on the next flush.
+        await pipeline.tick(now: base.addingTimeInterval(4))
+        #expect(await database.rows[key]?.isNew == true)
+
+        let sources = await database.sources
+        #expect(Set(sources.map(\.value)) == ["api.notion.com", "104.18.22.110"])
+    }
+
+    @Test func anotherMacWinningTheRaceSuppressesTheAlert() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let surge = CaptureFakeSurge()
+        let raycast = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
+        await database.preinsert(AppHost(appID: raycast.id, kind: .domain, value: "api.linear.app", site: "linear.app", firstSeen: boot,
+                                         lastSeen: boot, requestCount: 1, processName: "node", policy: nil, geo: nil, isDirect: false, hosts: []))
+        let pipeline = makePipeline(database: database, surge: surge, spoolDirectory: temp.url, contactGrace: 0)
+        await pipeline.setApps([raycast], paused: [])
+        try await pipeline.loadKnownHosts()
+        await pipeline.setDatabaseOnline(true)
+
+        await pipeline.ingest(nodeRequest(id: 5, host: "api.linear.app", remoteAddress: "10.0.0.8"), now: base)
+        await pipeline.tick(now: base.addingTimeInterval(2))
+        #expect(await database.alertsInserted.isEmpty)
+        #expect(await database.appHosts.count == 2, "the IP is still new for this Mac")
+    }
+
+    @Test func pausedAppsAndArchivedAppsDontAlert() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let raycast = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
+        let pipeline = makePipeline(database: database, surge: CaptureFakeSurge(), spoolDirectory: temp.url, contactGrace: 0)
+        await pipeline.setApps([raycast], paused: [raycast.id])
+        try await pipeline.loadKnownHosts()
+        await pipeline.setDatabaseOnline(true)
+
+        await pipeline.ingest(nodeRequest(id: 1, host: "api.linear.app", remoteAddress: "10.0.0.8"), now: base)
+        await pipeline.tick(now: base.addingTimeInterval(2))
+        #expect(await database.appHosts.isEmpty)
+        #expect(await database.alertsInserted.isEmpty)
+        #expect(await database.rows.values.first?.appID == raycast.id, "paused apps still own their requests")
+    }
+
+    @Test func spoolsWhileOfflineAndReplaysInOrder() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let pipeline = makePipeline(database: database, surge: CaptureFakeSurge(), spoolDirectory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        await database.setFailing(true)
+
+        for id in 1...3 { await pipeline.ingest(CaptureFixtures.request(id: Int64(id), host: "h\(id).com", processPath: "/usr/bin/curl", remoteAddress: "10.0.0.\(id)", completed: true), now: base) }
+        await pipeline.tick(now: base.addingTimeInterval(2))
+        let failure = await pipeline.drainUpdate()
+        #expect(failure.databaseFailure != nil)
+        #expect(failure.bufferedRows == 3)
+        #expect(await pipeline.isOnline == false)
+
+        for id in 4...5 { await pipeline.ingest(CaptureFixtures.request(id: Int64(id), host: "h\(id).com", processPath: "/usr/bin/curl", remoteAddress: "10.0.0.\(id)", completed: true), now: base.addingTimeInterval(3)) }
+        await pipeline.tick(now: base.addingTimeInterval(5))
+        #expect(await pipeline.bufferedRows == 5)
+        #expect(await database.writes.isEmpty)
+
+        await database.setFailing(false)
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.tick(now: base.addingTimeInterval(7))
+        #expect(await database.writes.map(\.key.surgeID) == [1, 2, 3, 4, 5])
+        let after = await pipeline.drainUpdate()
+        #expect(after.bufferedRows == 0)
+        #expect(after.rowsWritten == 5)
+    }
+
+    @Test func rewritesActiveRequestsPeriodicallyAndOnCompletion() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let pipeline = makePipeline(database: database, surge: CaptureFakeSurge(), spoolDirectory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+
+        var request = CaptureFixtures.request(id: 9, host: "example.com", processPath: "/usr/bin/curl", remoteAddress: "10.0.0.9")
+        await pipeline.ingest(request, now: base)
+        await pipeline.tick(now: base)
+        #expect(await database.writes.count == 1, "written when first seen")
+
+        request.inBytes = 4096
+        await pipeline.ingest(request, now: base.addingTimeInterval(1))
+        await pipeline.tick(now: base.addingTimeInterval(2))
+        #expect(await database.writes.count == 1, "active rows wait about 10 s")
+        await pipeline.tick(now: base.addingTimeInterval(11))
+        #expect(await database.writes.count == 2)
+        #expect(await database.writes.last?.inBytes == 4096)
+
+        request.completed = true
+        request.completedDate = request.startDate.map { $0 + 12 }
+        await pipeline.ingest(request, now: base.addingTimeInterval(12))
+        await pipeline.tick(now: base.addingTimeInterval(13.5))
+        #expect(await database.writes.count == 3)
+        #expect(await database.writes.last?.state == .completed)
+
+        // Identical updates after completion write nothing.
+        await pipeline.ingest(request, now: base.addingTimeInterval(14))
+        await pipeline.tick(now: base.addingTimeInterval(16))
+        #expect(await database.writes.count == 3)
+    }
+
+    @Test func resolvesProxiedHostnamesThroughSurge() async throws {
+        let temp = CaptureTempDirectory()
+        let surge = CaptureFakeSurge()
+        surge.update { $0.dns["api.github.com"] = ["140.82.121.5"] }
+        let pipeline = makePipeline(database: CaptureFakeDatabase(), surge: surge, spoolDirectory: temp.url)
+
+        await pipeline.ingest(CaptureFixtures.request(id: 1, host: "api.github.com", processPath: "/usr/bin/git", remoteAddress: "23.254.139.175 (Proxy)"), now: base)
+        #expect(await eventually { await pipeline.drainUpdate().records.contains { $0.remoteIP == "140.82.121.5" } })
+
+        // Cached by TTL: the next request for the host needs no lookup.
+        await pipeline.ingest(CaptureFixtures.request(id: 2, host: "api.github.com", processPath: "/usr/bin/git", remoteAddress: "23.254.139.175 (Proxy)"), now: base)
+        let update = await pipeline.drainUpdate()
+        #expect(update.records.first { $0.key.surgeID == 2 }?.remoteIP == "140.82.121.5")
+        #expect(surge.snapshot.dnsLookups == ["api.github.com"])
+    }
+
+    @Test func usesSurgesDNSCache() async {
+        let temp = CaptureTempDirectory()
+        let surge = CaptureFakeSurge()
+        surge.update { $0.dnsCache["registry.npmjs.org"] = ["104.16.27.34"] }
+        let pipeline = makePipeline(database: CaptureFakeDatabase(), surge: surge, spoolDirectory: temp.url)
+        await pipeline.refreshDNSCache(now: base)
+        await pipeline.ingest(CaptureFixtures.request(id: 1, host: "registry.npmjs.org", processPath: "/usr/local/bin/node", remoteAddress: "1.2.3.4 (Proxy)"), now: base)
+        #expect(await pipeline.drainUpdate().records.first?.remoteIP == "104.16.27.34")
+        #expect(surge.snapshot.dnsLookups.isEmpty)
+    }
+
+    @Test func matchesProbeConnectionsBySourcePort() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let probes = ProbeRegistry()
+        let session = UUID()
+        probes.begin(sessionID: session, startedAt: base)
+        probes.connectionOpened(host: "github.com", at: base)
+        probes.registerUpstream(port: 50_001, host: "github.com")
+        let pipeline = makePipeline(database: database, surge: CaptureFakeSurge(), spoolDirectory: temp.url, probes: probes)
+        await pipeline.setDatabaseOnline(true)
+
+        let own = CaptureFixtures.request(id: 3, host: "github.com", processPath: ownExecutable, remoteAddress: "20.205.243.166", sourcePort: 50_001)
+        let other = CaptureFixtures.request(id: 4, host: "github.com", processPath: ownExecutable, remoteAddress: "20.205.243.166", sourcePort: 50_002)
+        await pipeline.ingest(own, now: base)
+        await pipeline.ingest(other, now: base)
+        let update = await pipeline.drainUpdate()
+        #expect(update.records.first { $0.key.surgeID == 3 }?.probeSessionID == session)
+        #expect(update.records.first { $0.key.surgeID == 4 }?.probeSessionID == nil)
+        #expect(probes.snapshot().hosts.first?.ips == ["20.205.243.166"])
+
+        await pipeline.tick(now: base.addingTimeInterval(2))
+        let sources = await database.sources
+        #expect(sources.count == 2, "only the non-probe request lands in the global inventory from the pipeline")
+    }
+
+    @Test func pausingRecordingDropsEvents() async {
+        let temp = CaptureTempDirectory()
+        let pipeline = makePipeline(database: CaptureFakeDatabase(), surge: CaptureFakeSurge(), spoolDirectory: temp.url)
+        await pipeline.setRecording(false)
+        let request = CaptureFixtures.request(id: 1, host: "a.com", processPath: "/usr/bin/curl")
+        await pipeline.ingest(request, now: base)
+        #expect(await pipeline.drainUpdate().records.isEmpty)
+
+        await pipeline.setRecording(true)
+        await pipeline.ingest(request, now: base)
+        #expect(await pipeline.drainUpdate().records.isEmpty, "requests first seen while paused stay ignored")
+        await pipeline.ingest(CaptureFixtures.request(id: 2, host: "b.com", processPath: "/usr/bin/curl"), now: base)
+        let update = await pipeline.drainUpdate()
+        #expect(update.records.map(\.key.surgeID) == [2])
+        #expect(update.newRequests == 1)
+    }
+
+    @Test func backfillIsNotCountedAsNewTraffic() async {
+        let temp = CaptureTempDirectory()
+        let pipeline = makePipeline(database: CaptureFakeDatabase(), surge: CaptureFakeSurge(), spoolDirectory: temp.url)
+        await pipeline.ingestBackfill([
+            CaptureFixtures.request(id: 2, host: "b.com", processPath: "/usr/bin/curl", completed: true),
+            CaptureFixtures.request(id: 1, host: "a.com", processPath: "/usr/bin/curl", completed: true),
+        ], now: base)
+        let update = await pipeline.drainUpdate()
+        #expect(update.newRequests == 0)
+        #expect(update.fresh.count == 2)
+    }
+
+    @Test func newlyMonitoredAppsAttributeLiveRequests() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let pipeline = makePipeline(database: database, surge: CaptureFakeSurge(), spoolDirectory: temp.url, contactGrace: 0)
+        try await pipeline.loadKnownHosts()
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.ingestBackfill([nodeRequest(id: 1, host: "backend.raycast.com", remoteAddress: "76.76.21.21", completed: true)], now: base)
+        _ = await pipeline.drainUpdate()
+
+        let raycast = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app", createdAt: .now)
+        await pipeline.setApps([raycast], paused: [])
+        let update = await pipeline.drainUpdate()
+        #expect(update.records.first?.appID == raycast.id)
+        await pipeline.tick(now: base.addingTimeInterval(2))
+        #expect(await database.alertsInserted.isEmpty, "traffic from before the app was added is history, not first contact")
+    }
+}
