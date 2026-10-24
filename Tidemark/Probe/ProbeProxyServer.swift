@@ -7,23 +7,28 @@ import Synchronization
 ///
 /// It listens on `127.0.0.1` with an ephemeral port and accepts `CONNECT` tunnels and absolute-URI plain
 /// HTTP requests. Each browser connection gets its own upstream connection to Surge's HTTP proxy: the
-/// proxy registers the upstream's local source port with the `ProbeRegistry` (so the capture pipeline can
-/// match Surge's record of it), replays the request head, and then pipes both directions, relaying
-/// Surge's response untouched. Every host and its activity window are reported to the registry.
+/// proxy registers the upstream's local source address and port with the `ProbeRegistry` (so the capture
+/// pipeline can match Surge's record of it) until shortly after it closes, replays the request head, and
+/// then pipes both directions, relaying Surge's response untouched. Every host and its activity window are
+/// reported to the registry. A client that does not finish its request head within `headTimeout` gets 408.
 final class ProbeProxyServer: Sendable {
     let upstreamHost: String
     let upstreamPort: UInt16
     let registry: ProbeRegistry
     /// How long to wait for Surge to accept an upstream connection.
     let connectTimeout: Duration
+    /// How long a client may take to send its request head; silent clients are answered 408 and closed.
+    let headTimeout: Duration
 
     private let runTask = Mutex<Task<Void, Never>?>(nil)
 
-    init(upstreamPort: UInt16, registry: ProbeRegistry, upstreamHost: String = "127.0.0.1", connectTimeout: Duration = .seconds(5)) {
+    init(upstreamPort: UInt16, registry: ProbeRegistry, upstreamHost: String = "127.0.0.1", connectTimeout: Duration = .seconds(5),
+         headTimeout: Duration = .seconds(10)) {
         self.upstreamHost = upstreamHost
         self.upstreamPort = upstreamPort
         self.registry = registry
         self.connectTimeout = connectTimeout
+        self.headTimeout = headTimeout
     }
 
     /// Starts listening and returns the loopback port.
@@ -75,21 +80,68 @@ final class ProbeProxyServer: Sendable {
 
     // MARK: Connections
 
+    /// What arrived before the blank line that ends a request head.
+    private enum HeadRead: Sendable {
+        case head(Data, end: Int)
+        case closed
+        case tooLarge
+    }
+
+    private static func readHead(from client: NetworkConnection<TCP>) async throws -> HeadRead {
+        var buffer = Data()
+        while true {
+            let message = try await client.receive(atLeast: 1, atMost: 65_536)
+            buffer.append(message.content)
+            if let end = ProbeHTTPHead.headEnd(in: buffer) { return .head(buffer, end: end) }
+            if message.metadata.endOfStream { return .closed }
+            if buffer.count > ProbeHTTPHead.maxLength { return .tooLarge }
+        }
+    }
+
+    /// Reads the head, or returns nil after `timeout`. Cancelling a pending receive tears the connection
+    /// down, so the reader is only cancelled after the caller has answered the client.
+    private static func readHead(from client: NetworkConnection<TCP>, timeout: Duration) async throws -> (read: HeadRead?, reader: Task<HeadRead, any Error>) {
+        let reader = Task { try await readHead(from: client) }
+        let once = ProbeOnce<HeadRead?>()
+        let read = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HeadRead?, any Error>) in
+            once.set(continuation)
+            let timer = Task {
+                try? await Task.sleep(for: timeout)
+                once.resume(returning: nil)
+            }
+            Task {
+                do {
+                    let value = try await reader.value
+                    once.resume(returning: value)
+                } catch {
+                    once.resume(throwing: error)
+                }
+                timer.cancel()
+            }
+        }
+        return (read, reader)
+    }
+
     private func handle(_ client: NetworkConnection<TCP>) async {
         do {
-            var buffer = Data()
-            var end: Int?
-            while end == nil {
-                let message = try await client.receive(atLeast: 1, atMost: 65_536)
-                buffer.append(message.content)
-                end = ProbeHTTPHead.headEnd(in: buffer)
-                if end == nil, message.metadata.endOfStream { return }
-                if end == nil, buffer.count > ProbeHTTPHead.maxLength {
-                    try await client.send(ProbeHTTPHead.response(status: 431, reason: "Request Header Fields Too Large"), endOfStream: true)
-                    return
-                }
+            let (head, reader) = try await Self.readHead(from: client, timeout: headTimeout)
+            guard let read = head else {
+                try? await client.send(ProbeHTTPHead.response(status: 408, reason: "Request Timeout"), endOfStream: true)
+                reader.cancel()
+                return
             }
-            guard let end, let head = ProbeHTTPHead.parse(buffer.prefix(end)) else {
+            let buffer: Data, end: Int
+            switch read {
+            case .closed:
+                return
+            case .tooLarge:
+                try await client.send(ProbeHTTPHead.response(status: 431, reason: "Request Header Fields Too Large"), endOfStream: true)
+                return
+            case .head(let data, let headEnd):
+                buffer = data
+                end = headEnd
+            }
+            guard let head = ProbeHTTPHead.parse(buffer.prefix(end)) else {
                 try await client.send(ProbeHTTPHead.response(status: 400, reason: "Bad Request"), endOfStream: true)
                 return
             }
@@ -106,9 +158,12 @@ final class ProbeProxyServer: Sendable {
                 try? await client.send(ProbeHTTPHead.response(status: 502, reason: "Bad Gateway"), endOfStream: true)
                 return
             }
-            if case .hostPort(_, let localPort)? = upstream.localEndpoint {
-                registry.registerUpstream(port: Int(localPort.rawValue), host: head.host)
+            var sourcePort: Int?
+            if case .hostPort(let localHost, let localPort)? = upstream.localEndpoint {
+                sourcePort = Int(localPort.rawValue)
+                registry.registerUpstream(port: Int(localPort.rawValue), host: head.host, sourceAddress: Self.address(localHost))
             }
+            defer { if let sourcePort { registry.upstreamClosed(port: sourcePort) } }
             var first = head.forwardedData()
             first.append(contentsOf: early)
             try await upstream.send(first)
@@ -122,6 +177,16 @@ final class ProbeProxyServer: Sendable {
             }
         } catch {
             // The browser or Surge closed the connection; both sides are released with this task.
+        }
+    }
+
+    /// `127.0.0.1`, `::1`: the textual form Surge uses for a record's `sourceAddress`.
+    static func address(_ host: NWEndpoint.Host) -> String {
+        switch host {
+        case .ipv4(let address): "\(address)"
+        case .ipv6(let address): "\(address)"
+        case .name(let name, _): name
+        @unknown default: "\(host)"
         }
     }
 

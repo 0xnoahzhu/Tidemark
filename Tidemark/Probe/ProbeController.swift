@@ -1,32 +1,60 @@
 import Foundation
 import os
 
+/// Why a site probe cannot start. `errorDescription` is already in the app language.
+struct ProbeStartError: Error, LocalizedError, Hashable, Sendable {
+    enum Reason: Hashable, Sendable {
+        /// A remote Surge is configured: its records cannot be matched to this Mac's probe proxy.
+        case remoteSurge
+        /// Surge reports no HTTP proxy listener.
+        case httpProxyOff
+        /// Surge's HTTP proxy listener could not be read.
+        case httpProxyUnknown
+    }
+
+    var reason: Reason
+    var message: String
+
+    var errorDescription: String? { message }
+}
+
 /// Runs site probes: opens a per-session loopback proxy that forwards to Surge, publishes the live
 /// waterfall into `model.probe`, and saves finished sessions. Implements `ProbeActions`.
 ///
 /// Surge and the database are read from `model` on every use, so clients the capture engine rebuilds are
-/// picked up automatically.
+/// picked up automatically. A probe needs this Mac's Surge: the proxy forwards to its HTTP listener and
+/// Surge's records are matched to the probe by the forwarder's source port, which a remote Surge cannot see.
 @MainActor
 final class ProbeController: ProbeActions {
     let model: AppModel
     /// Shared with the capture engine's pipeline, which adds the remote IPs Surge saw.
     let registry: ProbeRegistry
-    /// The page counts as loading for this long (matches the design's status line).
-    let loadingWindow: Duration
+    /// Fallback when the web view never reports the end of its first load: the page then counts as loaded
+    /// after this long.
+    let loadingTimeout: Duration
+    /// With `tail` on, the probe keeps recording at least this long after the first page load finished
+    /// ("Keep recording 6 s after load"): a Stop pressed earlier waits for the rest of it, so late requests
+    /// of the page are still caught.
+    let tailWindow: Duration
     /// Surge records of the last connections can trail the stop by a moment.
     let stopGrace: Duration
 
     private static let log = Logger(subsystem: "io.tidemark.Tidemark", category: "probe")
+    private static let table = "ProbeEngine"
 
     private var server: ProbeProxyServer?
     private var refreshTask: Task<Void, Never>?
     private var phaseTask: Task<Void, Never>?
+    private var tailTask: Task<Void, Never>?
+    private var tailEnabled = false
     private var publishedVersion = 0
 
-    init(model: AppModel, registry: ProbeRegistry, loadingWindow: Duration = .milliseconds(6500), stopGrace: Duration = .seconds(1)) {
+    init(model: AppModel, registry: ProbeRegistry, loadingTimeout: Duration = .seconds(30), tailWindow: Duration = .seconds(6),
+         stopGrace: Duration = .seconds(1)) {
         self.model = model
         self.registry = registry
-        self.loadingWindow = loadingWindow
+        self.loadingTimeout = loadingTimeout
+        self.tailWindow = tailWindow
         self.stopGrace = stopGrace
     }
 
@@ -50,8 +78,14 @@ final class ProbeController: ProbeActions {
             throw URLError(.badURL)
         }
         let surge = model.surge
-        let surgePort = (try? await CaptureTimeout.run(.seconds(5)) { try await surge.httpProxyPort() }) ?? 6152
-        let server = ProbeProxyServer(upstreamPort: UInt16(clamping: surgePort), registry: registry)
+        if let remote = surge.endpoint.remote?.trimmingCharacters(in: .whitespaces), !remote.isEmpty {
+            throw ProbeStartError(
+                reason: .remoteSurge,
+                message: tr("Site Probe needs the Surge running on this Mac. A remote Surge is set in Settings › Surge, and its records can't be matched to the probe's connections.", Self.table)
+            )
+        }
+        let listener = try await httpListener(of: surge)
+        let server = ProbeProxyServer(upstreamPort: UInt16(clamping: listener.port), registry: registry, upstreamHost: listener.connectHost)
         let id = UUID()
         let startedAt = Date.now
         registry.begin(sessionID: id, startedAt: startedAt)
@@ -64,6 +98,8 @@ final class ProbeController: ProbeActions {
         }
         self.server = server
         publishedVersion = 0
+        tailEnabled = tail
+        tailTask = nil
 
         let first = ProbeStep(at: 0, label: mode == .iphone ? "Page load · iPhone" : "Page load", url: normalized)
         model.probe.running = ProbeSession(
@@ -74,12 +110,11 @@ final class ProbeController: ProbeActions {
         model.probe.proxyPort = port
         model.probe.selectedID = id
 
-        // The page counts as loaded after the loading window; with `tail` off it still records until Stop,
-        // the window only changes the status.
-        let window = tail ? loadingWindow : min(loadingWindow, .seconds(3))
-        phaseTask = Task { [weak self] in
-            try? await Task.sleep(for: window)
-            guard !Task.isCancelled, let self, self.model.probe.running?.id == id else { return }
+        // The web view reports the end of the first load (`pageDidFinishLoading`); this only covers a page
+        // that never reports it. Recording runs until Stop either way.
+        phaseTask = Task { [weak self, loadingTimeout] in
+            try? await Task.sleep(for: loadingTimeout)
+            guard !Task.isCancelled, let self, self.model.probe.running?.id == id, self.model.probe.phase == .loading else { return }
             self.model.probe.phase = .recording
         }
         refreshTask = Task { [weak self] in
@@ -91,6 +126,20 @@ final class ProbeController: ProbeActions {
         return port
     }
 
+    func pageDidFinishLoading() {
+        guard let running = model.probe.running, model.probe.phase == .loading else { return }
+        phaseTask?.cancel()
+        phaseTask = nil
+        model.probe.phase = .recording
+        guard tailEnabled else { return }
+        let id = running.id
+        tailTask = Task { [weak self, tailWindow] in
+            try? await Task.sleep(for: tailWindow)
+            guard let self, self.model.probe.running?.id == id else { return }
+            self.tailTask = nil
+        }
+    }
+
     func recordStep(label: String, url: String?) {
         guard var running = model.probe.running else { return }
         running.steps.append(ProbeStep(at: Date.now.timeIntervalSince(running.startedAt), label: label, url: url))
@@ -100,6 +149,12 @@ final class ProbeController: ProbeActions {
 
     @discardableResult
     func stopProbe() async -> ProbeSession? {
+        guard model.probe.running != nil else { return nil }
+        // Keep recording until the tail after the first load has passed.
+        if let tailTask {
+            await tailTask.value
+            self.tailTask = nil
+        }
         guard var session = model.probe.running else { return nil }
         refreshTask?.cancel()
         phaseTask?.cancel()
@@ -152,6 +207,25 @@ final class ProbeController: ProbeActions {
     }
 
     // MARK: Helpers
+
+    /// Where Surge's HTTP proxy listens. Fails with a clear reason instead of guessing `127.0.0.1:6152`.
+    private func httpListener(of surge: any SurgeClient) async throws -> SurgeHTTPListener {
+        do {
+            return try await CaptureTimeout.run(.seconds(8)) {
+                if let detailed = surge as? any SurgeClientDetails { return try await detailed.httpProxyListener() }
+                let port = try await surge.httpProxyPort()
+                return SurgeHTTPListener(interface: "127.0.0.1", port: port)
+            }
+        } catch is SurgeHTTPProxyOff {
+            throw ProbeStartError(
+                reason: .httpProxyOff,
+                message: tr("Surge's HTTP proxy is off. Turn on its HTTP proxy (http-listen) to run a probe.", Self.table)
+            )
+        } catch {
+            let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            throw ProbeStartError(reason: .httpProxyUnknown, message: trf("Couldn't find Surge's HTTP proxy port: %@", Self.table, detail))
+        }
+    }
 
     private func publish() {
         let snapshot = registry.snapshot()

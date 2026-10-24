@@ -1,0 +1,21 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Couldn't find Surge's HTTP proxy port: %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "找不到 Surge 的 HTTP 代理端口：%@" } }
+      }
+    },
+    "Site Probe needs the Surge running on this Mac. A remote Surge is set in Settings › Surge, and its records can't be matched to the probe's connections." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "网站探测需要本机运行的 Surge。设置 › Surge 中配置了远程 Surge，它的记录无法和探测的连接对应起来。" } }
+      }
+    },
+    "Surge's HTTP proxy is off. Turn on its HTTP proxy (http-listen) to run a probe." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surge 的 HTTP 代理未开启。开启 HTTP 代理（http-listen）后才能探测。" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}
