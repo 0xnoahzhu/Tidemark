@@ -197,6 +197,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var alertsInserted: [AlertItem] = []
     var known: [AppID: Set<String>] = [:]
     var mutesList: [String] = []
+    var appList: [MonitoredApp] = []
     var probeSessionsSaved: [ProbeSession] = []
     var egressSamples: [EgressSample] = []
     var egressChangeList: [EgressChange] = []
@@ -224,10 +225,13 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func devices() async throws -> [Device] { [] }
     func renameDevice(_ id: DeviceID, name: String) async throws {}
 
-    func apps() async throws -> [MonitoredApp] { [] }
-    func insertApp(_ app: MonitoredApp) async throws { try check() }
-    func updateApp(_ app: MonitoredApp) async throws { try check() }
-    func deleteApp(_ id: AppID) async throws { try check() }
+    func apps() async throws -> [MonitoredApp] { try check(); return appList }
+    func insertApp(_ app: MonitoredApp) async throws { try check(); appList.append(app) }
+    func updateApp(_ app: MonitoredApp) async throws {
+        try check()
+        if let index = appList.firstIndex(where: { $0.id == app.id }) { appList[index] = app }
+    }
+    func deleteApp(_ id: AppID) async throws { try check(); appList.removeAll { $0.id == id } }
     func setInstalled(appID: AppID, deviceID: DeviceID, installed: Bool) async throws {}
     func installs() async throws -> [AppID: [DeviceID: Bool]] { [:] }
     func appStats(_ id: AppID, scope: DeviceScope) async throws -> AppStats { AppStats() }
