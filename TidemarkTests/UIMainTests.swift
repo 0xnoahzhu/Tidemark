@@ -485,15 +485,48 @@ struct RequestsHistogramTests {
         #expect(bins.last?.isLast == true)
         #expect(bins[2].contains(start.addingTimeInterval(2500)))
         #expect(!bins[2].contains(start.addingTimeInterval(3600)))
-        #expect(RequestsHistogramBin.axisDates(of: histogram) == [start, start.addingTimeInterval(2400), start.addingTimeInterval(4800)])
     }
 
-    @Test func labelsTheAxisByRange() {
-        let date = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 23, hour: 14, minute: 0))!
-        let english = Locale(identifier: "en")
-        #expect(RequestsHistogramBin.axisLabel(date, span: 3600, locale: english) == "14:00")
-        #expect(RequestsHistogramBin.axisLabel(date, span: 86400, locale: english) == "Oct 23 14:00")
-        #expect(RequestsHistogramBin.axisLabel(date, span: 30 * 86400, locale: english) == "Oct 23")
+    private let english = Locale(identifier: "en")
+
+    private func date(_ day: Int, _ hour: Int, _ minute: Int, _ second: Int = 0) -> Date {
+        Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour, minute: minute, second: second))!
+    }
+
+    private func labels(from start: Date, to end: Date, now: Date) -> [String] {
+        let histogram = Histogram(start: start, end: end, counts: Array(repeating: 1, count: 48))
+        return RequestsHistogramBin.axisTicks(of: histogram, now: now, locale: english, nowLabel: "Now").map(\.label)
+    }
+
+    @Test func labelsTheLastDayOnWholeHours() {
+        // The design: `Oct 23 14:00 · 20:00 · Oct 24 02:00 · 08:00 · Now`.
+        let now = date(24, 13, 48, 12)
+        #expect(labels(from: now.addingTimeInterval(-86400), to: now, now: now) == ["Oct 23 14:00", "20:00", "Oct 24 02:00", "08:00", "Now"])
+        let ticks = RequestsHistogramBin.axisTicks(of: Histogram(start: now.addingTimeInterval(-86400), end: now, counts: [1]), now: now, locale: english, nowLabel: "Now")
+        #expect(ticks.first?.date == date(23, 14, 0))
+        #expect(ticks.last?.date == now)
+    }
+
+    @Test func labelsShorterAndLongerRanges() {
+        let now = date(24, 14, 48)
+        #expect(labels(from: now.addingTimeInterval(-3600), to: now, now: now) == ["14:00", "14:15", "14:30", "Now"])
+        #expect(labels(from: now.addingTimeInterval(-7 * 86400), to: now, now: now) == ["Oct 18", "Oct 20", "Oct 22", "Now"])
+        #expect(labels(from: now.addingTimeInterval(-30 * 86400), to: now, now: now) == ["Sep 25", "Oct 2", "Oct 9", "Oct 16", "Now"])
+    }
+
+    @Test func labelsAZoomedWindowWithItsEnd() {
+        // A window that does not end now is labelled with its end time.
+        #expect(labels(from: date(24, 9, 5), to: date(24, 11, 50), now: date(24, 14, 0)) == ["10:00", "11:00", "11:50"])
+        // The date appears where the day changes.
+        #expect(labels(from: date(23, 22, 10), to: date(24, 1, 40), now: date(24, 14, 0)) == ["23:00", "Oct 24 00:00", "01:00", "01:40"])
+        // Seconds appear once the ticks are less than a minute apart.
+        #expect(labels(from: date(24, 10, 0, 5), to: date(24, 10, 1, 35), now: date(24, 14, 0)) == ["10:00:30", "10:01:00", "10:01:35"])
+    }
+
+    @Test func labelsWindows() {
+        #expect(RequestsHistogramBin.windowLabel(date(24, 14, 0), date(24, 14, 30), locale: english) == "14:00–14:30")
+        #expect(RequestsHistogramBin.windowLabel(date(24, 14, 0, 5), date(24, 14, 1, 5), locale: english) == "14:00:05–14:01:05")
+        #expect(RequestsHistogramBin.windowLabel(date(23, 22, 0), date(24, 1, 30), locale: english) == "Oct 23 22:00–Oct 24 01:30")
     }
 }
 

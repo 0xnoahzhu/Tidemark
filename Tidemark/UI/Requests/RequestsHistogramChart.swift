@@ -11,6 +11,7 @@ struct RequestsHistogramChart: View {
     var body: some View {
         let bins = RequestsHistogramBin.bins(of: histogram)
         let selected = hovered.flatMap { date in bins.first { $0.contains(date) } }
+        let ticks = RequestsHistogramBin.axisTicks(of: histogram, now: .now, locale: Localizer.shared.locale, nowLabel: tr("Now", "Requests"))
         Chart {
             ForEach(bins) { bin in
                 bar(bin, highlighted: bin.isLast || bin.id == selected?.id)
@@ -19,17 +20,17 @@ struct RequestsHistogramChart: View {
                 RuleMark(x: .value("Hovered", selected.middle))
                     .foregroundStyle(.clear)
                     .annotation(position: .top, spacing: 2, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
-                        RequestsHistogramCallout(bin: selected)
+                        RequestsHistogramCallout(text: RequestsHistogramBin.windowLabel(selected.start, selected.end, locale: Localizer.shared.locale) + " · " + Fmt.count(selected.count))
                     }
             }
         }
         .chartXScale(domain: histogram.start...max(histogram.end, histogram.start.addingTimeInterval(1)))
         .chartYAxis(.hidden)
         .chartXAxis {
-            AxisMarks(values: RequestsHistogramBin.axisDates(of: histogram)) { value in
-                AxisValueLabel(anchor: anchor(for: value.index, count: value.count)) {
-                    if let date = value.as(Date.self) {
-                        Text(label(for: date, index: value.index, count: value.count))
+            AxisMarks(values: ticks.map(\.date)) { value in
+                AxisValueLabel(anchor: anchor(for: value.index, of: ticks)) {
+                    if ticks.indices.contains(value.index) {
+                        Text(ticks[value.index].label)
                             .font(Theme.mono(10.5))
                             .foregroundStyle(Theme.ink3)
                     }
@@ -54,24 +55,22 @@ struct RequestsHistogramChart: View {
         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2))
     }
 
-    private func label(for date: Date, index: Int, count: Int) -> String {
-        if index == count - 1, abs(date.timeIntervalSinceNow) < 120 { return tr("Now", "Requests") }
-        return RequestsHistogramBin.axisLabel(date, span: histogram.end.timeIntervalSince(histogram.start), locale: Localizer.shared.locale)
-    }
-
-    private func anchor(for index: Int, count: Int) -> UnitPoint {
-        if index == 0 { return .topLeading }
-        if index == count - 1 { return .topTrailing }
+    /// The first label starts at its tick when it sits at the left edge, the last ends at the right edge,
+    /// the others are centered on their tick.
+    private func anchor(for index: Int, of ticks: [RequestsHistogramBin.AxisTick]) -> UnitPoint {
+        if index == ticks.count - 1 { return .topTrailing }
+        let span = histogram.end.timeIntervalSince(histogram.start)
+        if index == 0, span > 0, ticks[0].date.timeIntervalSince(histogram.start) / span < 0.08 { return .topLeading }
         return .top
     }
 }
 
 /// Hover callout: `14:00–14:30 · 1,204`.
 private struct RequestsHistogramCallout: View {
-    var bin: RequestsHistogramBin
+    var text: String
 
     var body: some View {
-        Text(verbatim: "\(Fmt.hm(bin.start))–\(Fmt.hm(bin.end)) · \(Fmt.count(bin.count))")
+        Text(verbatim: text)
             .font(Theme.mono(10.5, weight: .medium))
             .foregroundStyle(Theme.ink)
             .padding(.horizontal, 6)
@@ -105,18 +104,85 @@ struct RequestsHistogramBin: Identifiable, Equatable {
         }
     }
 
-    /// Start, middle and end of the range (the prototype labels start / middle / "Now").
-    static func axisDates(of histogram: Histogram) -> [Date] {
-        let span = histogram.end.timeIntervalSince(histogram.start)
-        return [histogram.start, histogram.start.addingTimeInterval(span / 2), histogram.end]
+    /// `14:00–14:30`, with seconds for windows under two minutes and the day when it changes:
+    /// `Oct 23 22:00–Oct 24 01:30` (the day only appears when the window spans midnight).
+    static func windowLabel(_ start: Date, _ end: Date, locale: Locale = .current, calendar: Calendar = .current) -> String {
+        let seconds = end.timeIntervalSince(start) < 120
+        func time(_ date: Date) -> String { seconds ? Fmt.hms(date) : Fmt.hm(date) }
+        if calendar.isDate(start, inSameDayAs: end) { return time(start) + "–" + time(end) }
+        return Fmt.monthDay(start, locale: locale) + " " + time(start) + "–" + Fmt.monthDay(end, locale: locale) + " " + time(end)
     }
 
-    /// `14:00` for short ranges, `Oct 23 14:00` within a month, `Oct 23` beyond.
-    static func axisLabel(_ date: Date, span: TimeInterval, locale: Locale) -> String {
-        if span <= 6 * 3600 { return Fmt.hm(date) }
-        if span <= 8 * 86400 {
-            return Fmt.monthDay(date, locale: locale) + " " + Fmt.hm(date)
+    // MARK: Axis
+
+    /// A labelled position on the time axis.
+    struct AxisTick: Equatable {
+        var date: Date
+        var label: String
+    }
+
+    /// Tick spacings tried in order; the first that splits the range into at most five parts wins.
+    static let tickSteps: [TimeInterval] = [
+        10, 15, 30, 60, 120, 300, 600, 900, 1800,
+        3600, 2 * 3600, 3 * 3600, 6 * 3600, 12 * 3600,
+        86400, 2 * 86400, 7 * 86400, 14 * 86400, 30 * 86400, 91 * 86400, 182 * 86400, 365 * 86400,
+    ]
+
+    /// The design's axis: ticks on round times (24 hours → `Oct 23 14:00 · 20:00 · Oct 24 02:00 · 08:00 ·
+    /// Now`), the date only where the day changes, and the range's end labelled "Now" when it is now.
+    static func axisTicks(of histogram: Histogram, now: Date, locale: Locale, calendar: Calendar = .current, nowLabel: String) -> [AxisTick] {
+        let start = histogram.start, end = histogram.end
+        let span = end.timeIntervalSince(start)
+        guard span > 0 else { return [] }
+        let step = tickSteps.first { $0 >= span / 5 } ?? tickSteps[tickSteps.count - 1]
+        let byDay = step >= 86400
+
+        var dates: [Date] = []
+        var tick = firstTick(atOrAfter: start, step: step, calendar: calendar)
+        // Ticks stop half a step before the end so they never crowd its label.
+        while end.timeIntervalSince(tick) >= step / 2 {
+            dates.append(tick)
+            guard let next = byDay ? calendar.date(byAdding: .day, value: Int(step / 86400), to: tick) : tick.addingTimeInterval(step) else { break }
+            tick = next
         }
-        return Fmt.monthDay(date, locale: locale)
+
+        func timeOfDay(_ date: Date) -> String { step < 60 ? Fmt.hms(date) : Fmt.hm(date) }
+        var ticks: [AxisTick] = []
+        var previous: Date?
+        for date in dates {
+            let label: String
+            if byDay {
+                label = Fmt.monthDay(date, locale: locale)
+            } else {
+                let newDay = previous.map { !calendar.isDate($0, inSameDayAs: date) } ?? (span > 6 * 3600)
+                label = newDay ? Fmt.monthDay(date, locale: locale) + " " + timeOfDay(date) : timeOfDay(date)
+            }
+            ticks.append(AxisTick(date: date, label: label))
+            previous = date
+        }
+
+        let endLabel: String
+        if abs(now.timeIntervalSince(end)) < 120 {
+            endLabel = nowLabel
+        } else if byDay || previous.map({ !calendar.isDate($0, inSameDayAs: end) }) ?? (span > 6 * 3600) {
+            endLabel = Fmt.monthDay(end, locale: locale) + " " + timeOfDay(end)
+        } else {
+            endLabel = timeOfDay(end)
+        }
+        ticks.append(AxisTick(date: end, label: endLabel))
+        return ticks
+    }
+
+    /// The first round time at or after `start`: the next multiple of `step` within the hour for steps under
+    /// an hour, the next full hour for steps under a day, the next midnight beyond.
+    private static func firstTick(atOrAfter start: Date, step: TimeInterval, calendar: Calendar) -> Date {
+        if step >= 86400 {
+            let day = calendar.startOfDay(for: start)
+            return day == start ? day : calendar.date(byAdding: .day, value: 1, to: day) ?? start
+        }
+        guard let hour = calendar.dateInterval(of: .hour, for: start)?.start else { return start }
+        let unit = min(step, 3600)
+        let offset = start.timeIntervalSince(hour)
+        return hour.addingTimeInterval((offset / unit).rounded(.up) * unit)
     }
 }
