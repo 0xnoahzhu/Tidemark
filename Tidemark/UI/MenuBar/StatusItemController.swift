@@ -144,24 +144,17 @@ final class StatusItemController: NSObject {
         let panel = panel ?? makePanel()
         self.panel = panel
         presentation += 1
-        if panel.isVisible, panel.alphaValue > 0 {
-            // Already showing (a fallback action and the session raced): keep it, just make sure it is key.
-            panel.alphaValue = 1
-            panel.makeKey()
-            installEventMonitors()
-            return
+        // Like a menu, the panel appears at once; it may already be up when a fallback action raced the session.
+        if !panel.isVisible {
+            if let hosting = glassView?.contentView {
+                let size = hosting.fittingSize
+                if size.width > 0, size.height > 0 { panel.setContentSize(size) }
+            }
+            position(panel)
         }
-        if let hosting = glassView?.contentView {
-            let size = hosting.fittingSize
-            if size.width > 0, size.height > 0 { panel.setContentSize(size) }
-        }
-        position(panel)
-        panel.alphaValue = 0
-        panel.makeKeyAndOrderFront(nil)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
-            panel.animator().alphaValue = 1
-        }
+        panel.alphaValue = 1
+        panel.orderFrontRegardless()
+        panel.makeKey()
         installEventMonitors()
     }
 
@@ -172,15 +165,18 @@ final class StatusItemController: NSObject {
             panel.orderOut(nil)
             return
         }
+        // Fade out like a menu. The window is ordered out on a timer rather than in the animation's
+        // completion handler, so it never lingers when the animation is skipped.
         let closing = presentation
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
             panel.animator().alphaValue = 0
-        } completionHandler: { [weak self] in
-            Task { @MainActor in
-                guard let self, self.presentation == closing else { return }
-                panel.orderOut(nil)
-            }
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(170))
+            guard let self, presentation == closing else { return }
+            panel.orderOut(nil)
+            panel.alphaValue = 1
         }
     }
 
