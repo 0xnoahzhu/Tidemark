@@ -1,0 +1,241 @@
+import AppKit
+import SwiftUI
+
+/// The request table shared by Live and History: Time, App · Process, Host, Remote IP, Policy, Size.
+///
+/// Table cells and row menus are hosted outside the SwiftUI environment chain, so they receive the model
+/// explicitly instead of reading it from `@Environment`.
+struct RequestsTable: View {
+    enum TimeStyle {
+        /// `14:32:27.130`
+        case clock
+        /// `10-24 14:21:25`
+        case dayClock
+    }
+
+    var model: AppModel
+    var rows: [RequestRecord]
+    @Binding var selection: RequestKey?
+    var timeStyle: TimeStyle
+    /// Reference time for the fresh-row background; nil disables it (History).
+    var now: Date?
+
+    var body: some View {
+        Table(rows, selection: $selection) {
+            TableColumn(tr("Time", "Requests")) { record in
+                RequestsTimeCell(date: record.startedAt, style: timeStyle)
+                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
+            }
+            .width(min: timeStyle == .clock ? 84 : 100, ideal: timeStyle == .clock ? 90 : 106, max: 140)
+
+            TableColumn(tr("App · Process", "Requests")) { record in
+                RequestsAppCell(model: model, record: record)
+                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
+            }
+            .width(min: 100, ideal: 150, max: 320)
+
+            TableColumn(tr("Host", "Requests")) { record in
+                RequestsHostCell(record: record)
+                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
+            }
+            .width(min: 140, ideal: 220)
+
+            TableColumn(tr("Remote IP", "Requests")) { record in
+                Text(record.remoteIP ?? "—")
+                    .font(Theme.mono(11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
+            }
+            .width(min: 80, ideal: 110, max: 260)
+
+            TableColumn(tr("Policy", "Requests")) { record in
+                RequestsPolicyTag(policyPath: record.policyPath)
+                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
+            }
+            .width(min: 64, ideal: 108, max: 260)
+
+            TableColumn(tr("Size", "Requests")) { record in
+                RequestsSizeCell(record: record)
+                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
+            }
+            .width(min: 56, ideal: 66, max: 110)
+            .alignment(.trailing)
+        }
+        .alternatingRowBackgrounds()
+        // A table reports the sum of its column widths as its minimum, which would push the split view past the
+        // window once the inspector opens; below that width it scrolls horizontally instead.
+        .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+        .contextMenu(forSelectionType: RequestKey.self) { keys in
+            RequestsRowMenu(model: model, records: rows.filter { keys.contains($0.key) })
+        } primaryAction: { keys in
+            if let key = keys.first { selection = key }
+        }
+    }
+
+    /// Fresh rows get the arrival tint, except the selected one, which keeps the system selection.
+    private func isFresh(_ record: RequestRecord) -> Bool {
+        guard let now, record.key != selection else { return false }
+        return RequestsPresentation.isFresh(record, now: now)
+    }
+}
+
+/// Paints the prototype's "fresh" tint behind a cell of a row that just arrived, and fades it out.
+/// The tint reaches past the cell into the column gaps so the cells read as one row band.
+private struct RequestsFreshBackground: ViewModifier {
+    var isFresh: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background {
+                Theme.fresh
+                    .padding(.horizontal, -12)
+                    .padding(.vertical, -6)
+                    .opacity(isFresh ? 1 : 0)
+                    .animation(.easeOut(duration: 0.9), value: isFresh)
+            }
+    }
+}
+
+/// Monospaced start time.
+struct RequestsTimeCell: View {
+    var date: Date
+    var style: RequestsTable.TimeStyle
+
+    var body: some View {
+        Text(style == .clock ? Fmt.clock(date) : Fmt.dayClock(date))
+            .font(Theme.mono(11))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+    }
+}
+
+/// `[MBP] ▣ Cursor › node`: device badge (several Macs), app tile, app name and the sending process.
+struct RequestsAppCell: View {
+    var model: AppModel
+    var record: RequestRecord
+
+    var body: some View {
+        let identity = model.appIdentity(for: record)
+        let process = record.processName
+        let suffix = process != identity.name ? " › " + process : ""
+        HStack(spacing: 6) {
+            if model.devices.showsDeviceBadges {
+                DeviceBadge(shortName: model.devices.shortName(record.deviceID), hue: model.devices.hue(record.deviceID))
+            }
+            AppTile(identity: identity, size: 16)
+            Text("\(Text(identity.name).fontWeight(.medium))\(Text(suffix).foregroundStyle(.secondary))")
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .help(record.processPath ?? process)
+    }
+}
+
+/// `CONNECT  api2.cursor.sh  BY IP  NEW`
+struct RequestsHostCell: View {
+    var record: RequestRecord
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(record.method.uppercased())
+                .font(Theme.mono(9.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 46, alignment: .leading)
+            Text(record.host)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .layoutPriority(1)
+            if record.isIPLiteral {
+                TagBadge(text: tr("BY IP", "Requests"), style: .neutral)
+            }
+            if record.isNew {
+                TagBadge(text: tr("NEW", "Requests"), style: .new)
+            }
+        }
+        .help(record.url ?? record.host)
+    }
+}
+
+/// Byte count, or "failed" / "rejected" in red.
+struct RequestsSizeCell: View {
+    var record: RequestRecord
+
+    var body: some View {
+        Group {
+            switch record.state {
+            case .failed:
+                Text(tr("failed", "Requests")).foregroundStyle(Theme.failed)
+            case .rejected:
+                Text(tr("rejected", "Requests")).foregroundStyle(Theme.failed)
+            case .active, .completed:
+                Text(Fmt.bytes(record.totalBytes)).foregroundStyle(.tertiary)
+            }
+        }
+        .font(Theme.mono(11))
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
+/// A policy chip that hugs its text and truncates inside narrow table columns.
+struct RequestsPolicyTag: View {
+    var policyPath: [String]
+
+    var body: some View {
+        let tint = Theme.tint(Theme.policyHue(policyPath))
+        Text(policyPath.isEmpty ? "—" : policyPath.joined(separator: " › "))
+            .font(.system(size: 11, weight: .medium))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 7)
+            .frame(height: 18)
+            .background(tint.background, in: .rect(cornerRadius: 5, style: .continuous))
+            .foregroundStyle(tint.foreground)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(policyPath.joined(separator: " › "))
+    }
+}
+
+/// Right-click menu of request rows.
+struct RequestsRowMenu: View {
+    var model: AppModel
+    var records: [RequestRecord]
+
+    var body: some View {
+        if let record = records.first {
+            let identity = model.appIdentity(for: record)
+            Button(tr("Copy Host", "Requests")) { RequestsPasteboard.copy(records.map(\.host).joined(separator: "\n")) }
+            if records.count == 1, let ip = record.remoteIP {
+                Button(tr("Copy Remote IP", "Requests")) { RequestsPasteboard.copy(ip) }
+            }
+            if records.count == 1, let url = record.url {
+                Button(tr("Copy URL", "Requests")) { RequestsPasteboard.copy(url) }
+            }
+            Button(tr("Copy as JSON", "Requests")) {
+                RequestsPasteboard.copy(RequestsPresentation.json(for: records))
+            }
+            Divider()
+            Button(trf("Filter by %@", "Requests", record.host)) { model.nav.requestSearch = record.host }
+            if let appID = identity.appID {
+                Button(trf("Open %@", "Requests", identity.name)) { model.nav.open(.app(appID), tab: .requests) }
+            } else if let bundle = record.bundlePath, !bundle.isEmpty {
+                Button(trf("Monitor %@…", "Requests", identity.name)) { model.nav.openAddApp(preselect: bundle) }
+            }
+        }
+    }
+}
+
+/// Writes plain text to the general pasteboard.
+enum RequestsPasteboard {
+    @MainActor
+    static func copy(_ string: String) {
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(string, forType: .string)
+    }
+}
