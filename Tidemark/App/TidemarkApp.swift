@@ -11,6 +11,7 @@ struct TidemarkApp: App {
             MainWindowView()
                 .environment(model)
                 .environment(Localizer.shared)
+                .modifier(TidemarkIntentsWindowBridge())
         }
         .defaultSize(width: 1248, height: 812)
         .windowToolbarStyle(.unified)
@@ -31,6 +32,7 @@ struct TidemarkApp: App {
             SettingsView()
                 .environment(model)
                 .environment(Localizer.shared)
+                .modifier(TidemarkIntentsWindowBridge())
         }
     }
 }

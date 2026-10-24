@@ -17,6 +17,10 @@ struct SurgeRequest: Decodable, Sendable, Hashable {
     var pid: Int32?
     var policyName: String?
     var originalPolicyName: String?
+    /// The matched rule as Surge reports it, e.g. `DOMAIN-SET proxy.list` (absent in global-proxy mode).
+    var rule: String?
+    /// Per-phase timings, e.g. `[{"name":"Rule Evaluating","duration":0.0053,"durationInMillisecond":5}]`.
+    var timingRecords: [SurgeTimingRecord]?
     var remoteAddress: String?
     var localAddress: String?
     var sourceAddress: String?
@@ -45,12 +49,21 @@ struct SurgeRequest: Decodable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, remoteHost, method, status, processPath, pathForStatistics, pid, policyName, originalPolicyName
+        case rule, timingRecords
         case remoteAddress, localAddress, sourceAddress, sourcePort, interface, deviceName, notes
         case inBytes, outBytes, inCurrentSpeed, outCurrentSpeed, inMaxSpeed, outMaxSpeed
         case startDate, setupCompletedDate, completedDate, completed, failed, rejected, modified, replica, local
         case takeoverMode, engineIdentifier
         case url = "URL"
     }
+}
+
+/// One timed phase of a request as recorded by Surge.
+struct SurgeTimingRecord: Decodable, Sendable, Hashable {
+    var name: String
+    /// Seconds.
+    var duration: Double
+    var durationInMillisecond: Int?
 }
 
 /// `real-time-speed` watch event: bytes per second, plus a 20-sample history.

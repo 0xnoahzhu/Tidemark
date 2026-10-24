@@ -13,9 +13,9 @@ struct PolicyChip: View {
             .truncationMode(.tail)
             .padding(.horizontal, 6)
             .frame(height: 18)
-            .frame(maxWidth: maxWidth, alignment: .leading)
             .background(tint.background, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .foregroundStyle(tint.foreground)
+            .frame(maxWidth: maxWidth, alignment: .leading)
             .fixedSize(horizontal: maxWidth == nil, vertical: true)
     }
 }

@@ -102,7 +102,7 @@ struct HostInsightView: View {
                 phase = .loaded(cached)
             } else {
                 phase = .idle
-                (insights as? any HostInsightCacheReading)?.prewarm()
+                insights.prewarm()
             }
             return
         }
@@ -120,9 +120,7 @@ struct HostInsightView: View {
     }
 
     private func cachedInsight(for host: String, language: String) async -> HostInsight? {
-        if let reader = model.insights as? any HostInsightCacheReading {
-            return await reader.cachedInsight(for: host)
-        }
+        if let cached = await model.insights.cachedInsight(for: host) { return cached }
         return try? await model.database.hostInsight(HostInsightService.normalizedHost(host), language: language)
     }
 }

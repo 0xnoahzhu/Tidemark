@@ -519,6 +519,7 @@ final class CaptureEngine {
     /// "View" on a notification: the app's Domains & IPs tab, alerts marked read.
     private func openAlerts(appID: AppID, ids: [Int64]) {
         model.nav.open(.app(appID), tab: .inventory)
+        TidemarkIntents.showMainWindow()
         guard !ids.isEmpty else { return }
         Task { await markAlertsRead(ids) }
     }

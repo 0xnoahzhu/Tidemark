@@ -26,7 +26,7 @@ enum CaptureRecordMapper {
             remoteAddress: nonEmpty(request.remoteAddress),
             geo: nil,
             policyPath: policyPath,
-            rule: rule(notes: notes, policyPath: policyPath),
+            rule: nonEmpty(request.rule) ?? rule(notes: notes, policyPath: policyPath),
             state: state(of: request),
             inBytes: request.inBytes ?? 0,
             outBytes: request.outBytes ?? 0,

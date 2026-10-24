@@ -2,15 +2,6 @@ import Foundation
 import Observation
 import os
 
-/// Extra entry points of the insight service used by `HostInsightView` beyond `HostInsightProviding`.
-@MainActor
-protocol HostInsightCacheReading: AnyObject {
-    /// The insight for `host` in the current language from memory or the database, without running the model.
-    func cachedInsight(for host: String) async -> HostInsight?
-    /// Warms the model up (call when the inspector opens and no cached insight exists).
-    func prewarm()
-}
-
 /// Failure surfaced to the UI when an insight cannot be produced.
 struct HostInsightError: LocalizedError, Equatable {
     enum Kind: Equatable, Sendable {
@@ -35,7 +26,7 @@ struct HostInsightError: LocalizedError, Equatable {
 /// for the same host share one request.
 @MainActor
 @Observable
-final class HostInsightService: HostInsightProviding, HostInsightCacheReading {
+final class HostInsightService: HostInsightProviding {
     @ObservationIgnored private let database: any TidemarkDatabase
     @ObservationIgnored private let generator: any HostInsightGenerating
     @ObservationIgnored private var memory: [String: HostInsight] = [:]
@@ -87,7 +78,7 @@ final class HostInsightService: HostInsightProviding, HostInsightCacheReading {
         return try await task.value
     }
 
-    // MARK: HostInsightCacheReading
+    // MARK: Cache
 
     func cachedInsight(for host: String) async -> HostInsight? {
         let host = Self.normalizedHost(host)

@@ -63,6 +63,7 @@ struct RequestRecord: Identifiable, Hashable, Codable, Sendable {
 
     /// First contact of the attributed app with this host or IP.
     var isNew: Bool
+    /// Time of the row's latest write (`updated_at`); the cursor for `requestsWritten(after:)`.
     var writtenAt: Date?
     var probeSessionID: UUID?
 

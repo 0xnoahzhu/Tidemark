@@ -124,7 +124,8 @@ protocol TidemarkDatabase: Sendable {
     @discardableResult func upsertRequests(_ rows: [RequestRecord]) async throws -> [RequestKey: Int64]
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram
-    /// Rows written after `cursor` by devices other than `excluding` (live view for other Macs).
+    /// Rows inserted or updated after `cursor` (`updated_at`) by devices other than `excluding`, newest first
+    /// (live view for other Macs). Poll with a small overlap and dedupe by key.
     func requestsWritten(after cursor: Date, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord]
     func distinctPolicies(since: Date?) async throws -> [String]
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64
@@ -217,7 +218,8 @@ enum DatabaseError: Error, Sendable, Equatable, LocalizedError {
 /// Recording, apps, alerts and devices. Implemented by the capture engine.
 @MainActor
 protocol CaptureActions: AnyObject {
-    /// Pause or resume writing requests and firing alerts. Resumes automatically on next launch.
+    /// Pause or resume writing requests and firing alerts, updating `LiveState.recording` on the main
+    /// actor before returning. Resumes automatically on next launch.
     func setRecording(_ on: Bool)
     /// Reconnects to Surge and PostgreSQL with the current settings.
     func reconnect()
@@ -264,6 +266,10 @@ protocol HostInsightProviding: AnyObject {
     var unavailableReason: String? { get }
     /// Cached insight, or a fresh one from the model.
     func insight(for context: HostContext) async throws -> HostInsight
+    /// The insight for `host` in the current language from memory or the database, without running the model.
+    func cachedInsight(for host: String) async -> HostInsight?
+    /// Warms the model up (call when the inspector opens and no cached insight exists).
+    func prewarm()
 }
 
 /// Egress IP checks and IP lookups.

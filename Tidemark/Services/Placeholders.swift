@@ -154,4 +154,6 @@ final class UnavailableHostInsights: HostInsightProviding {
     var isAvailable: Bool { false }
     var unavailableReason: String? { "On-device model not configured." }
     func insight(for context: HostContext) async throws -> HostInsight { throw DatabaseError.notConfigured }
+    func cachedInsight(for host: String) async -> HostInsight? { nil }
+    func prewarm() {}
 }
