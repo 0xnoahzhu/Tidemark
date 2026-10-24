@@ -62,6 +62,9 @@ struct OfflineDatabase: TidemarkDatabase {
     func probeSessions(limit: Int) async throws -> [ProbeSession] { [] }
     func deleteProbeSession(_ id: UUID) async throws {}
 
+    func hostInsight(_ host: String, language: String) async throws -> HostInsight? { nil }
+    func saveHostInsight(_ insight: HostInsight) async throws {}
+
     func saveEgressSamples(_ samples: [EgressSample], deviceID: DeviceID) async throws {}
     func latestEgress(deviceID: DeviceID) async throws -> [EgressSample] { [] }
     func insertEgressChange(_ change: EgressChange, deviceID: DeviceID) async throws {}
@@ -138,4 +141,11 @@ final class NoopProbeActions: ProbeActions {
 final class NoopEgressActions: EgressActions {
     func checkAll() async {}
     func lookup(ip: String) async -> IPLookupResult { IPLookupResult(ip: ip) }
+}
+
+@MainActor
+final class UnavailableHostInsights: HostInsightProviding {
+    var isAvailable: Bool { false }
+    var unavailableReason: String? { "On-device model not configured." }
+    func insight(for context: HostContext) async throws -> HostInsight { throw DatabaseError.notConfigured }
 }

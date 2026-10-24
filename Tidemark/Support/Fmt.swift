@@ -7,7 +7,7 @@ enum Fmt {
         groupingFormatter.string(from: NSNumber(value: Int64(n))) ?? String(n)
     }
 
-    nonisolated(unsafe) private static let groupingFormatter: NumberFormatter = {
+    private static let groupingFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.locale = Locale(identifier: "en_US")
         f.numberStyle = .decimal
@@ -84,28 +84,28 @@ enum Fmt {
     /// `9.6s`
     static func seconds(_ t: TimeInterval) -> String { String(format: "%.1fs", t) }
 
-    nonisolated(unsafe) private static let clockFormatter: DateFormatter = {
+    private static let clockFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "HH:mm:ss.SSS"
         return f
     }()
 
-    nonisolated(unsafe) private static let hmFormatter: DateFormatter = {
+    private static let hmFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "HH:mm"
         return f
     }()
 
-    nonisolated(unsafe) private static let hmsFormatter: DateFormatter = {
+    private static let hmsFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "HH:mm:ss"
         return f
     }()
 
-    nonisolated(unsafe) private static let dayClockFormatter: DateFormatter = {
+    private static let dayClockFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "MM-dd HH:mm:ss"

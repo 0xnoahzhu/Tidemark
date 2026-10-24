@@ -233,6 +233,19 @@ enum Schema {
         PRIMARY KEY (session_id, host)
     );
 
+    -- On-device explanations of hosts, shared by every Mac.
+    CREATE TABLE host_insights (
+        host          text NOT NULL,
+        language      text NOT NULL,
+        category      text NOT NULL,
+        operator_name text,
+        summary       text NOT NULL,
+        concern       text,
+        model         text,
+        created_at    timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (host, language)
+    );
+
     -- Egress IP per policy, and changes of the current egress.
     CREATE TABLE egress_checks (
         id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

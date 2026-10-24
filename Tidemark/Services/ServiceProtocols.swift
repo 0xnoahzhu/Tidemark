@@ -170,6 +170,10 @@ protocol TidemarkDatabase: Sendable {
     func probeSessions(limit: Int) async throws -> [ProbeSession]
     func deleteProbeSession(_ id: UUID) async throws
 
+    // Host insights (on-device model output, shared cache)
+    func hostInsight(_ host: String, language: String) async throws -> HostInsight?
+    func saveHostInsight(_ insight: HostInsight) async throws
+
     // Egress
     func saveEgressSamples(_ samples: [EgressSample], deviceID: DeviceID) async throws
     func latestEgress(deviceID: DeviceID) async throws -> [EgressSample]
@@ -249,6 +253,17 @@ protocol ProbeActions: AnyObject {
     /// Stops recording, saves the session and returns it.
     @discardableResult func stopProbe() async -> ProbeSession?
     func deleteProbe(_ id: UUID) async
+}
+
+/// On-device explanations of hosts (FoundationModels). Results are cached in `host_insights`.
+@MainActor
+protocol HostInsightProviding: AnyObject {
+    /// `false` when Apple Intelligence is off, the model is downloading, or the device is unsupported.
+    var isAvailable: Bool { get }
+    /// Why the model is unavailable, for display (nil when available).
+    var unavailableReason: String? { get }
+    /// Cached insight, or a fresh one from the model.
+    func insight(for context: HostContext) async throws -> HostInsight
 }
 
 /// Egress IP checks and IP lookups.
