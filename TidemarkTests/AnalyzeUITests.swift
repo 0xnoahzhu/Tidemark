@@ -315,6 +315,42 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(ProbeWebSession.userAgent(for: .iphone).contains("iPhone"))
         #expect(ProbeWebSession.userAgent(for: .iphone).contains("Mobile/"))
     }
+
+    @Test func isOffWhileReadingARemoteSurge() {
+        #expect(ProbeWebSession.unavailableReason(remoteSurge: "") == nil)
+        #expect(ProbeWebSession.unavailableReason(remoteSurge: "  ") == nil)
+        #expect(ProbeWebSession.unavailableReason(remoteSurge: "192.168.1.20:6170") != nil)
+    }
+
+    /// WebKit traps when a page still bound to one `WebView` is given to another, so the page only moves
+    /// once the view that showed it is gone.
+    @Test func movesThePageOnlyAfterTheOldWebViewIsGone() async throws {
+        let session = ProbeWebSession()
+        #expect(session.host == .inline && !session.isPoppedOut)
+        session.webViewDidAppear(in: .inline)
+        var opened = false
+        session.popOut { opened = true }
+        #expect(opened)
+        #expect(session.isPoppedOut && session.host == nil)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(session.host == nil)
+
+        session.webViewDidDisappear(from: .inline)
+        try await Self.waitUntil { session.host == .window }
+
+        session.webViewDidAppear(in: .window)
+        session.windowDidClose()
+        #expect(!session.isPoppedOut && session.host == nil)
+        session.webViewDidDisappear(from: .window)
+        try await Self.waitUntil { session.host == .inline }
+    }
+
+    private static func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+        for _ in 0..<100 where !condition() {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(condition())
+    }
 }
 
 @Suite @MainActor struct InventoryGroupTests {

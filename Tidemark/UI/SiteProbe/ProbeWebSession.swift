@@ -7,20 +7,34 @@ import WebKit
 /// Owns the probe browser — a WebKit `WebPage` whose only network path is the probe's loopback
 /// CONNECT proxy — and shares it between the Site Probe page and the pop-out window.
 ///
-/// Only one `WebView` may show the page at a time: the window while it is open (`isPoppedOut`),
-/// otherwise the inline preview. Navigations after the first page load are recorded as click steps;
+/// Exactly one `WebView` may show the page at a time: WebKit traps when a page that is still bound to one
+/// `WebView` is given to another. `host` names the view allowed to show it; moving the page between the
+/// Site Probe page and the pop-out window first clears `host`, waits until the old `WebView` is gone, and
+/// only then names the new one. Navigations after the first page load are recorded as click steps;
 /// switching between desktop and iPhone records a step and reloads with the other user agent.
 @MainActor
 @Observable
 final class ProbeWebSession {
     static let shared = ProbeWebSession()
 
+    /// A view that can show the probe page.
+    enum Host: Hashable, Sendable {
+        /// The browser card of the Site Probe page.
+        case inline
+        /// The pop-out window.
+        case window
+    }
+
     /// URL typed in the Site Probe page; the window's Start button probes it too.
     var urlDraft = ""
     /// The probe browser of the running (or last) probe.
     private(set) var page: WebPage?
-    /// The pop-out window is open and shows the page.
-    var isPoppedOut = false
+    /// Where the page is shown, or is being moved to.
+    private(set) var hostTarget: Host = .inline
+    /// The view allowed to show the page right now; nil while the page moves between views.
+    private(set) var host: Host? = .inline
+    /// The pop-out window is open.
+    private(set) var isWindowOpen = false
     /// Loopback port of the running probe's proxy.
     private(set) var port: UInt16?
     private(set) var mode: ProbeDeviceMode = .desktop
@@ -31,36 +45,41 @@ final class ProbeWebSession {
     private(set) var loadFailure: String?
     /// Picture of the page taken when its probe stopped, shown under the "session ended" veil.
     private(set) var endedSnapshot: ProbeEndedSnapshot?
-    /// Ask sites not to sell or share data (`Sec-GPC: 1`, `navigator.globalPrivacyControl`).
-    var sendsGlobalPrivacyControl: Bool {
-        didSet { UserDefaults.standard.set(sendsGlobalPrivacyControl, forKey: Self.gpcDefaultsKey) }
-    }
 
+    /// The page lives in (or is moving to) the pop-out window.
+    var isPoppedOut: Bool { hostTarget == .window }
+
+    @ObservationIgnored private weak var model: AppModel?
     @ObservationIgnored private var runningSessionID: UUID?
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     @ObservationIgnored private var lastStepURL: URL?
     /// Set while a reload or redirect chain we started is in flight, so it is not taken for a click.
     @ObservationIgnored private var suppressSteps = false
+    /// Views whose `WebView` is currently on screen.
+    @ObservationIgnored private var mounted: Set<Host> = []
+    @ObservationIgnored private var moveTask: Task<Void, Never>?
 
-    private static let gpcDefaultsKey = "probe.globalPrivacyControl"
     /// Data store shared by non-isolated probes, so cookies and caches carry over between them.
     private static let sharedStoreID = UUID(uuidString: "6A0F6E52-6C0B-4C55-9F57-7D1E3C2B9A41")!
-
-    init() {
-        sendsGlobalPrivacyControl = UserDefaults.standard.bool(forKey: Self.gpcDefaultsKey)
-    }
 
     // MARK: Lifecycle
 
     /// Opens the probe's proxy through the engine, then loads `urlDraft` in a fresh page behind it.
-    func start(model: AppModel) async throws {
+    ///
+    /// The page is shown in the pop-out window when `inWindow` is true; by default when "Open in its own
+    /// window" is on or the window is already open. The caller opens the window.
+    func start(model: AppModel, inWindow: Bool? = nil) async throws {
         guard !isStarting, !model.probe.isRunning else { return }
+        if let reason = Self.unavailableReason(remoteSurge: model.preferences.surgeRemote) {
+            throw ProbeWebError(errorDescription: reason)
+        }
         guard let url = Self.normalizedURL(urlDraft) else {
             throw ProbeWebError(errorDescription: trf("“%@” is not a web address.", "SiteProbe", urlDraft))
         }
         isStarting = true
         defer { isStarting = false }
         tearDown()
+        self.model = model
         urlDraft = url.absoluteString
         loadFailure = nil
         endedSnapshot = nil
@@ -75,6 +94,12 @@ final class ProbeWebSession {
         self.mode = mode
         runningSessionID = model.probe.running?.id
 
+        // Choose the view before the page exists, so it is never shown in one view and then taken by another.
+        moveTask?.cancel()
+        moveTask = nil
+        hostTarget = (inWindow ?? (model.preferences.probeOwnWindow || isWindowOpen)) ? .window : .inline
+        host = hostTarget
+
         let page = makePage(port: endpointPort, isolated: model.preferences.probeIsolated)
         page.customUserAgent = Self.userAgent(for: mode)
         self.page = page
@@ -87,7 +112,7 @@ final class ProbeWebSession {
     /// Stops recording; keeps a snapshot of the last page for the "session ended" view.
     func stop(model: AppModel) async {
         let sessionID = runningSessionID ?? model.probe.running?.id
-        if let page, let sessionID, let data = try? await page.exported(as: .image()), let image = NSImage(data: data) {
+        if let page, let sessionID, let image = await Self.snapshot(of: page, mode: mode) {
             endedSnapshot = ProbeEndedSnapshot(sessionID: sessionID, image: image, mode: mode)
         }
         let saved = await model.probeActions.stopProbe()
@@ -147,6 +172,56 @@ final class ProbeWebSession {
         suppressSteps = false
     }
 
+    // MARK: Hosting
+
+    /// Pop Out: hands the page to the window, then opens it (`open` calls `openWindow`).
+    func popOut(open: () -> Void) {
+        move(to: .window)
+        open()
+    }
+
+    /// The pop-out window appeared. Opened from the Window menu while a probe runs inline, it takes the page.
+    func windowDidOpen() {
+        isWindowOpen = true
+        if page != nil, hostTarget == .inline { move(to: .window) }
+    }
+
+    /// The pop-out window closed: the page goes back to the Site Probe page once the window's view is gone.
+    func windowDidClose() {
+        isWindowOpen = false
+        if hostTarget == .window { move(to: .inline) }
+    }
+
+    /// A `WebView` showing the page appeared in `view`.
+    func webViewDidAppear(in view: Host) {
+        mounted.insert(view)
+    }
+
+    /// A `WebView` showing the page disappeared from `view`.
+    func webViewDidDisappear(from view: Host) {
+        mounted.remove(view)
+    }
+
+    /// Moves the page to `target`: no view may show it until the `WebView` that showed it is gone.
+    private func move(to target: Host) {
+        hostTarget = target
+        // A move in flight hands the page to the latest target when it ends.
+        guard moveTask == nil, host != target else { return }
+        host = nil
+        moveTask = Task { [weak self] in
+            // Up to a second for the old view to go away (a closing window tears its views down late),
+            // then one more beat so WebKit has released the page.
+            for _ in 0..<40 {
+                guard let self, !self.mounted.isEmpty else { break }
+                try? await Task.sleep(for: .milliseconds(25))
+            }
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled, let self else { return }
+            self.host = self.hostTarget
+            self.moveTask = nil
+        }
+    }
+
     // MARK: Page
 
     private func makePage(port: NWEndpoint.Port, isolated: Bool) -> WebPage {
@@ -163,13 +238,13 @@ final class ProbeWebSession {
         return page
     }
 
-    /// Per-navigation preferences: content mode for the profile, Global Privacy Control (macOS 27),
-    /// and maximum compatibility so the page behaves as it would in Safari.
+    /// Per-navigation preferences: content mode for the profile, Global Privacy Control (macOS 27, from
+    /// Preferences), and maximum compatibility so the page behaves as it would in Safari.
     func navigationPreferences(base: WebPage.NavigationPreferences = WebPage.NavigationPreferences()) -> WebPage.NavigationPreferences {
         var preferences = base
         preferences.preferredContentMode = mode == .iphone ? .mobile : .desktop
         preferences.securityRestrictionMode = .maximizeCompatibility
-        preferences.isGlobalPrivacyControlEnabled = sendsGlobalPrivacyControl
+        preferences.isGlobalPrivacyControlEnabled = model?.preferences.probeGlobalPrivacyControl ?? false
         return preferences
     }
 
@@ -180,7 +255,7 @@ final class ProbeWebSession {
             } catch {
                 self?.navigationFailed(error)
             }
-            if isFirstLoad { self?.firstLoadDidFinish(page) }
+            if isFirstLoad, !Task.isCancelled { self?.firstLoadDidFinish(page) }
         }
         tasks.append(task)
     }
@@ -210,8 +285,11 @@ final class ProbeWebSession {
     }
 
     private func firstLoadDidFinish(_ page: WebPage) {
+        guard page === self.page else { return }
         firstLoadFinished = true
         lastStepURL = page.url
+        // The engine switches the probe from "loading" to "recording".
+        if let model, model.probe.isRunning { model.probeActions.pageDidFinishLoading() }
     }
 
     private func navigationFailed(_ error: any Error) {
@@ -250,7 +328,28 @@ final class ProbeWebSession {
         model.probeActions.recordStep(label: "Click · " + Self.stepTitle(for: url), url: url.absoluteString)
     }
 
+    /// The page's first screen (one viewport, not the whole document, which can be thousands of points tall).
+    private static func snapshot(of page: WebPage, mode: ProbeDeviceMode) async -> NSImage? {
+        let fallback = mode == .iphone ? iPhoneViewport : CGSize(width: 1280, height: 800)
+        var viewport = fallback
+        let script = "return [window.innerWidth, window.innerHeight];"
+        if let values = try? await page.callJavaScript(script, contentWorld: .defaultClient) as? [NSNumber], values.count == 2,
+           values[0].doubleValue > 0, values[1].doubleValue > 0 {
+            viewport = CGSize(width: values[0].doubleValue, height: values[1].doubleValue)
+        }
+        let region = WebPage.ExportedContentConfiguration.Region.rect(CGRect(origin: .zero, size: viewport))
+        guard let data = try? await page.exported(as: .image(region: region)) else { return nil }
+        return NSImage(data: data)
+    }
+
     // MARK: Helpers
+
+    /// Why a probe cannot start, or nil. The probe's proxy forwards to the Surge on this Mac, so probes
+    /// are off while Tidemark reads a remote Surge.
+    static func unavailableReason(remoteSurge: String) -> String? {
+        guard !remoteSurge.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return tr("Site Probe needs Surge on this Mac. Tidemark is reading a remote Surge (Settings › Surge), so probes are turned off.", "SiteProbe")
+    }
 
     /// Adds `https://` when the scheme is missing; nil when there is no host.
     nonisolated static func normalizedURL(_ raw: String) -> URL? {
@@ -310,5 +409,16 @@ private struct ProbeNavigationDecider: WebPage.NavigationDeciding {
             return .cancel
         }
         return .allow
+    }
+}
+
+/// Registers a `WebView` showing the probe page with the session while it is on screen.
+struct ProbeWebViewMount: ViewModifier {
+    var view: ProbeWebSession.Host
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { ProbeWebSession.shared.webViewDidAppear(in: view) }
+            .onDisappear { ProbeWebSession.shared.webViewDidDisappear(from: view) }
     }
 }

@@ -241,6 +241,16 @@
         }
       }
     },
+    "GPC" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GPC"
+          }
+        }
+      }
+    },
     "Host" : {
       "localizations" : {
         "zh-Hans" : {
@@ -441,6 +451,16 @@
         }
       }
     },
+    "Send Global Privacy Control: tells sites not to sell or share your data (the Sec-GPC header), like Safari's privacy setting. Applies from the next page load." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送全局隐私控制（GPC）：告诉网站不要出售或共享你的数据（Sec-GPC 请求头），和 Safari 的隐私设置一样。从下一次页面加载开始生效。"
+          }
+        }
+      }
+    },
     "Sessions" : {
       "localizations" : {
         "zh-Hans" : {
@@ -457,6 +477,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "网站探测"
+          }
+        }
+      }
+    },
+    "Site Probe needs Surge on this Mac. Tidemark is reading a remote Surge (Settings › Surge), so probes are turned off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网站探测需要本机上的 Surge。Tidemark 正在读取远程 Surge（设置 › Surge），所以探测已关闭。"
           }
         }
       }
@@ -497,16 +527,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "切换到 iPhone"
-          }
-        }
-      }
-    },
-    "Tells sites not to sell or share your data (the Sec-GPC header), like Safari's privacy setting. Applies from the next page load." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "告诉网站不要出售或共享你的数据（Sec-GPC 请求头），和 Safari 的隐私设置一样。从下一次页面加载开始生效。"
           }
         }
       }

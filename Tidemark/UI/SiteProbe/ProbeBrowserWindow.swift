@@ -5,6 +5,8 @@ import WebKit
 /// the Desktop / iPhone switch and Stop, over a caption naming the proxy port everything goes through.
 struct ProbeBrowserWindow: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.systemPrefersReducedResourceUsage) private var reducedResources
 
     @State private var startError: (any Error)?
     @State private var viewport: CGSize?
@@ -25,8 +27,9 @@ struct ProbeBrowserWindow: View {
         .background(Theme.bg)
         .navigationTitle(model.probe.running?.host ?? tr("Site Probe", "SiteProbe"))
         .toolbar { toolbar(running: running) }
-        .onAppear { web.isPoppedOut = true }
-        .onDisappear { web.isPoppedOut = false }
+        // The session decides which view shows the page; the window only reports that it opened or closed.
+        .onAppear { web.windowDidOpen() }
+        .onDisappear { web.windowDidClose() }
         .alert(error: $startError) {
             Button(tr("OK", "SiteProbe")) {}
         }
@@ -45,7 +48,7 @@ struct ProbeBrowserWindow: View {
 
         ToolbarItem(placement: .principal) {
             HStack(spacing: 7) {
-                if running { StatusDot(color: Theme.recording, size: 7, pulsing: true) }
+                if running { StatusDot(color: Theme.recording, size: 7, pulsing: !reduceMotion && !reducedResources) }
                 Text(address)
                     .font(Theme.mono(12))
                     .lineLimit(1)
@@ -82,14 +85,16 @@ struct ProbeBrowserWindow: View {
                 .tint(Color(oklch: 0.62, 0.19, 27))
                 .keyboardShortcut(".", modifiers: .command)
             } else {
+                let unavailable = ProbeWebSession.unavailableReason(remoteSurge: model.preferences.surgeRemote)
                 Button(tr("Start Probe", "SiteProbe")) {
                     Task {
-                        do { try await web.start(model: model) } catch { startError = error }
+                        do { try await web.start(model: model, inWindow: true) } catch { startError = error }
                     }
                 }
                 .buttonStyle(.glassProminent)
                 .tint(Theme.accent)
-                .disabled(ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isStarting)
+                .disabled(unavailable != nil || ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isStarting)
+                .help(unavailable ?? "")
             }
         }
     }
@@ -131,16 +136,14 @@ struct ProbeBrowserWindow: View {
 
     @ViewBuilder
     private func content(running: Bool) -> some View {
-        if running, let page = web.page {
-            switch model.preferences.probeMode {
-            case .desktop:
-                WebView(page)
-                    .webViewBackForwardNavigationGestures(.enabled)
-                    .webViewMagnificationGestures(.enabled)
-                    .onGeometryChange(for: CGSize.self, of: \.size) { viewport = $0 }
-            case .iphone:
-                phone(page)
-            }
+        if running, let page = web.page, web.host == .window {
+            browser(page)
+        } else if running {
+            // The page is on its way here from the Site Probe page.
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.bg2)
         } else if let last = model.probe.sessions.first, let snapshot = web.snapshot(for: last.id) {
             ProbeEndedView(snapshot: snapshot, compact: false)
         } else {
@@ -154,19 +157,24 @@ struct ProbeBrowserWindow: View {
         }
     }
 
-    /// The page at iPhone size inside a device outline.
-    private func phone(_ page: WebPage) -> some View {
+    /// The page, full size for desktop or at iPhone size inside a device outline. Both profiles use the same
+    /// `WebView` (only its frame and outline change), because WebKit traps when a second `WebView` is made
+    /// for a page that is still bound to the first.
+    private func browser(_ page: WebPage) -> some View {
+        let iphone = model.preferences.probeMode == .iphone
         let screen = ProbeWebSession.iPhoneViewport
-        return ZStack {
-            Theme.bg3
-            WebView(page)
-                .frame(width: screen.width)
-                .frame(maxHeight: screen.height)
-                .clipShape(RoundedRectangle(cornerRadius: 37, style: .continuous))
-                .padding(10)
-                .background(Color(hex: 0x111111), in: RoundedRectangle(cornerRadius: 46, style: .continuous))
-                .shadow(color: .black.opacity(0.3), radius: 25, y: 20)
-                .padding(.vertical, 24)
-        }
+        return WebView(page)
+            .webViewBackForwardNavigationGestures(.enabled)
+            .webViewMagnificationGestures(.enabled)
+            .modifier(ProbeWebViewMount(view: .window))
+            .onGeometryChange(for: CGSize.self, of: \.size) { viewport = $0 }
+            .frame(maxWidth: iphone ? screen.width : .infinity, maxHeight: iphone ? screen.height : .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: iphone ? 37 : 0, style: .continuous))
+            .padding(iphone ? 10 : 0)
+            .background(iphone ? Color(hex: 0x111111) : .clear, in: RoundedRectangle(cornerRadius: iphone ? 46 : 0, style: .continuous))
+            .shadow(color: .black.opacity(iphone ? 0.3 : 0), radius: iphone ? 25 : 0, y: iphone ? 20 : 0)
+            .padding(.vertical, iphone ? 24 : 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(iphone ? Theme.bg3 : Theme.bg)
     }
 }

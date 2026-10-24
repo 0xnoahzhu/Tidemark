@@ -11,6 +11,8 @@ struct SiteProbeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.systemPrefersReducedResourceUsage) private var reducedResources
 
     @State private var startError: (any Error)?
     @FocusState private var urlFocused: Bool
@@ -60,31 +62,42 @@ struct SiteProbeView: View {
     private var urlBar: some View {
         @Bindable var web = web
         let running = model.probe.isRunning
-        return HStack(spacing: 8) {
-            TextField(text: $web.urlDraft, prompt: Text(verbatim: "https://example.com")) {
-                Text(tr("Address", "SiteProbe"))
-            }
-            .textFieldStyle(.bordered)
-            .textInputBorderShape(.capsule)
-            .font(Theme.mono(12.5))
-            .autocorrectionDisabled()
-            .focused($urlFocused)
-            .disabled(running || web.isStarting)
-            .onSubmit { if !running { start() } }
+        let unavailable = ProbeWebSession.unavailableReason(remoteSurge: model.preferences.surgeRemote)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                TextField(text: $web.urlDraft, prompt: Text(verbatim: "https://example.com")) {
+                    Text(tr("Address", "SiteProbe"))
+                }
+                .textFieldStyle(.bordered)
+                .textInputBorderShape(.capsule)
+                .font(Theme.mono(12.5))
+                .autocorrectionDisabled()
+                .focused($urlFocused)
+                .disabled(running || web.isStarting)
+                .onSubmit { if !running, unavailable == nil { start() } }
 
-            if running {
-                Button(tr("Stop", "SiteProbe")) { stop() }
-                    .buttonStyle(.glassProminent)
-                    .tint(Color(oklch: 0.62, 0.19, 27))
-                    .keyboardShortcut(".", modifiers: .command)
-            } else {
-                Button(tr("Start Probe", "SiteProbe")) { start() }
-                    .buttonStyle(.glassProminent)
-                    .tint(Theme.accent)
-                    .disabled(ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isStarting)
+                if running {
+                    Button(tr("Stop", "SiteProbe")) { stop() }
+                        .buttonStyle(.glassProminent)
+                        .tint(Color(oklch: 0.62, 0.19, 27))
+                        .keyboardShortcut(".", modifiers: .command)
+                } else {
+                    Button(tr("Start Probe", "SiteProbe")) { start() }
+                        .buttonStyle(.glassProminent)
+                        .tint(Theme.accent)
+                        .disabled(unavailable != nil || ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isStarting)
+                        .help(unavailable ?? "")
+                }
+            }
+            .controlSize(.large)
+            if let unavailable, !running {
+                Label(unavailable, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.ink2)
+                    .symbolRenderingMode(.multicolor)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .controlSize(.large)
         .padding(.horizontal, 20)
         .padding(.top, 14)
         .padding(.bottom, 8)
@@ -157,12 +170,16 @@ struct SiteProbeView: View {
             .fixedSize()
     }
 
+    /// Global Privacy Control (a macOS 27 WebKit option), kept short so the row stays close to the design.
     private var privacyToggle: some View {
-        @Bindable var web = web
-        return Toggle(tr("Send Global Privacy Control", "SiteProbe"), isOn: $web.sendsGlobalPrivacyControl)
-            .toggleStyle(.checkbox)
-            .help(tr("Tells sites not to sell or share your data (the Sec-GPC header), like Safari's privacy setting. Applies from the next page load.", "SiteProbe"))
-            .fixedSize()
+        @Bindable var preferences = model.preferences
+        return Toggle(isOn: $preferences.probeGlobalPrivacyControl) {
+            Text(tr("GPC", "SiteProbe"))
+        }
+        .toggleStyle(.checkbox)
+        .help(tr("Send Global Privacy Control: tells sites not to sell or share your data (the Sec-GPC header), like Safari's privacy setting. Applies from the next page load.", "SiteProbe"))
+        .accessibilityLabel(tr("Send Global Privacy Control", "SiteProbe"))
+        .fixedSize()
     }
 
     @ViewBuilder
@@ -186,7 +203,7 @@ struct SiteProbeView: View {
         let requestCount = waterfall.steps.reduce(0) { $0 + $1.rows.reduce(0) { $0 + $1.requests } }
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
-                if running { StatusDot(color: Theme.recording, size: 7, pulsing: true) }
+                if running { StatusDot(color: Theme.recording, size: 7, pulsing: !reduceMotion && !reducedResources) }
                 Text(status(session, running: running))
                     .fontWeight(.semibold)
                     .foregroundStyle(Theme.ink)
@@ -216,7 +233,7 @@ struct SiteProbeView: View {
             GeometryReader { geometry in
                 HStack(alignment: .top, spacing: 16) {
                     ProbePreviewPane(session: session, running: running,
-                                     openWindow: { openWindow(id: WindowID.probeBrowser) },
+                                     openWindow: { web.popOut { openWindow(id: WindowID.probeBrowser) } },
                                      closeWindow: { dismissWindow(id: WindowID.probeBrowser) })
                         .frame(width: previewWidth(total: geometry.size.width))
                     ProbeWaterfall(model: waterfall, running: running)
@@ -280,8 +297,9 @@ struct SiteProbeView: View {
         urlFocused = false
         Task {
             do {
+                // The session hands the page to the window before it exists, so the inline preview never shows it.
                 try await web.start(model: model)
-                if model.preferences.probeOwnWindow { openWindow(id: WindowID.probeBrowser) }
+                if web.isPoppedOut { openWindow(id: WindowID.probeBrowser) }
             } catch {
                 startError = error
             }
@@ -327,7 +345,8 @@ private struct ProbeSessionsColumn: View {
                 }
             }
         }
-        .frame(width: 232)
+        // Leading, so the header stays 16 pt in when the column has no sessions yet.
+        .frame(width: 232, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.bg2)
     }
@@ -468,17 +487,21 @@ private struct ProbePreviewPane: View {
                 }
             }
             .background(Theme.bg2)
-        } else if running, let page = web.page {
+        } else if running, let page = web.page, web.host == .inline {
             WebView(page)
                 .webViewBackForwardNavigationGestures(.enabled)
                 .webViewMagnificationGestures(.enabled)
+                .modifier(ProbeWebViewMount(view: .inline))
+        } else if running {
+            // The page is coming back from the pop-out window.
+            ProgressView().controlSize(.small)
         } else {
             ProbeEndedView(snapshot: web.snapshot(for: session.id), compact: true)
         }
     }
 }
 
-/// An ended (or never seen) session: its last picture, blurred, or a placeholder, under a note.
+/// An ended (or never seen) session: its last picture, or a placeholder, under a veil with a note.
 struct ProbeEndedView: View {
     var snapshot: ProbeEndedSnapshot?
     var compact: Bool
@@ -486,13 +509,16 @@ struct ProbeEndedView: View {
     var body: some View {
         ZStack {
             if let snapshot {
-                Image(nsImage: snapshot.image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                // `Color.clear` takes the proposed size and the picture is drawn into it from the top, so a
+                // tall page can never make the card grow.
+                Color.clear
+                    .overlay(alignment: .top) {
+                        Image(nsImage: snapshot.image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    }
                     .clipped()
-                    .blur(radius: 3)
-                    .opacity(0.7)
+                    .blur(radius: compact ? 2 : 3)
             } else {
                 ProbeStripes()
             }
@@ -500,11 +526,11 @@ struct ProbeEndedView: View {
                 .font(.system(size: compact ? 12 : 13, weight: .medium))
                 .foregroundStyle(Theme.ink2)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .padding(compact ? 20 : 40)
+                .padding(compact ? 24 : 40)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Theme.bg.opacity(0.62))
         }
+        .clipped()
     }
 }
 
