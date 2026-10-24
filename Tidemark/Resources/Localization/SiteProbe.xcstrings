@@ -1,0 +1,596 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%lld IP" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个 IP"
+          }
+        }
+      }
+    },
+    "%lld IPs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个 IP"
+          }
+        }
+      }
+    },
+    "%lld host" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个主机"
+          }
+        }
+      }
+    },
+    "%lld hosts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个主机"
+          }
+        }
+      }
+    },
+    "%lld new host" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增 %lld 个主机"
+          }
+        }
+      }
+    },
+    "%lld new hosts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增 %lld 个主机"
+          }
+        }
+      }
+    },
+    "%lld request" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个请求"
+          }
+        }
+      }
+    },
+    "%lld requests" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个请求"
+          }
+        }
+      }
+    },
+    "%lld step" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 步"
+          }
+        }
+      }
+    },
+    "%lld steps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 步"
+          }
+        }
+      }
+    },
+    "Address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址"
+          }
+        }
+      }
+    },
+    "All traffic from this window goes to" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个窗口的所有流量都发往"
+          }
+        }
+      }
+    },
+    "Back" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后退"
+          }
+        }
+      }
+    },
+    "Browsing in its own window" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在独立窗口中浏览"
+          }
+        }
+      }
+    },
+    "Click · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点击 · %@"
+          }
+        }
+      }
+    },
+    "Close Window" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭窗口"
+          }
+        }
+      }
+    },
+    "Completed · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已完成 · %@"
+          }
+        }
+      }
+    },
+    "Delete" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除"
+          }
+        }
+      }
+    },
+    "Desktop" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "桌面"
+          }
+        }
+      }
+    },
+    "Desktop · %1$@ × %2$@ · Safari user agent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "桌面 · %1$@ × %2$@ · Safari UA"
+          }
+        }
+      }
+    },
+    "Device" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备"
+          }
+        }
+      }
+    },
+    "Enter a URL in the Site Probe page and press Start Probe." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在网站探测页输入网址，然后点开始探测。"
+          }
+        }
+      }
+    },
+    "Enter a URL to start a probe" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入网址开始探测"
+          }
+        }
+      }
+    },
+    "Forward" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前进"
+          }
+        }
+      }
+    },
+    "Host" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主机"
+          }
+        }
+      }
+    },
+    "How attribution works." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "归属原理。"
+          }
+        }
+      }
+    },
+    "Isolated session, no cache or cookies" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隔离会话，不带缓存和 Cookie"
+          }
+        }
+      }
+    },
+    "Loading page…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "页面加载中…"
+          }
+        }
+      }
+    },
+    "New Probe" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新建探测"
+          }
+        }
+      }
+    },
+    "No page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有页面"
+          }
+        }
+      }
+    },
+    "OK" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
+          }
+        }
+      }
+    },
+    "Open a URL in an isolated browser and record every host it touches" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在隔离的浏览器里打开网址，记录它连接的每一个主机"
+          }
+        }
+      }
+    },
+    "Open in its own window" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在独立窗口中打开"
+          }
+        }
+      }
+    },
+    "Other sites" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他站点"
+          }
+        }
+      }
+    },
+    "Page load" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "页面加载"
+          }
+        }
+      }
+    },
+    "Page load · iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "页面加载 · iPhone"
+          }
+        }
+      }
+    },
+    "Pop Out" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "弹出窗口"
+          }
+        }
+      }
+    },
+    "Probe Again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再次探测"
+          }
+        }
+      }
+    },
+    "Probes you run are kept here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你运行过的探测会保存在这里。"
+          }
+        }
+      }
+    },
+    "Recording · click around in the page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "记录中 · 可以在页面里随意点击"
+          }
+        }
+      }
+    },
+    "Records until you press Stop" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一直记录到你按下停止"
+          }
+        }
+      }
+    },
+    "Reqs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求"
+          }
+        }
+      }
+    },
+    "Same site" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同站点"
+          }
+        }
+      }
+    },
+    "Send Global Privacy Control" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送全局隐私控制（GPC）"
+          }
+        }
+      }
+    },
+    "Sessions" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会话"
+          }
+        }
+      }
+    },
+    "Site Probe" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网站探测"
+          }
+        }
+      }
+    },
+    "Start Probe" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始探测"
+          }
+        }
+      }
+    },
+    "Stop" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止"
+          }
+        }
+      }
+    },
+    "Switched to desktop" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到桌面"
+          }
+        }
+      }
+    },
+    "Switched to iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到 iPhone"
+          }
+        }
+      }
+    },
+    "Tells sites not to sell or share your data (the Sec-GPC header), like Safari's privacy setting. Applies from the next page load." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "告诉网站不要出售或共享你的数据（Sec-GPC 请求头），和 Safari 的隐私设置一样。从下一次页面加载开始生效。"
+          }
+        }
+      }
+    },
+    "The page loads in a fresh, isolated browser. Its traffic goes through a proxy port opened only for this session, so every host listed belongs to this URL and nothing else." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "页面会在一个全新的隔离浏览器里加载。它的流量走一个只给本次会话使用的代理端口，所以列出的每个主机都只属于这个网址。"
+          }
+        }
+      }
+    },
+    "The probe browser is a WKWebView with its own proxy setting (macOS 14+). Load the page, then click around: everything it does goes only to a port Tidemark opens for this session and on to Surge, so every connection belongs to this URL until you press Stop. Surge's records fill in the IP, policy and rule." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "探测用的浏览器是一个单独设置了代理的 WKWebView（macOS 14+）。页面加载后可以随意点击，它的所有流量都只连接 Tidemark 为本次会话打开的端口，再转发给 Surge，所以在你按下停止之前，每个连接都属于这个网址。IP、策略和规则由 Surge 的记录补全。"
+          }
+        }
+      }
+    },
+    "The probe's proxy did not open a port." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "探测代理没有打开端口。"
+          }
+        }
+      }
+    },
+    "This session has ended. Start a new probe to keep browsing." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本次会话已结束，开始新的探测才能继续浏览。"
+          }
+        }
+      }
+    },
+    "Your clicks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的点击"
+          }
+        }
+      }
+    },
+    "iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone"
+          }
+        }
+      }
+    },
+    "iPhone · 393 × 852 · mobile Safari user agent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone · 393 × 852 · 移动版 Safari UA"
+          }
+        }
+      }
+    },
+    "“%@” is not a web address." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”不是有效的网址。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
