@@ -21,8 +21,12 @@ struct RequestsTable: View {
     var now: Date?
 
     var body: some View {
+        // The table scrolls horizontally below the sum of the ideal widths and hands extra width out in equal
+        // shares to every resizable column up to its maximum. So the ideals stay modest (the default window
+        // fits without scrolling), Time and Size are fixed to their text, Remote IP and Policy stop growing
+        // early, and the rest goes to App · Process and Host, as in the design's grid.
         Table(rows, selection: $selection) {
-            TableColumn(tr("Time", "Requests")) { record in
+            TableColumn(Self.header(tr("Time", "Requests"))) { record in
                 RequestsTimeCell(date: record.startedAt, style: timeStyle)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .background {
@@ -31,36 +35,36 @@ struct RequestsTable: View {
                         }
                     }
             }
-            .width(min: timeStyle == .clock ? 84 : 100, ideal: timeStyle == .clock ? 90 : 106, max: 140)
+            .width(timeStyle == .clock ? 86 : 102)
 
-            TableColumn(tr("App · Process", "Requests")) { record in
+            TableColumn(Self.header(tr("App · Process", "Requests"))) { record in
                 RequestsAppCell(model: model, record: record)
             }
-            .width(min: 100, ideal: 150, max: 320)
+            .width(min: 110, ideal: 150)
 
-            TableColumn(tr("Host", "Requests")) { record in
+            TableColumn(Self.header(tr("Host", "Requests"))) { record in
                 RequestsHostCell(record: record)
             }
-            .width(min: 140, ideal: 220)
+            .width(min: 140, ideal: 190)
 
-            TableColumn(tr("Remote IP", "Requests")) { record in
+            TableColumn(Self.header(tr("Remote IP", "Requests"))) { record in
                 Text(record.remoteIP ?? "—")
                     .font(Theme.mono(11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-            .width(min: 80, ideal: 110, max: 260)
+            .width(min: 80, ideal: 100, max: 124)
 
-            TableColumn(tr("Policy", "Requests")) { record in
+            TableColumn(Self.header(tr("Policy", "Requests"))) { record in
                 RequestsPolicyTag(policyPath: record.policyPath)
             }
-            .width(min: 64, ideal: 108, max: 260)
+            .width(min: 70, ideal: 110, max: 200)
 
-            TableColumn(tr("Size", "Requests")) { record in
+            TableColumn(Self.header(tr("Size", "Requests"))) { record in
                 RequestsSizeCell(record: record)
             }
-            .width(min: 56, ideal: 66, max: 110)
+            .width(64)
             .alignment(.trailing)
         }
         .alternatingRowBackgrounds()
@@ -78,6 +82,13 @@ struct RequestsTable: View {
     private func isFresh(_ record: RequestRecord) -> Bool {
         guard let now, record.key != selection else { return false }
         return RequestsPresentation.isFresh(record, now: now)
+    }
+
+    /// The design's header labels: 11 pt semibold in the secondary ink.
+    private static func header(_ title: String) -> Text {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Theme.ink2)
     }
 }
 
@@ -110,6 +121,7 @@ struct RequestsAppCell: View {
             }
             AppTile(identity: identity, size: 16)
             Text("\(Text(identity.name).fontWeight(.medium))\(Text(suffix).foregroundStyle(.secondary))")
+                .font(.system(size: 12))
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
@@ -129,6 +141,7 @@ struct RequestsHostCell: View {
                 .lineLimit(1)
                 .frame(width: 46, alignment: .leading)
             Text(record.host)
+                .font(.system(size: 12))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .layoutPriority(1)
