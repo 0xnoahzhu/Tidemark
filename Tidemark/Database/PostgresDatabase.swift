@@ -8,16 +8,23 @@ import Synchronization
 
 /// `TidemarkDatabase` on PostgreSQL, through PostgresNIO's pooled `PostgresClient`.
 ///
-/// Lifecycle: create it with a connection URL, call `connect()` (starts the pool and waits until the
+/// Lifecycle: create it with a connection URL, call `connect()` (starts the pools and waits until the
 /// server answers), then `migrate()`. Call `shutdown()` when the app quits; a database that was shut
 /// down cannot be connected again — create a new instance instead (e.g. after the URL changes).
+///
+/// Two pools: the capture write path (requests, processes, inventory, alerts) and `ping()` use a small
+/// `writer` pool the UI can never exhaust; UI reads and maintenance use the `main` pool. Every connection
+/// carries statement, lock and idle-in-transaction timeouts (`SessionLimits`), so a stuck query, a lock
+/// held by another Mac or a Mac that went to sleep mid-transaction cannot hang a pool for long.
 ///
 /// Every pooled connection runs with `search_path = <schema>, public`, so all SQL is written without a
 /// schema prefix and the same code serves production (`public`) and throwaway test schemas.
 ///
-/// Errors: connection problems surface as `DatabaseError.unreachable`, errors reported by the server as
-/// `DatabaseError.query`. Cancelling the calling task throws `CancellationError`. All methods are safe
-/// to call concurrently; each one leases its own connection from the pool.
+/// Errors follow `DatabaseError`: anything that may succeed later (connection problems, timeouts, the
+/// server running out of resources, shutting down or being read-only, lock and serialization conflicts)
+/// is `.unreachable`; only a statement or its data being rejected is `.query`. Cancelling the calling task
+/// throws `CancellationError`. All methods are safe to call concurrently; each one leases its own
+/// connection from a pool.
 final class PostgresDatabase: TidemarkDatabase {
     /// Schema holding Tidemark's tables (`public` in production).
     let schema: String
@@ -32,9 +39,43 @@ final class PostgresDatabase: TidemarkDatabase {
     private let setup: Result<Setup, DatabaseError>
     private let lifecycle = Mutex<Lifecycle>(.idle)
 
+    /// The connection pool a call runs on.
+    enum Pool: Sendable {
+        /// UI reads, settings and maintenance.
+        case main
+        /// The capture write path and `ping()`: connections reserved for writes, so a burst of slow
+        /// History queries can never make a flush wait for a connection.
+        case writer
+    }
+
+    /// Per-connection limits, sent as startup parameters.
+    struct SessionLimits: Sendable, Equatable {
+        /// Longest a single statement may run (`statement_timeout`).
+        var statement: String
+        /// Longest a statement waits for a lock held by another session (`lock_timeout`).
+        var lock: String
+        /// Longest a session may sit idle inside an open transaction
+        /// (`idle_in_transaction_session_timeout`); the server then ends the session and releases its
+        /// locks, e.g. when a MacBook sleeps in the middle of a flush.
+        var idleInTransaction: String
+
+        static let main = SessionLimits(statement: "30s", lock: "10s", idleInTransaction: "60s")
+        static let writer = SessionLimits(statement: "60s", lock: "5s", idleInTransaction: "30s")
+
+        var parameters: [(String, String)] {
+            [("statement_timeout", statement), ("lock_timeout", lock), ("idle_in_transaction_session_timeout", idleInTransaction)]
+        }
+    }
+
+    /// Connections per pool; together they stay at the 8 connections per Mac Tidemark always used.
+    static let mainPoolSize = 6
+    static let writerPoolSize = 2
+
     private struct Setup: Sendable {
-        var client: PostgresClient
+        var main: PostgresClient
+        var writer: PostgresClient
         var url: PostgresConnectionURL
+        /// Startup parameters of the main pool, reused by the standalone probe connection.
         var startupParameters: [(String, String)]
     }
 
@@ -78,24 +119,30 @@ final class PostgresDatabase: TidemarkDatabase {
 
     // MARK: - Connection
 
-    /// Starts the connection pool (once) and waits up to ~5 s for the server to answer.
+    /// Starts the connection pools (once) and waits up to ~5 s for the server to answer.
     ///
     /// Authentication failures and unknown databases fail immediately; network errors are retried
     /// until the deadline. Throws `DatabaseError.unreachable` with the server's or the network's reason.
     func connect() async throws {
         let setup = try setup.get()
-        try startPool(setup.client)
+        try startPools(setup)
         try await probeServer(setup, within: .seconds(5))
         do {
-            _ = try await withConnection { connection in
-                try await connection.query("SELECT 1", logger: Self.logger).collect()
-            }
+            async let main: Void = selectOne(on: .main)
+            async let writer: Void = selectOne(on: .writer)
+            _ = try await (main, writer)
         } catch let error as DatabaseError {
             throw DatabaseError.unreachable(Self.reason(error))
         }
     }
 
-    /// Closes every pooled connection and waits for the pool to stop, even when the calling task is
+    private func selectOne(on pool: Pool) async throws {
+        _ = try await withConnection(on: pool) { connection in
+            try await connection.query("SELECT 1", logger: Self.logger).collect()
+        }
+    }
+
+    /// Closes every pooled connection and waits for the pools to stop, even when the calling task is
     /// being cancelled (e.g. during app termination after the final flush).
     func shutdown() async {
         let task: Task<Void, Never>? = lifecycle.withLock { state in
@@ -110,9 +157,10 @@ final class PostgresDatabase: TidemarkDatabase {
         }
     }
 
-    /// Round trip of `SELECT 1` on a pooled connection, plus `PostgreSQL <server_version>`.
+    /// Round trip of `SELECT 1` on a writer connection (so it reports whether captured requests can be
+    /// written, whatever the UI is reading), plus the bare server version (`18.3`).
     func ping() async throws -> (roundTrip: Duration, serverVersion: String) {
-        try await withConnection { connection in
+        try await withConnection(on: .writer) { connection in
             let clock = ContinuousClock()
             let start = clock.now
             _ = try await connection.query("SELECT 1", logger: Self.logger).collect()
@@ -127,12 +175,17 @@ final class PostgresDatabase: TidemarkDatabase {
 
     // MARK: - Pool plumbing
 
-    private func startPool(_ client: PostgresClient) throws {
+    private func startPools(_ setup: Setup) throws {
+        let main = setup.main
+        let writer = setup.writer
         try lifecycle.withLock { state in
             switch state {
             case .idle:
-                state = .running(Task.detached(name: "Tidemark PostgreSQL pool") {
-                    await client.run()
+                state = .running(Task.detached(name: "Tidemark PostgreSQL pools") {
+                    await withDiscardingTaskGroup { group in
+                        group.addTask { await main.run() }
+                        group.addTask { await writer.run() }
+                    }
                 })
             case .running:
                 break
@@ -142,15 +195,18 @@ final class PostgresDatabase: TidemarkDatabase {
         }
     }
 
-    /// The pool, once `connect()` started it.
-    private func runningClient() throws -> PostgresClient {
-        let client = try setup.get().client
+    /// The pool's client, once `connect()` started the pools.
+    private func runningClient(_ pool: Pool) throws -> PostgresClient {
+        let setup = try setup.get()
         let isRunning = lifecycle.withLock { state in
             if case .running = state { return true }
             return false
         }
         guard isRunning else { throw DatabaseError.unreachable("Not connected.") }
-        return client
+        switch pool {
+        case .main: return setup.main
+        case .writer: return setup.writer
+        }
     }
 
     /// Opens standalone connections until one succeeds, to report precise reasons (wrong password,
@@ -187,29 +243,30 @@ final class PostgresDatabase: TidemarkDatabase {
         throw DatabaseError.unreachable(Self.describe(lastError, endpoint: setup.url))
     }
 
-    /// Leases a pooled connection for `body`. Fails with `.unreachable` when no connection becomes
-    /// available within `leaseTimeout`; once leased, `body` runs to completion.
+    /// Leases a connection from `pool` for `body`. Fails with `.unreachable` when no connection becomes
+    /// available within `leaseTimeout`; once leased, `body` runs to completion. A connection handed over
+    /// after the timeout fired goes back unused: the caller was told the work failed, so it must not be
+    /// applied behind its back (a retry would apply it twice).
     func withConnection<Result: Sendable>(
+        on pool: Pool = .main,
         _ body: @escaping @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
-        let client = try runningClient()
-        let leased = LeaseFlag()
+        let client = try runningClient(pool)
+        let lease = LeaseState()
         let timeout = leaseTimeout
         let endpoint = self.endpoint
         do {
             return try await withThrowingTaskGroup(of: LeaseOutcome<Result>.self) { group in
                 group.addTask(name: "PostgreSQL lease") {
                     try await client.withConnection { connection in
-                        leased.set()
+                        guard lease.claim() else { return LeaseOutcome.abandoned }
                         return LeaseOutcome.finished(try await body(connection))
                     }
                 }
                 group.addTask(name: "PostgreSQL lease timeout") {
                     try await Task.sleep(for: timeout)
-                    guard leased.isSet else {
-                        throw DatabaseError.unreachable("No connection to \(endpoint?.redacted ?? "the server") within \(timeout.components.seconds) s.")
-                    }
-                    return .leased
+                    guard lease.expire() else { return .leased }
+                    throw DatabaseError.unreachable("No connection to \(endpoint?.redacted ?? "the server") within \(timeout.components.seconds) s.")
                 }
                 while let outcome = try await group.next() {
                     if case .finished(let value) = outcome {
@@ -224,17 +281,23 @@ final class PostgresDatabase: TidemarkDatabase {
         }
     }
 
-    /// Runs `body` inside `BEGIN … COMMIT` on one leased connection; rolls back when it throws.
+    /// Runs `body` inside `BEGIN … COMMIT` on one connection leased from `pool`; rolls back when it throws.
     /// A transaction chosen as a deadlock victim (or failing serialization) is retried up to two more
     /// times, so `body` must be safe to run again (all of ours rebuild their state inside the closure).
+    /// `statementTimeout` (e.g. `"10min"`) replaces the pool's limit for this transaction only, for
+    /// maintenance work on large tables.
     func withTransaction<Result: Sendable>(
+        on pool: Pool = .main,
+        statementTimeout: String? = nil,
         _ body: @escaping @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
-        try await withConnection { connection in
+        let setTimeout = statementTimeout.map { PostgresQuery(unsafeSQL: "SET LOCAL statement_timeout = '\($0)'") }
+        return try await withConnection(on: pool) { connection in
             var attempt = 1
             while true {
                 try await connection.query("BEGIN", logger: Self.logger)
                 do {
+                    if let setTimeout { try await connection.query(setTimeout, logger: Self.logger) }
                     let value = try await body(connection)
                     try await connection.query("COMMIT", logger: Self.logger)
                     return value
@@ -250,9 +313,14 @@ final class PostgresDatabase: TidemarkDatabase {
 
     /// Deadlock (`40P01`) or serialization failure (`40001`) reported by the server.
     static func isTransientConflict(_ error: any Error) -> Bool {
-        guard let error = error as? PSQLError, error.code == .server else { return false }
-        let state = error.serverInfo?[.sqlState]
+        let state = sqlState(of: error)
         return state == "40P01" || state == "40001"
+    }
+
+    /// The SQLSTATE of an error reported by the server, nil for anything else.
+    static func sqlState(of error: any Error) -> String? {
+        guard let error = error as? PSQLError, error.code == .server else { return nil }
+        return error.serverInfo?[.sqlState]
     }
 
     /// Rolls back even when the task is cancelled; a connection that cannot roll back is closed so it
@@ -268,15 +336,15 @@ final class PostgresDatabase: TidemarkDatabase {
     }
 
     /// Runs a statement and returns its rows.
-    func rows(_ query: PostgresQuery) async throws -> [PostgresRow] {
-        try await withConnection { connection in
+    func rows(_ query: PostgresQuery, on pool: Pool = .main) async throws -> [PostgresRow] {
+        try await withConnection(on: pool) { connection in
             try await connection.query(query, logger: Self.logger).collect()
         }
     }
 
     /// Runs a statement and discards its result.
-    func execute(_ query: PostgresQuery) async throws {
-        _ = try await rows(query)
+    func execute(_ query: PostgresQuery, on pool: Pool = .main) async throws {
+        _ = try await rows(query, on: pool)
     }
 
     // MARK: - Configuration
@@ -300,41 +368,53 @@ final class PostgresDatabase: TidemarkDatabase {
     }
 
     private static func makeSetup(url: PostgresConnectionURL, schema: String) -> Setup {
+        let root = url.rootCertificatePath
         let tls: PostgresClient.Configuration.TLS = switch url.tls {
         case .disable: .disable
         case .prefer: .prefer(tlsConfiguration(.none))
         case .require: .require(tlsConfiguration(.none))
-        case .verifyCA: .require(tlsConfiguration(.noHostnameVerification))
-        case .verifyFull: .require(tlsConfiguration(.fullVerification))
+        case .verifyCA: .require(tlsConfiguration(.noHostnameVerification, rootCertificate: root))
+        case .verifyFull: .require(tlsConfiguration(.fullVerification, rootCertificate: root))
         }
 
         let searchPath = schema == "public" ? "public" : "\(quoteIdentifier(schema)), public"
-        let parameters = [("search_path", searchPath), ("application_name", "Tidemark")]
-
-        var configuration: PostgresClient.Configuration
-        if let socket = url.socketPath {
-            configuration = .init(unixSocketPath: socket, username: url.username, password: url.password, database: url.database)
-        } else {
-            configuration = .init(host: url.host, port: url.port, username: url.username, password: url.password, database: url.database, tls: tls)
+        func parameters(_ application: String, _ limits: SessionLimits) -> [(String, String)] {
+            [("search_path", searchPath), ("application_name", application)] + limits.parameters
         }
-        configuration.options.connectTimeout = .seconds(5)
-        configuration.options.minimumConnections = 1
-        configuration.options.maximumConnections = 8
-        configuration.options.connectionIdleTimeout = .seconds(120)
-        configuration.options.additionalStartupParameters = parameters
+        func client(_ application: String, _ limits: SessionLimits, size: Int) -> PostgresClient {
+            var configuration: PostgresClient.Configuration
+            if let socket = url.socketPath {
+                configuration = .init(unixSocketPath: socket, username: url.username, password: url.password, database: url.database)
+            } else {
+                configuration = .init(host: url.host, port: url.port, username: url.username, password: url.password, database: url.database, tls: tls)
+            }
+            configuration.options.connectTimeout = .seconds(5)
+            configuration.options.minimumConnections = 1
+            configuration.options.maximumConnections = size
+            configuration.options.connectionIdleTimeout = .seconds(120)
+            configuration.options.additionalStartupParameters = parameters(application, limits)
+            return PostgresClient(configuration: configuration)
+        }
 
-        return Setup(client: PostgresClient(configuration: configuration), url: url, startupParameters: parameters)
+        return Setup(
+            main: client("Tidemark", .main, size: mainPoolSize),
+            writer: client("Tidemark writer", .writer, size: writerPoolSize),
+            url: url,
+            startupParameters: parameters("Tidemark", .main)
+        )
     }
 
-    private static func tlsConfiguration(_ verification: CertificateVerification) -> TLSConfiguration {
+    private static func tlsConfiguration(_ verification: CertificateVerification, rootCertificate: String? = nil) -> TLSConfiguration {
         var configuration = TLSConfiguration.makeClientConfiguration()
         configuration.certificateVerification = verification
+        if let rootCertificate { configuration.trustRoots = .file(rootCertificate) }
         return configuration
     }
 
     /// A standalone-connection configuration equivalent to the pool's, for `probeServer`.
     private static func directConfiguration(_ setup: Setup, timeout: Duration) throws -> PostgresConnection.Configuration {
         let url = setup.url
+        let root = url.rootCertificatePath
         var configuration: PostgresConnection.Configuration
         if let socket = url.socketPath {
             configuration = .init(unixSocketPath: socket, username: url.username, password: url.password, database: url.database)
@@ -343,8 +423,8 @@ final class PostgresDatabase: TidemarkDatabase {
             case .disable: .disable
             case .prefer: .prefer(try NIOSSLContext(configuration: tlsConfiguration(.none)))
             case .require: .require(try NIOSSLContext(configuration: tlsConfiguration(.none)))
-            case .verifyCA: .require(try NIOSSLContext(configuration: tlsConfiguration(.noHostnameVerification)))
-            case .verifyFull: .require(try NIOSSLContext(configuration: tlsConfiguration(.fullVerification)))
+            case .verifyCA: .require(try NIOSSLContext(configuration: tlsConfiguration(.noHostnameVerification, rootCertificate: root)))
+            case .verifyFull: .require(try NIOSSLContext(configuration: tlsConfiguration(.fullVerification, rootCertificate: root)))
             }
             configuration = .init(host: url.host, port: url.port, username: url.username, password: url.password, database: url.database, tls: tls)
         }
@@ -357,6 +437,10 @@ final class PostgresDatabase: TidemarkDatabase {
     // MARK: - Errors
 
     /// Maps PostgresNIO / NIO errors to `DatabaseError`; `CancellationError` passes through.
+    ///
+    /// `.query` is reserved for errors that retrying the same statement cannot fix (the server rejected
+    /// the statement or its data, or a reply could not be decoded); everything else — including errors
+    /// of unknown origin — is `.unreachable`, so callers keep the data and retry later.
     static func map(_ error: any Error, endpoint: PostgresConnectionURL? = nil) -> any Error {
         switch error {
         case let error as DatabaseError:
@@ -366,23 +450,19 @@ final class PostgresDatabase: TidemarkDatabase {
         case let error as PSQLError:
             switch error.code {
             case .server:
-                let state = error.serverInfo?[.sqlState] ?? ""
                 let message = describe(error, endpoint: endpoint)
-                // 08: connection exception, 28: invalid authorization, 3D000: unknown database,
-                // 53300: too many connections, 57P0x: server shutting down / starting up.
-                if state.hasPrefix("08") || state.hasPrefix("28") || state == "3D000" || state == "53300" || state.hasPrefix("57P0") {
-                    return DatabaseError.unreachable(message)
-                }
-                return DatabaseError.query(message)
+                return isTransient(sqlState: error.serverInfo?[.sqlState] ?? "") ? DatabaseError.unreachable(message) : DatabaseError.query(message)
             case .queryCancelled:
                 return CancellationError()
-            case .tooManyParameters, .messageDecodingFailure, .unexpectedBackendMessage, .invalidCommandTag:
+            case .tooManyParameters:
                 return DatabaseError.query(describe(error, endpoint: endpoint))
             default:
                 return DatabaseError.unreachable(describe(error, endpoint: endpoint))
             }
         case let error as PostgresDecodingError:
             return DatabaseError.query("Could not read column \(error.columnName) (\(error.code)).")
+        case is EncodingError:
+            return DatabaseError.query(String(describing: error))
         case is IOError, is ChannelError, is NIOConnectionError, is NIOSSLError:
             return DatabaseError.unreachable(describe(error, endpoint: endpoint))
         default:
@@ -391,7 +471,34 @@ final class PostgresDatabase: TidemarkDatabase {
             if typeName.contains("ConnectionPoolError") {
                 return Task.isCancelled ? CancellationError() : DatabaseError.unreachable("The connection pool is closed.")
             }
-            return DatabaseError.query(String(describing: error))
+            return DatabaseError.unreachable(String(describing: error))
+        }
+    }
+
+    /// Whether a server error says nothing about the statement or its data, so the same work can succeed
+    /// later: connection problems (08), authentication and unknown database or schema (28, 3D, 3F),
+    /// insufficient resources such as a full disk (53), operator intervention such as a statement
+    /// timeout or shutdown (57), system and internal errors (58, XX), serialization failures and
+    /// deadlocks (40, except 40002), a read-only or timed-out transaction (25006, 25P02, 25P03, 25P04), a
+    /// lock that could not be taken (55P03, 55006), a missing privilege (42501), snapshot too old (72),
+    /// configuration file errors (F0).
+    ///
+    /// Everything else — data exceptions (22), constraint and foreign-key violations (23), syntax errors
+    /// and undefined objects (42), program limits (54)… — rejects the statement itself.
+    static func isTransient(sqlState state: String) -> Bool {
+        switch state.prefix(2) {
+        case "08", "28", "3D", "3F", "53", "57", "58", "72", "F0", "XX":
+            return true
+        case "40":
+            return state != "40002"
+        case "25":
+            return ["25006", "25P02", "25P03", "25P04"].contains(state)
+        case "55":
+            return state == "55P03" || state == "55006"
+        case "42":
+            return state == "42501"
+        default:
+            return false
         }
     }
 
@@ -478,14 +585,28 @@ final class PostgresDatabase: TidemarkDatabase {
     }
 }
 
-/// Set once a pooled connection has been handed to a `withConnection` body.
-private final class LeaseFlag: Sendable {
-    private let value = Atomic<Bool>(false)
-    func set() { value.store(true, ordering: .releasing) }
-    var isSet: Bool { value.load(ordering: .acquiring) }
+/// Hand-over of a pooled connection between `withConnection`'s lease and its timeout: whichever of the
+/// two moves first wins, so the body never runs once the caller was told the lease timed out.
+private final class LeaseState: Sendable {
+    private static let waiting: UInt8 = 0
+    private static let leased: UInt8 = 1
+    private static let expired: UInt8 = 2
+
+    private let value = Atomic<UInt8>(LeaseState.waiting)
+
+    /// The lease got a connection; false when the timeout already fired.
+    func claim() -> Bool {
+        value.compareExchange(expected: Self.waiting, desired: Self.leased, ordering: .acquiringAndReleasing).exchanged
+    }
+
+    /// The timeout fired; false when a connection was already handed to the body.
+    func expire() -> Bool {
+        value.compareExchange(expected: Self.waiting, desired: Self.expired, ordering: .acquiringAndReleasing).exchanged
+    }
 }
 
 private enum LeaseOutcome<Value: Sendable>: Sendable {
     case finished(Value)
     case leased
+    case abandoned
 }
