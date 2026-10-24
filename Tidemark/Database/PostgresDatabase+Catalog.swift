@@ -390,11 +390,14 @@ extension PostgresDatabase {
 
     /// The app's processes aggregated by executable lineage (root path → … → path), in depth-first
     /// order with siblings in launch order. Each node shows its latest PID and that PID's Mac, the distinct
-    /// domains and requests of all its processes, and `isRunning` when one of them was seen in the last
-    /// 5 minutes (the UI refines this for processes of this Mac).
+    /// domains and the requests of all its processes that are attributed to the app (the same rows the app's
+    /// header and Requests tab count; a process row can also carry requests attributed elsewhere or to no
+    /// app), and `isRunning` when one of them was seen in the last 5 minutes (the UI refines this for
+    /// processes of this Mac). A Mac scope needs no request filter of its own: process rows belong to one Mac.
     func processTree(appID: AppID, scope: DeviceScope) async throws -> [ProcessNode] {
         var sql = SQL("WITH RECURSIVE app_procs AS (SELECT id, parent_id, device_id, pid, start_time, name, path, first_seen, last_seen FROM processes WHERE app_id = ")
-        sql.append(sql.bind(appID))
+        let app = sql.bind(appID)
+        sql.append(app)
         if let device = scope.deviceID { sql.append(" AND device_id = \(sql.bind(device))") }
         sql.append("""
             ), walk AS (
@@ -423,7 +426,7 @@ extension PostgresDatabase {
             FROM grouped g
             LEFT JOIN LATERAL (
                 SELECT count(DISTINCT r.host) FILTER (WHERE NOT r.is_ip_literal) AS domains, count(*) AS requests
-                FROM requests r WHERE r.process_id = ANY(g.ids)
+                FROM requests r WHERE r.process_id = ANY(g.ids) AND r.app_id = \(app)
             ) s ON true
             """)
 

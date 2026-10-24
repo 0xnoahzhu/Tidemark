@@ -572,11 +572,15 @@ struct DatabaseLiveTests {
             var direct = Fixture.request(device: device.id, id: 4, host: "140.82.112.3")
             direct.appID = app.id
             direct.chain = [cursor, plugin, git, remote]
-            try await db.upsertRequests([fromNode, fromNode2, fromRemote, direct])
+            // The same process also made a request that is not the app's (attributed elsewhere, or to no app):
+            // the tree counts the same rows as the app's header and Requests tab.
+            var unattributed = Fixture.request(device: device.id, id: 5, host: "telemetry.example.com")
+            unattributed.chain = [cursor, plugin, node]
+            try await db.upsertRequests([fromNode, fromNode2, fromRemote, direct, unattributed])
             let linked = try await db.rows("SELECT surge_id, process_id FROM requests ORDER BY surge_id").map { row in
                 try PostgresRowReader(row)("process_id", as: Int64?.self)
             }
-            #expect(linked == [nodeID, nodeID, remoteID, remoteID])
+            #expect(linked == [nodeID, nodeID, remoteID, remoteID, nodeID])
 
             let tree = try await db.processTree(appID: app.id, scope: .all)
             #expect(tree.map(\.name) == ["Cursor", "Cursor Helper (Plugin)", "node", "git", "git-remote-https", "Cursor Helper (Renderer)"])
