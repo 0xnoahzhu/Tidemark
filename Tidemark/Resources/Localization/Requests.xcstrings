@@ -936,6 +936,17 @@
         }
       }
     },
+    "Surge reported no process for this request, so it only lands in the global log." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 没有报告发起这条请求的进程，这条只记在全局日志里。"
+          }
+        }
+      }
+    },
     "Switch between the live stream and stored history" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1009,6 +1020,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "隧道"
+          }
+        }
+      }
+    },
+    "Unknown process" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未知进程"
           }
         }
       }

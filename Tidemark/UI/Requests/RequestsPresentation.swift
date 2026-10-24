@@ -34,8 +34,34 @@ enum RequestsPresentation {
     static func matches(_ record: RequestRecord, needle: String, appName: String) -> Bool {
         if record.host.lowercased().contains(needle) { return true }
         if let ip = record.remoteIP, ip.lowercased().contains(needle) { return true }
-        if record.processName.lowercased().contains(needle) { return true }
+        if let process = processName(of: record), process.lowercased().contains(needle) { return true }
         return appName.lowercased().contains(needle)
+    }
+
+    // MARK: Unknown processes
+
+    /// The process that sent the request (leaf of the chain, else the executable's name); nil when Surge
+    /// reported neither a chain nor a path (QUIC / UDP flows without a PID). Unlike
+    /// `RequestRecord.processName` it never returns the untranslated "Unknown" placeholder.
+    static func processName(of record: RequestRecord) -> String? {
+        if let leaf = record.chain.last, !leaf.name.isEmpty { return leaf.name }
+        if let path = record.processPath, !path.isEmpty {
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            return name.isEmpty ? nil : name
+        }
+        return nil
+    }
+
+    /// `true` when nothing identifies who sent the request: no monitored app, no bundle and no process.
+    static func isUnattributed(_ record: RequestRecord, identity: AppIdentity) -> Bool {
+        identity.appID == nil && (identity.bundlePath ?? "").isEmpty && record.chain.isEmpty && processName(of: record) == nil
+    }
+
+    /// `identity` for display: an unattributed request is shown as `unknownName` with a "?" tile instead of
+    /// the model's English "Unknown" placeholder.
+    static func displayIdentity(_ identity: AppIdentity, for record: RequestRecord, unknownName: String) -> AppIdentity {
+        guard isUnattributed(record, identity: identity) else { return identity }
+        return AppIdentity(name: unknownName, bundlePath: nil, letter: "?", hue: nil, isMonitored: false, appID: nil)
     }
 
     /// Apple system daemons and Apple-operated hosts (Settings › Requests › Hide Apple services).
@@ -102,17 +128,18 @@ enum RequestsPresentation {
     }
 
     /// Process chain rows for the inspector, root first; falls back to the leaf when no chain was captured.
+    /// The fallback's name is empty when the process is unknown (the view shows a localized placeholder).
     static func chainLinks(for record: RequestRecord) -> [ProcessLink] {
         if !record.chain.isEmpty { return record.chain }
-        return [ProcessLink(name: record.processName, pid: record.pid ?? 0, path: record.processPath, startTime: nil)]
+        return [ProcessLink(name: processName(of: record) ?? "", pid: record.pid ?? 0, path: record.processPath, startTime: nil)]
     }
 
-    /// `HostContext` handed to the on-device host insight.
+    /// `HostContext` handed to the on-device host insight. `appName` is nil when the sender is unknown.
     static func hostContext(for record: RequestRecord, appName: String?) -> HostContext {
         HostContext(
             host: record.host,
             appName: appName,
-            processName: record.processName,
+            processName: processName(of: record),
             port: record.port,
             ips: record.remoteIP.map { [$0] } ?? [],
             geo: record.geo,
@@ -139,5 +166,19 @@ enum RequestsPresentation {
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(value) else { return nil }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+extension RequestsPresentation {
+    /// Shown for the app and the process of a request that nothing identifies.
+    @MainActor
+    static var unknownProcessLabel: String { tr("Unknown process", "Requests") }
+}
+
+extension AppModel {
+    /// `appIdentity(for:)` as the Requests page shows it: an unattributed request reads "Unknown process" in
+    /// the current language instead of the model's English placeholder.
+    func requestsIdentity(for record: RequestRecord) -> AppIdentity {
+        RequestsPresentation.displayIdentity(appIdentity(for: record), for: record, unknownName: RequestsPresentation.unknownProcessLabel)
     }
 }

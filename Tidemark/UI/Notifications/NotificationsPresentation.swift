@@ -57,22 +57,31 @@ enum NotificationsPresentation {
     /// site: `First host api.linear.app · via node · US · AS13335 Cloudflare`
     /// host: `via node · 104.16.98.215 · US · AS13335 Cloudflare`
     /// ip:   `production.cloudflare.docker.com · via com.docker.backend · US · AS13335 Cloudflare` (or `No hostname`)
+    ///
+    /// "via …" is left out when Surge reported no process for the request.
     static func details(for alert: AlertItem) -> [Detail] {
         var parts: [Detail] = []
         let geo = alert.geo?.display ?? ""
+        let via: [Detail] = isUnknownProcessName(alert.processName) ? [] : [.via(alert.processName)]
         switch alert.scope {
         case .site:
             parts.append(.firstHost(alert.value))
-            parts.append(.via(alert.processName))
+            parts += via
         case .host:
-            parts.append(.via(alert.processName))
+            parts += via
             if let ip = alert.ip, !ip.isEmpty { parts.append(.text(ip)) }
         case .ip:
             if let host = alert.host, !host.isEmpty, !alert.isDirect { parts.append(.text(host)) } else { parts.append(.noHostname) }
-            parts.append(.via(alert.processName))
+            parts += via
         }
         if !geo.isEmpty { parts.append(.text(geo)) }
         return parts
+    }
+
+    /// An empty process name, or the model's untranslated "Unknown" placeholder stored with older alerts.
+    static func isUnknownProcessName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty || trimmed == "Unknown"
     }
 
     /// The value "Mute" acts on: the host for domain alerts, the IP for IP alerts.

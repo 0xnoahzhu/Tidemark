@@ -20,7 +20,7 @@ enum RequestsCSV {
             record.startedAt.formatted(timestampStyle),
             deviceName ?? "",
             appName ?? "",
-            record.processName,
+            RequestsPresentation.processName(of: record) ?? "",
             record.pid.map(String.init) ?? "",
             record.method,
             record.host,

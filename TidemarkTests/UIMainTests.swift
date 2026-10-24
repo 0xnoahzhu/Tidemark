@@ -114,6 +114,52 @@ struct RequestsPresentationTests {
         #expect(links[0].name == "curl")
     }
 
+    @Test func leavesUnknownProcessesToTheView() {
+        // QUIC / UDP flows can arrive without a PID: no chain, no path, no bundle.
+        let quic = F.record(id: 1, host: "apple-relay.cloudflare.com", method: "QUIC")
+        #expect(RequestsPresentation.processName(of: quic) == nil)
+        #expect(RequestsPresentation.chainLinks(for: quic).map(\.name) == [""])
+        #expect(RequestsPresentation.hostContext(for: quic, appName: nil).processName == nil)
+
+        let placeholder = AppIdentity(name: "Unknown", bundlePath: nil, letter: "U", hue: nil, isMonitored: false, appID: nil)
+        #expect(RequestsPresentation.isUnattributed(quic, identity: placeholder))
+        let shown = RequestsPresentation.displayIdentity(placeholder, for: quic, unknownName: "未知进程")
+        #expect(shown.name == "未知进程")
+        #expect(shown.letter == "?")
+
+        // The placeholder is not data: searching for it finds nothing, and CSV leaves the column empty.
+        #expect(!RequestsPresentation.matches(quic, needle: "unknown", appName: ""))
+        let line = RequestsCSV.line(for: quic, appName: nil, deviceName: nil)
+        #expect(line.split(separator: ",", omittingEmptySubsequences: false)[3] == "")
+
+        // Anything that names the sender keeps its identity.
+        let curl = F.record(id: 2, processPath: "/usr/bin/curl")
+        let curlIdentity = AppIdentity(name: "curl", bundlePath: nil, letter: "c", hue: nil, isMonitored: false, appID: nil)
+        #expect(RequestsPresentation.processName(of: curl) == "curl")
+        #expect(RequestsPresentation.displayIdentity(curlIdentity, for: curl, unknownName: "?") == curlIdentity)
+        let spotify = F.record(id: 3, bundle: "/Applications/Spotify.app")
+        let spotifyIdentity = AppIdentity(name: "Spotify", bundlePath: "/Applications/Spotify.app", letter: "S", hue: nil, isMonitored: false, appID: nil)
+        #expect(!RequestsPresentation.isUnattributed(spotify, identity: spotifyIdentity))
+    }
+
+    @MainActor
+    @Test func localizesTheUnknownProcess() {
+        let suite = "tidemark-tests-\(UUID().uuidString)"
+        let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: suite)!))
+        let quic = F.record(id: 1, method: "QUIC")
+        let saved = Localizer.shared.preference
+        defer {
+            Localizer.shared.preference = saved
+            UserDefaults.standard.removePersistentDomain(forName: suite)
+        }
+
+        Localizer.shared.preference = .english
+        #expect(model.requestsIdentity(for: quic).name == "Unknown process")
+        Localizer.shared.preference = .chinese
+        guard Localizer.shared.bundle != nil else { return }
+        #expect(model.requestsIdentity(for: quic).name == "未知进程")
+    }
+
     @Test func detectsFreshRows() {
         let start = Date(timeIntervalSince1970: 1_000)
         let record = F.record(id: 1, startedAt: start)
@@ -417,6 +463,15 @@ struct NotificationsPresentationTests {
         #expect(NotificationsPresentation.details(for: alert(2, kind: .domain, scope: .host, value: "x.com", ip: "185.199.108.133")) == [.via("node"), .text("185.199.108.133"), geo])
         #expect(NotificationsPresentation.details(for: alert(3, kind: .ip, scope: .ip, value: "1.2.3.4", host: "a.docker.com")) == [.text("a.docker.com"), .via("node"), geo])
         #expect(NotificationsPresentation.details(for: alert(4, kind: .ip, scope: .ip, value: "1.2.3.4", direct: true)) == [.noHostname, .via("node"), geo])
+    }
+
+    @Test func leavesOutUnknownProcesses() {
+        var unknown = alert(1, kind: .domain, scope: .host, value: "apple-relay.cloudflare.com", ip: "162.159.196.66")
+        unknown.processName = "Unknown"
+        #expect(NotificationsPresentation.details(for: unknown) == [.text("162.159.196.66"), .text("US · AS13335 Cloudflare")])
+        unknown.processName = ""
+        #expect(!NotificationsPresentation.details(for: unknown).contains(.via("")))
+        #expect(!NotificationsPresentation.isUnknownProcessName("node"))
     }
 }
 

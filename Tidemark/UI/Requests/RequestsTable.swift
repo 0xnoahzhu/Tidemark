@@ -112,9 +112,9 @@ struct RequestsAppCell: View {
     var record: RequestRecord
 
     var body: some View {
-        let identity = model.appIdentity(for: record)
-        let process = record.processName
-        let suffix = process != identity.name ? " › " + process : ""
+        let identity = model.requestsIdentity(for: record)
+        let process = RequestsPresentation.processName(of: record)
+        let suffix = process.map { $0 != identity.name ? " › " + $0 : "" } ?? ""
         HStack(spacing: 6) {
             if model.devices.showsDeviceBadges {
                 DeviceBadge(shortName: model.devices.shortName(record.deviceID), hue: model.devices.hue(record.deviceID))
@@ -125,7 +125,7 @@ struct RequestsAppCell: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .help(record.processPath ?? process)
+        .help(record.processPath ?? process ?? identity.name)
     }
 }
 
@@ -211,7 +211,7 @@ struct RequestsRowMenu: View {
 
     var body: some View {
         if let record = records.first {
-            let identity = model.appIdentity(for: record)
+            let identity = model.requestsIdentity(for: record)
             Button(tr("Copy Host", "Requests")) { RequestsPasteboard.copy(records.map(\.host).joined(separator: "\n")) }
             if records.count == 1, let ip = record.remoteIP {
                 Button(tr("Copy Remote IP", "Requests")) { RequestsPasteboard.copy(ip) }

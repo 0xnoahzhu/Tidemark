@@ -48,7 +48,7 @@ struct RequestsLiveView: View {
             search: model.nav.requestSearch,
             monitoredOnly: model.preferences.monitoredOnly,
             hideAppleServices: model.preferences.hideAppleServices,
-            identity: model.appIdentity(for:)
+            identity: model.requestsIdentity(for:)
         )
     }
 }

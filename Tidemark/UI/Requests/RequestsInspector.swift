@@ -7,7 +7,8 @@ struct RequestsInspector: View {
     var close: () -> Void
 
     var body: some View {
-        let identity = model.appIdentity(for: record)
+        let identity = model.requestsIdentity(for: record)
+        let appName = RequestsPresentation.isUnattributed(record, identity: identity) ? nil : identity.name
         VStack(spacing: 0) {
             RequestsInspectorHeader(record: record, close: close)
             Divider()
@@ -16,7 +17,7 @@ struct RequestsInspector: View {
                     RequestsInspectorChain(record: record, identity: identity)
                     RequestsInspectorConnection(record: record)
                     RequestsInspectorTiming(record: record)
-                    HostInsightView(context: RequestsPresentation.hostContext(for: record, appName: identity.name))
+                    HostInsightView(context: RequestsPresentation.hostContext(for: record, appName: appName))
                     RequestsInspectorStored(record: record)
                 }
                 .padding(.horizontal, 16)
@@ -122,9 +123,9 @@ private struct RequestsInspectorChain: View {
                                 .font(Theme.mono(11))
                                 .foregroundStyle(Theme.ink3)
                         }
-                        Text(link.name)
+                        Text(link.name.isEmpty ? RequestsPresentation.unknownProcessLabel : link.name)
                             .font(.system(size: 12.5, weight: isLeaf ? .semibold : .regular))
-                            .foregroundStyle(Theme.ink)
+                            .foregroundStyle(link.name.isEmpty ? Theme.ink2 : Theme.ink)
                             .lineLimit(1)
                             .truncationMode(.middle)
                         if link.pid > 0 {
@@ -140,7 +141,7 @@ private struct RequestsInspectorChain: View {
                     }
                     .padding(.leading, CGFloat(index) * 16)
                     .frame(height: 26)
-                    .help(link.path ?? link.name)
+                    .help(link.path ?? (link.name.isEmpty ? RequestsPresentation.unknownProcessLabel : link.name))
                 }
             }
             .padding(.horizontal, 10)
@@ -156,7 +157,10 @@ private struct RequestsInspectorChain: View {
     }
 
     private var attributionText: String {
-        switch RequestsPresentation.attribution(for: record, app: model.catalog.app(record.appID), displayName: identity.name) {
+        if RequestsPresentation.isUnattributed(record, identity: identity) {
+            return tr("Surge reported no process for this request, so it only lands in the global log.", "Requests")
+        }
+        return switch RequestsPresentation.attribution(for: record, app: model.catalog.app(record.appID), displayName: identity.name) {
         case .rolledUp(let app, let parents):
             trn("Rolled up to %2$@ through %1$lld parent process", "Rolled up to %2$@ through %1$lld parent processes", parents, "Requests", app)
         case .direct(let app):
