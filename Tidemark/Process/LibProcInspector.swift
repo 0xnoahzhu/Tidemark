@@ -25,7 +25,7 @@ final class LibProcInspector: ProcessInspecting {
 
     func process(pid: Int32) -> LiveProcess? {
         guard let snapshot = Self.read(pid) else { return nil }
-        let link = cache.withLock { $0[snapshot.key]?.link } ?? Self.link(for: snapshot)
+        let link = Self.link(for: snapshot, path: Self.executablePath(pid))
         return LiveProcess(pid: pid, parentPID: snapshot.parentPID, name: link.name, path: link.path, startTime: snapshot.startTime)
     }
 
@@ -37,7 +37,9 @@ final class LibProcInspector: ProcessInspecting {
         var visited: Set<Int32> = []
         var next: Lookup? = .live(leaf)
         while let lookup = next, links.count < Self.maxDepth {
-            guard let resolved = resolve(lookup), visited.insert(resolved.node.link.pid).inserted else { break }
+            guard let resolved = resolve(lookup, refreshingPath: links.isEmpty),
+                  visited.insert(resolved.node.link.pid).inserted
+            else { break }
             links.append(resolved.node.link)
             if let parent = resolved.parent {
                 next = .live(parent)
@@ -89,11 +91,21 @@ final class LibProcInspector: ProcessInspecting {
 
     /// Resolves a hop, reading the parent from the process table when the hop is not cached yet.
     /// Returns the parent's snapshot too, so the next hop needs no second read.
-    private func resolve(_ lookup: Lookup) -> (node: Node, parent: Snapshot?)? {
+    ///
+    /// `refreshingPath` re-reads the executable of a cached leaf: a process that calls `exec` keeps its PID
+    /// and start time but runs another binary (`sh` wrappers that `exec node`).
+    private func resolve(_ lookup: Lookup, refreshingPath: Bool) -> (node: Node, parent: Snapshot?)? {
         let snapshot: Snapshot
         switch lookup {
         case .live(let live):
-            if let hit = cache.withLock({ $0[live.key] }) { return (hit, nil) }
+            if var hit = cache.withLock({ $0[live.key] }) {
+                if refreshingPath, let path = Self.executablePath(live.pid), path != hit.link.path {
+                    hit.link = Self.link(for: live, path: path)
+                    let refreshed = hit
+                    cache.withLock { $0[live.key] = refreshed }
+                }
+                return (hit, nil)
+            }
             snapshot = live
         case .cached(let key):
             if let hit = cache.withLock({ $0[key] }) { return (hit, nil) }
@@ -108,7 +120,7 @@ final class LibProcInspector: ProcessInspecting {
            Double(candidate.start - snapshot.start) / 1_000_000 <= Self.startTolerance {
             parent = candidate
         }
-        let node = Node(link: Self.link(for: snapshot), parent: parent?.key)
+        let node = Node(link: Self.link(for: snapshot, path: Self.executablePath(snapshot.pid)), parent: parent?.key)
         cache.withLock { cache in
             if cache.count >= Self.cacheLimit { cache.removeAll(keepingCapacity: true) }
             cache[snapshot.key] = node
@@ -116,8 +128,7 @@ final class LibProcInspector: ProcessInspecting {
         return (node, parent)
     }
 
-    private static func link(for snapshot: Snapshot) -> ProcessLink {
-        let path = executablePath(snapshot.pid)
+    private static func link(for snapshot: Snapshot, path: String?) -> ProcessLink {
         // The executable's file name is the full process name ("Cursor Helper (Plugin)"); the kernel's
         // copy is cut at 16 or 32 bytes.
         let name = path.map { URL(filePath: $0).lastPathComponent }.flatMap { $0.isEmpty ? nil : $0 } ?? snapshot.name

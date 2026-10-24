@@ -53,6 +53,23 @@ struct ProcessInspectorTests {
         #expect(inspector.isRunning(pid: child.processIdentifier, startTime: start))
     }
 
+    @Test func followsExecWithinTheSameProcess() async throws {
+        // `exec` keeps the PID and start time but swaps the executable; the cached leaf must follow.
+        let shell = Process()
+        shell.executableURL = URL(filePath: "/bin/sh")
+        shell.arguments = ["-c", "/bin/sleep 0.4; exec /bin/sleep 5"]
+        try shell.run()
+        defer { shell.terminate() }
+
+        let before = try #require(inspector.chain(pid: shell.processIdentifier, notAfter: nil).last)
+        #expect(before.path != "/bin/sleep")
+        try await Task.sleep(for: .seconds(1))
+        let after = try #require(inspector.chain(pid: shell.processIdentifier, notAfter: nil).last)
+        #expect(after.path == "/bin/sleep")
+        #expect(after.name == "sleep")
+        #expect(after.startTime == before.startTime)
+    }
+
     @Test func treatsAProcessThatStartedAfterTheRequestAsAReusedPID() {
         // The request happened an hour before this process started: its PID must have been reused.
         #expect(inspector.chain(pid: getpid(), notAfter: .now.addingTimeInterval(-3600)).isEmpty)
