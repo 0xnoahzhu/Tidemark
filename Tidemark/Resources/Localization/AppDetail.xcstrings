@@ -1,0 +1,1096 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%1$@ (%2$lld by IP only)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@（其中 %2$lld 个直连）"
+          }
+        }
+      }
+    },
+    "%1$@ in %2$@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，分属 %2$@"
+          }
+        }
+      }
+    },
+    "%1$@ is not on %2$@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@ 上没有 %1$@"
+          }
+        }
+      }
+    },
+    "%1$lld of %2$lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld / %2$lld"
+          }
+        }
+      }
+    },
+    "%@ domains and IPs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的域名与 IP"
+          }
+        }
+      }
+    },
+    "%@ stored" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共存 %@ 条"
+          }
+        }
+      }
+    },
+    "%lld IP" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个 IP"
+          }
+        }
+      }
+    },
+    "%lld IPs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个 IP"
+          }
+        }
+      }
+    },
+    "%lld domain" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个域名"
+          }
+        }
+      }
+    },
+    "%lld domains" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个域名"
+          }
+        }
+      }
+    },
+    "%lld host" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个主机"
+          }
+        }
+      }
+    },
+    "%lld hosts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个主机"
+          }
+        }
+      }
+    },
+    "%lld new domain in 24 h" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "24 小时内新增 %lld 个域名"
+          }
+        }
+      }
+    },
+    "%lld new domain or IP in 24 h" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "24 小时内新增 %lld 个域名和 IP"
+          }
+        }
+      }
+    },
+    "%lld new domains & IPs in 24 h" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "24 小时内新增 %lld 个域名和 IP"
+          }
+        }
+      }
+    },
+    "%lld new domains in 24 h" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "24 小时内新增 %lld 个域名"
+          }
+        }
+      }
+    },
+    "%lld site" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个站点"
+          }
+        }
+      }
+    },
+    "%lld sites" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个站点"
+          }
+        }
+      }
+    },
+    "ARCHIVED" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已归档"
+          }
+        }
+      }
+    },
+    "All" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部"
+          }
+        }
+      }
+    },
+    "All IPs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部 IP"
+          }
+        }
+      }
+    },
+    "All Requests" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部请求"
+          }
+        }
+      }
+    },
+    "Archive" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "归档"
+          }
+        }
+      }
+    },
+    "Archived" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已归档"
+          }
+        }
+      }
+    },
+    "BY IP" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直连 IP"
+          }
+        }
+      }
+    },
+    "Cancel" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消"
+          }
+        }
+      }
+    },
+    "Connection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接"
+          }
+        }
+      }
+    },
+    "Copy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷贝"
+          }
+        }
+      }
+    },
+    "Delete" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除"
+          }
+        }
+      }
+    },
+    "Delete %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除 %@？"
+          }
+        }
+      }
+    },
+    "Delete…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除…"
+          }
+        }
+      }
+    },
+    "Direct" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直连"
+          }
+        }
+      }
+    },
+    "Domains" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "域名"
+          }
+        }
+      }
+    },
+    "Domains & IPs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "域名与 IP"
+          }
+        }
+      }
+    },
+    "Every domain and IP %@ has used, each listed once. The first time a new one appears you get an alert, and it stays marked NEW for 24 hours." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 用过的每个域名和 IP 都只列一次。新的一出现就会提醒你，并在 24 小时内标为“新”。"
+          }
+        }
+      }
+    },
+    "Exited" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已退出"
+          }
+        }
+      }
+    },
+    "Export CSV" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出 CSV"
+          }
+        }
+      }
+    },
+    "Filter host, IP, process" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "过滤主机、IP、进程"
+          }
+        }
+      }
+    },
+    "First reached by %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "首次由 %@ 访问"
+          }
+        }
+      }
+    },
+    "First seen" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "首次出现"
+          }
+        }
+      }
+    },
+    "From domains" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自域名"
+          }
+        }
+      }
+    },
+    "History" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "历史"
+          }
+        }
+      }
+    },
+    "Host" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主机"
+          }
+        }
+      }
+    },
+    "IPs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IP"
+          }
+        }
+      }
+    },
+    "IPs used by %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 用到的 IP"
+          }
+        }
+      }
+    },
+    "Installed on" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装在"
+          }
+        }
+      }
+    },
+    "It was deleted, or another Mac removed it from the database." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它已被删除，或者另一台 Mac 已把它从数据库中移除。"
+          }
+        }
+      }
+    },
+    "Its requests are still recorded in the global log, but they won't be added to %@'s domain and IP lists or trigger alerts. Monitoring turns back on the next time Tidemark starts." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的请求仍会记在全局请求里，但不会再进 %@ 的域名和 IP 清单，也不会提醒。下次 Tidemark 启动时会自动恢复监控。"
+          }
+        }
+      }
+    },
+    "Last seen" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近出现"
+          }
+        }
+      }
+    },
+    "Live" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时"
+          }
+        }
+      }
+    },
+    "Loading…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在载入…"
+          }
+        }
+      }
+    },
+    "MUTED" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已静音"
+          }
+        }
+      }
+    },
+    "Monitor %@ again?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新监控 %@？"
+          }
+        }
+      }
+    },
+    "Monitoring" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "监控中"
+          }
+        }
+      }
+    },
+    "NEW" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新"
+          }
+        }
+      }
+    },
+    "NEW SITE" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新站点"
+          }
+        }
+      }
+    },
+    "Network · domains" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网络 · 域名"
+          }
+        }
+      }
+    },
+    "New domains and IPs from %@ and everything it launches will be added to its lists and alert again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 及其启动的进程的新域名和 IP 会重新进入清单并提醒。"
+          }
+        }
+      }
+    },
+    "No hostname · connected by IP" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有域名，直接用 IP 连接"
+          }
+        }
+      }
+    },
+    "No processes recorded yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有记录到进程。"
+          }
+        }
+      }
+    },
+    "No requests from %@ in the last few minutes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近几分钟没有来自 %@ 的请求。"
+          }
+        }
+      }
+    },
+    "No stored requests from %@ match." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有符合条件的 %@ 历史请求。"
+          }
+        }
+      }
+    },
+    "Not monitored on %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 上不监控"
+          }
+        }
+      }
+    },
+    "Not monitored there. Showing live data from %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "那台 Mac 上不会监控它，下面是 %@ 上的实时数据。"
+          }
+        }
+      }
+    },
+    "Not monitoring · history kept in the database" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已停止监控 · 历史记录仍保留在数据库里"
+          }
+        }
+      }
+    },
+    "Not reported" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未上报"
+          }
+        }
+      }
+    },
+    "Nothing in the database yet. Domains and IPs show up here as soon as Surge sees this app, or anything it launches, open a connection." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "数据库里还没有记录。只要 Surge 看到这个 App 或它启动的进程建立连接，域名和 IP 就会出现在这里。"
+          }
+        }
+      }
+    },
+    "Nothing reached by IP alone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有直接用 IP 访问的记录。"
+          }
+        }
+      }
+    },
+    "OK" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
+          }
+        }
+      }
+    },
+    "Offline" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "离线"
+          }
+        }
+      }
+    },
+    "Path not found" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有这个路径"
+          }
+        }
+      }
+    },
+    "Paused" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停"
+          }
+        }
+      }
+    },
+    "Policy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "策略"
+          }
+        }
+      }
+    },
+    "Process" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进程"
+          }
+        }
+      }
+    },
+    "Process Tree" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进程树"
+          }
+        }
+      }
+    },
+    "Process chain" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进程链"
+          }
+        }
+      }
+    },
+    "Processes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进程"
+          }
+        }
+      }
+    },
+    "Remote IP" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远端 IP"
+          }
+        }
+      }
+    },
+    "Requests" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求"
+          }
+        }
+      }
+    },
+    "Resolved from domains" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由域名解析"
+          }
+        }
+      }
+    },
+    "Restore" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "恢复"
+          }
+        }
+      }
+    },
+    "Rolled up to %2$@ through %1$lld parent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经过 %1$lld 层父进程归到 %2$@"
+          }
+        }
+      }
+    },
+    "Rolled up to %2$@ through %1$lld parents" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经过 %1$lld 层父进程归到 %2$@"
+          }
+        }
+      }
+    },
+    "Running" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行中"
+          }
+        }
+      }
+    },
+    "Save every domain and IP of this app as a CSV file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把这个 App 的所有域名和 IP 存成 CSV 文件"
+          }
+        }
+      }
+    },
+    "Search" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索"
+          }
+        }
+      }
+    },
+    "Sent by %@ itself" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由 %@ 自己发出"
+          }
+        }
+      }
+    },
+    "Show" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示"
+          }
+        }
+      }
+    },
+    "Show all" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示全部"
+          }
+        }
+      }
+    },
+    "Site · host" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "站点 · 主机"
+          }
+        }
+      }
+    },
+    "Size" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大小"
+          }
+        }
+      }
+    },
+    "Source" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源"
+          }
+        }
+      }
+    },
+    "Start Monitoring" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始监控"
+          }
+        }
+      }
+    },
+    "State" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "状态"
+          }
+        }
+      }
+    },
+    "Stop Monitoring" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止监控"
+          }
+        }
+      }
+    },
+    "Stop monitoring %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止监控 %@？"
+          }
+        }
+      }
+    },
+    "Stored as row %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "存为第 %@ 行"
+          }
+        }
+      }
+    },
+    "Surge reports each request's process and its parent. Tidemark walks up that chain until it reaches a monitored app, so everything below rolls up to %@, including processes that have already exited. Process IDs get reused, so each one is stored together with its start time." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 会给出每个请求的进程和它的父进程。Tidemark 沿着这条链往上找，直到找到被监控的 App，所以下面所有进程的请求都归到 %@，已经退出的进程也算。进程 ID 会被复用，所以每个进程都和它的启动时间一起保存。"
+          }
+        }
+      }
+    },
+    "This app is no longer monitored" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 App 已不在监控列表中"
+          }
+        }
+      }
+    },
+    "This removes %1$@'s domain and IP lists, its alerts and its settings. Its %2$@ requests stay in the global request log, because every request is recorded anyway." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会删除 %1$@ 的域名和 IP 清单、提醒和设置。它的 %2$@ 条请求仍保留在全局请求记录里，因为所有请求本来就会被记录。"
+          }
+        }
+      }
+    },
+    "Time" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "时间"
+          }
+        }
+      }
+    },
+    "Timing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "耗时"
+          }
+        }
+      }
+    },
+    "View" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示"
+          }
+        }
+      }
+    },
+    "Waiting for the first request from %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等待首个请求 · %@"
+          }
+        }
+      }
+    },
+    "failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失败"
+          }
+        }
+      }
+    },
+    "from %@ and everything it launched" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自 %@ 及其启动的所有进程"
+          }
+        }
+      }
+    },
+    "reached by IP, no hostname" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直接用 IP 访问，没有域名"
+          }
+        }
+      }
+    },
+    "the domains on the left resolved to these" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左边的域名解析到了这些 IP"
+          }
+        }
+      }
+    },
+    "this Mac" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
