@@ -83,7 +83,7 @@ final class ProbeController: ProbeActions {
             self.model.probe.phase = .recording
         }
         refreshTask = Task { [weak self] in
-            while !Task.isCancelled {
+            while !Task.isCancelled, self != nil {
                 self?.publish()
                 try? await Task.sleep(for: .milliseconds(250))
             }
