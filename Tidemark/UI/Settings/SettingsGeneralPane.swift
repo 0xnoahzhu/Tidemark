@@ -1,0 +1,199 @@
+import AppKit
+import ServiceManagement
+import SwiftUI
+
+/// Settings › General: where Tidemark shows up, appearance, Liquid Glass, language and login item.
+struct SettingsGeneralPane: View {
+    @Environment(AppModel.self) private var model
+    @Environment(Localizer.self) private var localizer
+
+    @State private var loginStatus = SMAppService.mainApp.status
+    @State private var loginError: String?
+
+    var body: some View {
+        Form {
+            Section {
+                showInPicker
+                appearancePicker
+                glassSlider
+                languagePicker
+            } header: {
+                brandHeader
+            }
+
+            Section {
+                Toggle(isOn: loginBinding) {
+                    Text(tr("Open at login", "Settings"))
+                    Text(tr("Starts recording right away and monitors every app except archived ones.", "Settings"))
+                }
+                if loginStatus == .requiresApproval {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(tr("Allow Tidemark in System Settings › General › Login Items to finish turning this on.", "Settings"))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.amberInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button(tr("Open Login Items…", "Settings")) {
+                            SMAppService.openSystemSettingsLoginItems()
+                        }
+                    }
+                }
+                if let loginError {
+                    Text(loginError)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.failed)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: SettingsLayout.width, height: 390)
+        .onAppear { loginStatus = SMAppService.mainApp.status }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            loginStatus = SMAppService.mainApp.status
+        }
+    }
+
+    // MARK: Header
+
+    private var brandHeader: some View {
+        HStack(spacing: 12) {
+            Image("BrandIcon")
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 56, height: 56)
+                .padding(-4)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: "Tidemark")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Theme.ink)
+                Text(trf("Version %@ · keeps every Surge request in PostgreSQL", "Settings", Self.version))
+                    .font(.system(size: 11.5, weight: .regular))
+                    .foregroundStyle(Theme.ink2)
+            }
+        }
+        .padding(.bottom, 8)
+        .textCase(nil)
+    }
+
+    static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1"
+    }
+
+    // MARK: Rows
+
+    private var showInPicker: some View {
+        Picker(tr("Show in", "Settings"), selection: Binding(
+            get: { model.preferences.showIn },
+            set: { value in
+                model.preferences.showIn = value
+                AppBootstrap.applyActivationPolicy(value)
+                // Changing the activation policy can deactivate the app; keep Settings in front.
+                Task { @MainActor in NSApp.activate() }
+            }
+        )) {
+            Text(tr("Menu Bar & Dock", "Settings")).tag(Preferences.ShowIn.menuBarAndDock)
+            Text(tr("Menu Bar Only", "Settings")).tag(Preferences.ShowIn.menuBarOnly)
+        }
+        .pickerStyle(.segmented)
+        .fixedSize()
+    }
+
+    private var appearancePicker: some View {
+        Picker(tr("Appearance", "Settings"), selection: Binding(
+            get: { model.preferences.appearance },
+            set: { value in
+                model.preferences.appearance = value
+                AppBootstrap.applyAppearance(value)
+            }
+        )) {
+            Text(tr("System", "Settings")).tag(Preferences.Appearance.system)
+            Text(tr("Light", "Settings")).tag(Preferences.Appearance.light)
+            Text(tr("Dark", "Settings")).tag(Preferences.Appearance.dark)
+        }
+        .pickerStyle(.segmented)
+        .fixedSize()
+    }
+
+    private var glassSlider: some View {
+        @Bindable var preferences = model.preferences
+        return LabeledContent {
+            Slider(value: $preferences.glass, in: 0...100) {
+                Text(tr("Liquid Glass", "Settings"))
+            } minimumValueLabel: {
+                Text(tr("Clear", "Settings"))
+            } maximumValueLabel: {
+                Text(tr("Tinted", "Settings"))
+            } ticks: {
+                SliderTickContentForEach(Array(stride(from: 0.0, through: 100.0, by: 25.0)), id: \.self) { value in
+                    SliderTick(value)
+                }
+            }
+            .labelsHidden()
+            .font(.system(size: 11))
+            .foregroundStyle(Theme.ink2)
+            .frame(width: 250)
+        } label: {
+            Text(tr("Liquid Glass", "Settings"))
+            Text(tr("Follows System Settings › Appearance until you move it here.", "Settings"))
+        }
+    }
+
+    private var languagePicker: some View {
+        Picker(tr("Language", "Settings"), selection: Binding(
+            get: { model.preferences.language },
+            set: { value in
+                model.preferences.language = value
+                Localizer.shared.preference = value
+            }
+        )) {
+            Text(tr("System", "Settings")).tag(Preferences.Language.system)
+            Divider()
+            Text(verbatim: "English").tag(Preferences.Language.english)
+            Text(verbatim: "简体中文").tag(Preferences.Language.chinese)
+        }
+        .pickerStyle(.menu)
+        .fixedSize()
+    }
+
+    // MARK: Login item
+
+    private var loginBinding: Binding<Bool> {
+        Binding(
+            get: { loginStatus == .enabled || loginStatus == .requiresApproval },
+            set: { setOpenAtLogin($0) }
+        )
+    }
+
+    private func setOpenAtLogin(_ on: Bool) {
+        loginError = nil
+        do {
+            try SettingsLoginItem.set(on)
+            model.preferences.openAtLogin = on
+        } catch {
+            loginError = error.localizedDescription
+        }
+        loginStatus = SMAppService.mainApp.status
+    }
+}
+
+/// Registers Tidemark as a login item with `SMAppService`.
+@MainActor
+enum SettingsLoginItem {
+    static var isEnabled: Bool {
+        let status = SMAppService.mainApp.status
+        return status == .enabled || status == .requiresApproval
+    }
+
+    static func set(_ on: Bool) throws {
+        let service = SMAppService.mainApp
+        if on {
+            guard service.status != .enabled else { return }
+            try service.register()
+        } else {
+            guard service.status == .enabled || service.status == .requiresApproval else { return }
+            try service.unregister()
+        }
+    }
+}
