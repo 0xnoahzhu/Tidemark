@@ -2,6 +2,11 @@ import Foundation
 
 /// Versioned schema migrations. Each migration runs once, inside a transaction, and is recorded in
 /// `schema_migrations`. Never edit a migration that has shipped; append a new one instead.
+///
+/// Statements are written without a schema prefix: `PostgresDatabase` runs them with
+/// `search_path = <schema>, public`, so the same migrations build the production schema and the
+/// throwaway `tm_test_*` schemas used by the tests. `pg_trgm` always lives in `public` (it is shared
+/// by every schema of the database and must never be dropped together with a test schema).
 enum Schema {
     struct Migration: Sendable {
         var version: Int
@@ -24,7 +29,7 @@ enum Schema {
     ]
 
     private static let v1 = """
-    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+    CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
 
     -- Macs (and remote Surge instances) writing to this database.
     CREATE TABLE devices (
@@ -98,7 +103,7 @@ enum Schema {
         is_ip_literal      boolean NOT NULL DEFAULT false,
         remote_ip          inet,
         remote_address     text,
-        geo                text,
+        geo                jsonb,
         policy             text,
         policy_path        text[] NOT NULL DEFAULT '{}',
         rule               text,
@@ -124,12 +129,15 @@ enum Schema {
     CREATE INDEX requests_started_idx ON requests (started_at DESC);
     CREATE INDEX requests_device_started_idx ON requests (device_id, started_at DESC);
     CREATE INDEX requests_app_started_idx ON requests (app_id, started_at DESC) WHERE app_id IS NOT NULL;
-    CREATE INDEX requests_written_idx ON requests (written_at);
+    -- Other Macs poll rows written or updated since a cursor (requestsWritten).
+    CREATE INDEX requests_updated_idx ON requests (updated_at);
     CREATE INDEX requests_host_idx ON requests (host);
     CREATE INDEX requests_host_trgm_idx ON requests USING gin (host gin_trgm_ops);
     CREATE INDEX requests_remote_ip_idx ON requests (remote_ip);
     CREATE INDEX requests_process_idx ON requests (process_id);
     CREATE INDEX requests_bundle_idx ON requests (bundle_path);
+    -- Prefix matches (process_path LIKE '/Applications/X.app/%') for backfill and its preview count.
+    CREATE INDEX requests_process_path_idx ON requests (process_path text_pattern_ops);
     CREATE INDEX requests_probe_idx ON requests (probe_session_id) WHERE probe_session_id IS NOT NULL;
 
     -- Per-app inventory: every domain and IP an app (and its children) used, listed once.
@@ -144,7 +152,7 @@ enum Schema {
         request_count   bigint NOT NULL DEFAULT 0,
         process_name    text,
         policy          text,
-        geo             text,
+        geo             jsonb,
         is_direct       boolean NOT NULL DEFAULT false,
         hosts           text[] NOT NULL DEFAULT '{}',
         PRIMARY KEY (app_id, kind, value)
@@ -163,7 +171,7 @@ enum Schema {
         first_seen    timestamptz NOT NULL,
         last_seen     timestamptz NOT NULL,
         request_count bigint NOT NULL DEFAULT 0,
-        geo           text,
+        geo           jsonb,
         PRIMARY KEY (kind, value, device_id, source_path)
     );
     CREATE INDEX host_sources_value_trgm_idx ON host_sources USING gin (value gin_trgm_ops);
@@ -191,7 +199,7 @@ enum Schema {
         site          text,
         host          text,
         ip            text,
-        geo           text,
+        geo           jsonb,
         process_name  text NOT NULL,
         is_direct     boolean NOT NULL DEFAULT false,
         request_id    bigint REFERENCES requests(id) ON DELETE SET NULL,
@@ -201,6 +209,8 @@ enum Schema {
     CREATE INDEX alerts_created_idx ON alerts (created_at DESC);
     CREATE INDEX alerts_app_idx ON alerts (app_id, created_at DESC);
     CREATE INDEX alerts_unread_idx ON alerts (created_at DESC) WHERE read_at IS NULL;
+    -- Backs the ON DELETE SET NULL of request_id when retention deletes requests in batches.
+    CREATE INDEX alerts_request_idx ON alerts (request_id) WHERE request_id IS NOT NULL;
 
     -- Muted host patterns (host, IP or *.example.com). Muted hosts are recorded but never alert.
     CREATE TABLE mutes (
