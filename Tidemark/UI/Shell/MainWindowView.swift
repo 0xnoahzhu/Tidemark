@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Main three-pane window: Liquid Glass sidebar, one page per destination, and the window-wide sheets
@@ -50,7 +51,8 @@ private struct ShellDetail: View {
 }
 
 /// "Pause recording?" / "Resume recording?" confirmation, presented when `Navigation.confirmRecordingToggle`
-/// is set (Requests toolbar, Capture menu, menu bar panel).
+/// is set (Requests toolbar, Capture menu, menu bar panel). As in the design, the dialog carries the app icon
+/// and its confirming button is the default one (Pause draws as the filled red default button).
 struct ShellRecordingConfirmation: ViewModifier {
     @Environment(AppModel.self) private var model
 
@@ -66,6 +68,7 @@ struct ShellRecordingConfirmation: ViewModifier {
                 Button(tr("Pause", "Shell"), role: .destructive) {
                     model.capture.setRecording(false)
                 }
+                .keyboardShortcut(.defaultAction)
             } else {
                 Button(tr("Resume", "Shell")) {
                     model.capture.setRecording(true)
@@ -77,5 +80,6 @@ struct ShellRecordingConfirmation: ViewModifier {
                 ? tr("Requests Surge handles from now on won't be saved to PostgreSQL, and no new-site alerts will fire until you resume. Recording turns back on by itself the next time Tidemark starts.", "Shell")
                 : tr("Every request Surge sees will be saved to PostgreSQL again, and alerts turn back on. Nothing from the paused period is filled in.", "Shell"))
         }
+        .dialogIcon(Image(nsImage: NSApp.applicationIconImage))
     }
 }
