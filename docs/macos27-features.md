@@ -74,20 +74,22 @@ Features that would only add decoration are left out, and section 7 explains why
 
 ## 3. Build settings
 
-### 3.1 Recommended `project.yml` changes
+### 3.1 Recommended build setting changes
+
+These settings live in `Tidemark.xcodeproj` (the project no longer uses XcodeGen). `SWIFT_STRICT_CONCURRENCY` has been removed and `ENABLE_PREVIEWS` turned on; the rest of the table is still open.
 
 | Setting | Current | Recommended | Why |
 |---|---|---|---|
 | `SWIFT_VERSION` | `"6.0"` | keep `"6.0"` | Swift 6.4 accepts `-language-mode` 4, 4.2, 5 and 6 only. Swift 6 mode already gives full data-race errors. |
-| `SWIFT_STRICT_CONCURRENCY` | `complete` | remove | It does nothing in Swift 6 mode: its xcspec condition applies only to 4, 4.2 and 5. |
+| `SWIFT_STRICT_CONCURRENCY` | removed | keep removed | It does nothing in Swift 6 mode: its xcspec condition applies only to 4, 4.2 and 5. |
 | `SWIFT_APPROACHABLE_CONCURRENCY` | — | `YES` | In Swift 6 mode this adds InferIsolatedConformances and NonisolatedNonsendingByDefault. A probe build confirmed both flags are passed with `SWIFT_VERSION 6.0`. It is the Xcode 27 template default. |
 | `SWIFT_DEFAULT_ACTOR_ISOLATION` | — (nonisolated) | keep `nonisolated` | See below. |
-| `SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY` | — | `YES` | Stops NIOCore and Logging members leaking through `import PostgresNIO`. It is the Xcode 27 template default and a Swift 7 feature. |
+| `SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY` | `YES` | keep `YES` | Stops NIOCore and Logging members leaking through `import PostgresNIO`. It is the Xcode 27 template default and a Swift 7 feature. |
 | `SWIFT_UPCOMING_FEATURE_EXISTENTIAL_ANY` | — | `YES` | Cheap now: the code base already writes `any SurgeClient`. It is a Swift 7 feature. |
-| `ENABLE_PREVIEWS` (app target) | — | `YES` | XcodeGen does not add it, and `#Preview` needs it. |
+| `ENABLE_PREVIEWS` (app target) | `YES` | keep `YES` | `#Preview` needs it. |
 | `SWIFT_EMIT_LOC_STRINGS` (app target) | `NO` | keep `NO` | Strings go through `tr("key", "Table")` with runtime `String` keys, which compiler extraction cannot see. Extracting SwiftUI literals would only collect strings that skip the in-app language switch. |
 | `STRING_CATALOG_GENERATE_SYMBOLS` | — | optional `YES` | Only worth it if `tr()` moves to generated `LocalizedStringResource` symbols, which turns a missing key into a compile error. First check that setting `resource.locale` honours the in-app language override (section 8). |
-| `ENABLE_HARDENED_RUNTIME`, `com.apple.security.app-sandbox: false` | as is | keep | Tidemark spawns `surge-cli` and reads libproc data for other processes' PIDs. |
+| `ENABLE_HARDENED_RUNTIME = YES`, `ENABLE_APP_SANDBOX = NO` | as is | keep | Tidemark spawns `surge-cli` and reads libproc data for other processes' PIDs. |
 | `SWIFT_STRICT_MEMORY_SAFETY` | — | `NO` | The libproc and sockaddr code is legitimately pointer-heavy. At most, try `MIGRATE` once on `Process/`. |
 | `ENABLE_ENHANCED_SECURITY` | — | `NO` for now | Optional arm64e hardening. Check first that SwiftNIO and PostgresNIO build for arm64e. |
 
@@ -98,33 +100,12 @@ Features that would only add decoration are left out, and section 7 explains why
 
 If MainActor-by-default is wanted later, move `UI/` and `State/` into their own target and give only that target the MainActor default.
 
-```yaml
-settings:
-  base:
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
-    SWIFT_VERSION: "6.0"
-    SWIFT_APPROACHABLE_CONCURRENCY: YES
-    SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY: YES
-    SWIFT_UPCOMING_FEATURE_EXISTENTIAL_ANY: YES
-    # SWIFT_DEFAULT_ACTOR_ISOLATION stays at its default (nonisolated)
-    # SWIFT_STRICT_CONCURRENCY removed: no-op in Swift 6 mode
-    ENABLE_USER_SCRIPT_SANDBOXING: YES
-    DEAD_CODE_STRIPPING: YES
-    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
-    ENABLE_STRICT_OBJC_MSGSEND: YES
-    CLANG_ENABLE_OBJC_ARC: YES
-    CODE_SIGN_STYLE: Manual
-    CODE_SIGN_IDENTITY: "-"
-    DEVELOPMENT_TEAM: ""
+In Xcode build-setting terms the open recommendations are:
 
-targets:
-  Tidemark:
-    settings:
-      base:
-        ENABLE_PREVIEWS: YES
-        SWIFT_EMIT_LOC_STRINGS: NO
-        # ...existing keys unchanged
+```
+SWIFT_APPROACHABLE_CONCURRENCY = YES              // project level
+SWIFT_UPCOMING_FEATURE_EXISTENTIAL_ANY = YES      // project level
+// SWIFT_DEFAULT_ACTOR_ISOLATION stays at its default (nonisolated)
 ```
 
 Also update the "Conventions" line in `docs/ARCHITECTURE.md` to read "Swift 6 language mode (which implies complete strict concurrency), approachable concurrency, no warnings".

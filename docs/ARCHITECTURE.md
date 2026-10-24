@@ -166,8 +166,17 @@ holding the `zh-Hans` translations; Settings › Language switches at runtime.
 
 ## Building
 
+`Tidemark.xcodeproj` is committed and uses Xcode's synchronized folders (`PBXFileSystemSynchronizedRootGroup`):
+the `Tidemark` target compiles everything under `Tidemark/` and the `TidemarkTests` target everything under
+`TidemarkTests/`. Add, move or delete files on disk; the project file only changes for build settings,
+targets or package dependencies. There is no `Info.plist` or entitlements file: the Info.plist is generated
+from `INFOPLIST_KEY_*` build settings and the App Sandbox is off (`ENABLE_APP_SANDBOX = NO`) because Tidemark
+runs `surge-cli` and reads other processes' details through libproc. PostgresNIO is a Swift package dependency,
+pinned in `Tidemark.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`.
+
 ```bash
-brew install xcodegen
-xcodegen generate
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project Tidemark.xcodeproj -scheme Tidemark -destination 'platform=macOS' build
+xcodebuild -project Tidemark.xcodeproj -scheme Tidemark -destination 'platform=macOS' build
 ```
+
+If `xcode-select` points to the Command Line Tools, prefix the command with
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.

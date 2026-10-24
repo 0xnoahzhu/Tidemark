@@ -14,10 +14,13 @@ Requires macOS 27, Surge Mac 6.10+ (`surge-cli`), and PostgreSQL 14+.
 
 ## Build
 
+Open `Tidemark.xcodeproj` in Xcode 27 and run the Tidemark scheme. From the command line:
+
 ```bash
-brew install xcodegen
-xcodegen generate
-open Tidemark.xcodeproj
+xcodebuild -project Tidemark.xcodeproj -scheme Tidemark -destination 'platform=macOS' build
 ```
+
+The project uses synchronized folders: every file under `Tidemark/` and `TidemarkTests/` belongs to its
+target automatically, so adding a file never requires editing the project.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it works.
