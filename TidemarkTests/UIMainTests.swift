@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Tidemark
@@ -125,6 +126,70 @@ struct RequestsPresentationTests {
         let object = try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
         #expect(object["host"] as? String == "api.github.com")
         #expect(json.contains("\n"))
+    }
+}
+
+@MainActor
+struct RequestsRowTintTests {
+    typealias F = UIMainFixtures
+
+    /// A row view with a separator-like view and two cells, the first hosting the tint anchor.
+    private func makeRow() -> (row: NSTableRowView, firstCell: NSTableCellView, anchor: RequestsRowTintAnchor) {
+        let row = NSTableRowView(frame: NSRect(x: 0, y: 0, width: 600, height: 24))
+        row.addSubview(NSView(frame: row.bounds))
+        let firstCell = NSTableCellView(frame: NSRect(x: 16, y: 0, width: 86, height: 24))
+        let secondCell = NSTableCellView(frame: NSRect(x: 119, y: 0, width: 200, height: 24))
+        row.addSubview(firstCell)
+        row.addSubview(secondCell)
+        let host = NSView(frame: firstCell.bounds)
+        firstCell.addSubview(host)
+        let anchor = RequestsRowTintAnchor(frame: host.bounds)
+        host.addSubview(anchor)
+        return (row, firstCell, anchor)
+    }
+
+    private func band(in row: NSTableRowView) -> RequestsRowBand? {
+        row.subviews.compactMap { $0 as? RequestsRowBand }.first
+    }
+
+    @Test func tintsTheWholeRowBelowTheCells() throws {
+        let (row, firstCell, anchor) = makeRow()
+        anchor.apply(key: F.record(id: 1).key, isFresh: true, animated: true)
+
+        let band = try #require(band(in: row))
+        #expect(band.alphaValue == 1)
+        #expect(band.frame == row.bounds.insetBy(dx: RequestsRowBand.horizontalInset, dy: 0))
+        let bandIndex = try #require(row.subviews.firstIndex(of: band))
+        let cellIndex = try #require(row.subviews.firstIndex(of: firstCell))
+        #expect(bandIndex < cellIndex)
+        #expect(bandIndex > 0, "above the row's own background views")
+
+        // Updating again reuses the same band.
+        anchor.apply(key: F.record(id: 1).key, isFresh: true, animated: true)
+        #expect(row.subviews.filter { $0 is RequestsRowBand }.count == 1)
+    }
+
+    @Test func clearsAtOnceForAnotherRequest() throws {
+        let (row, _, anchor) = makeRow()
+        anchor.apply(key: F.record(id: 1).key, isFresh: true, animated: true)
+        let band = try #require(band(in: row))
+
+        // The row view now shows another request that is not fresh: no fade, no leftover tint.
+        anchor.apply(key: F.record(id: 2).key, isFresh: false, animated: true)
+        #expect(band.alphaValue == 0)
+        #expect(band.key == F.record(id: 2).key)
+
+        // The same request aging out fades to clear.
+        anchor.apply(key: F.record(id: 3).key, isFresh: true, animated: true)
+        #expect(band.alphaValue == 1)
+        anchor.apply(key: F.record(id: 3).key, isFresh: false, animated: true)
+        #expect(band.alphaValue == 0)
+    }
+
+    @Test func doesNothingOutsideATableRow() {
+        let anchor = RequestsRowTintAnchor(frame: .zero)
+        anchor.apply(key: F.record(id: 1).key, isFresh: true, animated: true)
+        #expect(anchor.subviews.isEmpty)
     }
 }
 

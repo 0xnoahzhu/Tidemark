@@ -24,19 +24,22 @@ struct RequestsTable: View {
         Table(rows, selection: $selection) {
             TableColumn(tr("Time", "Requests")) { record in
                 RequestsTimeCell(date: record.startedAt, style: timeStyle)
-                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .background {
+                        if now != nil {
+                            RequestsRowTint(key: record.key, isFresh: isFresh(record), isSelected: record.key == selection)
+                        }
+                    }
             }
             .width(min: timeStyle == .clock ? 84 : 100, ideal: timeStyle == .clock ? 90 : 106, max: 140)
 
             TableColumn(tr("App · Process", "Requests")) { record in
                 RequestsAppCell(model: model, record: record)
-                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
             }
             .width(min: 100, ideal: 150, max: 320)
 
             TableColumn(tr("Host", "Requests")) { record in
                 RequestsHostCell(record: record)
-                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
             }
             .width(min: 140, ideal: 220)
 
@@ -46,19 +49,16 @@ struct RequestsTable: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
             }
             .width(min: 80, ideal: 110, max: 260)
 
             TableColumn(tr("Policy", "Requests")) { record in
                 RequestsPolicyTag(policyPath: record.policyPath)
-                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
             }
             .width(min: 64, ideal: 108, max: 260)
 
             TableColumn(tr("Size", "Requests")) { record in
                 RequestsSizeCell(record: record)
-                    .modifier(RequestsFreshBackground(isFresh: isFresh(record)))
             }
             .width(min: 56, ideal: 66, max: 110)
             .alignment(.trailing)
@@ -78,24 +78,6 @@ struct RequestsTable: View {
     private func isFresh(_ record: RequestRecord) -> Bool {
         guard let now, record.key != selection else { return false }
         return RequestsPresentation.isFresh(record, now: now)
-    }
-}
-
-/// Paints the prototype's "fresh" tint behind a cell of a row that just arrived, and fades it out.
-/// The tint reaches past the cell into the column gaps so the cells read as one row band.
-private struct RequestsFreshBackground: ViewModifier {
-    var isFresh: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .background {
-                Theme.fresh
-                    .padding(.horizontal, -12)
-                    .padding(.vertical, -6)
-                    .opacity(isFresh ? 1 : 0)
-                    .animation(.easeOut(duration: 0.9), value: isFresh)
-            }
     }
 }
 
