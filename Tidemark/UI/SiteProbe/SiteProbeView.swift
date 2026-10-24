@@ -44,9 +44,13 @@ struct SiteProbeView: View {
         .navigationSubtitle(tr("Open a URL in an isolated browser and record every host it touches", "SiteProbe"))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                ProbePrivacyToggle(preferences: model.preferences)
+            }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(placement: .primaryAction) {
                 Button(tr("New Probe", "SiteProbe"), systemImage: "plus") { newProbe() }
                     .labelStyle(.titleAndIcon)
-                    .disabled(model.probe.isRunning || web.isStarting)
+                    .disabled(model.probe.isRunning || web.isBusy)
             }
         }
         .alert(error: $startError) {
@@ -73,19 +77,21 @@ struct SiteProbeView: View {
                 .font(Theme.mono(12.5))
                 .autocorrectionDisabled()
                 .focused($urlFocused)
-                .disabled(running || web.isStarting)
-                .onSubmit { if !running, unavailable == nil { start() } }
+                .disabled(running || web.isBusy)
+                .onSubmit { if !running, !web.isBusy, unavailable == nil { start() } }
 
-                if running {
+                if web.isStopping {
+                    ProbeStoppingButton()
+                } else if running {
                     Button(tr("Stop", "SiteProbe")) { stop() }
                         .buttonStyle(.glassProminent)
-                        .tint(Color(oklch: 0.62, 0.19, 27))
+                        .tint(ProbeStoppingButton.tint)
                         .keyboardShortcut(".", modifiers: .command)
                 } else {
                     Button(tr("Start Probe", "SiteProbe")) { start() }
                         .buttonStyle(.glassProminent)
                         .tint(Theme.accent)
-                        .disabled(unavailable != nil || ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isStarting)
+                        .disabled(unavailable != nil || ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isBusy)
                         .help(unavailable ?? "")
                 }
             }
@@ -103,6 +109,8 @@ struct SiteProbeView: View {
         .padding(.bottom, 8)
     }
 
+    /// The design's row: isolation, "Records until you press Stop", Desktop / iPhone, own window, proxy port.
+    /// (Global Privacy Control, a macOS 27 extra, is the toolbar's hand button.)
     private var optionsRow: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 18) {
@@ -110,7 +118,6 @@ struct SiteProbeView: View {
                 recordsUntilStop
                 modePicker
                 ownWindowToggle
-                privacyToggle
                 Spacer(minLength: 8)
                 proxyCaption
             }
@@ -124,7 +131,6 @@ struct SiteProbeView: View {
                 HStack(spacing: 18) {
                     modePicker
                     ownWindowToggle
-                    privacyToggle
                 }
             }
         }
@@ -147,6 +153,9 @@ struct SiteProbeView: View {
             Text(tr("Records until you press Stop", "SiteProbe")).foregroundStyle(Theme.ink2)
         }
         .fixedSize()
+        .help(model.preferences.probeTail
+              ? tr("A Stop pressed right after the page loaded keeps recording until 6 s after the load, so the page's late requests are still caught.", "SiteProbe")
+              : "")
     }
 
     private var modePicker: some View {
@@ -168,18 +177,6 @@ struct SiteProbeView: View {
         return Toggle(tr("Open in its own window", "SiteProbe"), isOn: $preferences.probeOwnWindow)
             .toggleStyle(.checkbox)
             .fixedSize()
-    }
-
-    /// Global Privacy Control (a macOS 27 WebKit option), kept short so the row stays close to the design.
-    private var privacyToggle: some View {
-        @Bindable var preferences = model.preferences
-        return Toggle(isOn: $preferences.probeGlobalPrivacyControl) {
-            Text(tr("GPC", "SiteProbe"))
-        }
-        .toggleStyle(.checkbox)
-        .help(tr("Send Global Privacy Control: tells sites not to sell or share your data (the Sec-GPC header), like Safari's privacy setting. Applies from the next page load.", "SiteProbe"))
-        .accessibilityLabel(tr("Send Global Privacy Control", "SiteProbe"))
-        .fixedSize()
     }
 
     @ViewBuilder
@@ -248,6 +245,7 @@ struct SiteProbeView: View {
 
     private func status(_ session: ProbeSession, running: Bool) -> String {
         guard running else { return trf("Completed · %@", "SiteProbe", AnalyzeFormat.seen(session.startedAt)) }
+        if web.isStopping { return tr("Stopping · catching the page's last requests", "SiteProbe") }
         if web.firstLoadFinished || model.probe.phase == .recording {
             return tr("Recording · click around in the page", "SiteProbe")
         }
@@ -444,7 +442,7 @@ private struct ProbePreviewPane: View {
             .background(Theme.fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             Button(tr("Pop Out", "SiteProbe")) { openWindow() }
                 .font(.system(size: 10.5, weight: .semibold))
-                .disabled(!running || web.isPoppedOut)
+                .disabled(!running || web.isPoppedOut || web.isStopping)
         }
         .buttonStyle(.borderless)
         .font(.system(size: 11))
@@ -491,6 +489,8 @@ private struct ProbePreviewPane: View {
             WebView(page)
                 .webViewBackForwardNavigationGestures(.enabled)
                 .webViewMagnificationGestures(.enabled)
+                // Clicks after Stop would start steps the stopped session never shows.
+                .allowsHitTesting(!web.isStopping)
                 .modifier(ProbeWebViewMount(view: .inline))
         } else if running {
             // The page is coming back from the pop-out window.
@@ -522,15 +522,59 @@ struct ProbeEndedView: View {
             } else {
                 ProbeStripes()
             }
+            // The veil dims the page; the note sits on its own opaque card so no page text can run through it.
+            Theme.bg.opacity(0.62)
             Text(tr("This session has ended. Start a new probe to keep browsing.", "SiteProbe"))
                 .font(.system(size: compact ? 12 : 13, weight: .medium))
-                .foregroundStyle(Theme.ink2)
+                .foregroundStyle(Theme.ink)
                 .multilineTextAlignment(.center)
-                .padding(compact ? 24 : 40)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.bg.opacity(0.62))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, compact ? 14 : 18)
+                .padding(.vertical, compact ? 10 : 12)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+                .frame(maxWidth: compact ? 300 : 380)
+                .padding(compact ? 16 : 32)
         }
         .clipped()
+    }
+}
+
+/// Stands in for Stop while the probe finishes: the rest of the tail after the first load, the last Surge
+/// records, then saving the session.
+struct ProbeStoppingButton: View {
+    static let tint = Color(oklch: 0.62, 0.19, 27)
+
+    var body: some View {
+        Button {} label: {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text(tr("Stopping…", "SiteProbe"))
+            }
+        }
+        .buttonStyle(.glassProminent)
+        .tint(Self.tint)
+        .disabled(true)
+        .help(tr("Recording the page's last requests, then saving the session", "SiteProbe"))
+    }
+}
+
+/// Global Privacy Control (a macOS 27 WebKit option) for the probe browser. The design's options row has
+/// no room for it, so it is a toolbar toggle; the preferences are passed in because toolbar items can be
+/// re-hosted in the overflow menu.
+struct ProbePrivacyToggle: View {
+    var preferences: Preferences
+
+    var body: some View {
+        @Bindable var preferences = preferences
+        Toggle(isOn: $preferences.probeGlobalPrivacyControl) {
+            Label(tr("Send Global Privacy Control", "SiteProbe"),
+                  systemImage: preferences.probeGlobalPrivacyControl ? "hand.raised.fill" : "hand.raised")
+        }
+        .toggleStyle(.button)
+        .labelStyle(.iconOnly)
+        .help(tr("Send Global Privacy Control: tells sites not to sell or share your data (the Sec-GPC header), like Safari's privacy setting. Applies from the next page load.", "SiteProbe"))
     }
 }
 

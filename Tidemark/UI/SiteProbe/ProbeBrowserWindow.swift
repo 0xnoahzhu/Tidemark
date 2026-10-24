@@ -77,12 +77,14 @@ struct ProbeBrowserWindow: View {
         ToolbarSpacer(.fixed, placement: .primaryAction)
 
         ToolbarItem(placement: .primaryAction) {
-            if running {
+            if web.isStopping {
+                ProbeStoppingButton()
+            } else if running {
                 Button(tr("Stop", "SiteProbe")) {
                     Task { await web.stop(model: model) }
                 }
                 .buttonStyle(.glassProminent)
-                .tint(Color(oklch: 0.62, 0.19, 27))
+                .tint(ProbeStoppingButton.tint)
                 .keyboardShortcut(".", modifiers: .command)
             } else {
                 let unavailable = ProbeWebSession.unavailableReason(remoteSurge: model.preferences.surgeRemote)
@@ -93,7 +95,7 @@ struct ProbeBrowserWindow: View {
                 }
                 .buttonStyle(.glassProminent)
                 .tint(Theme.accent)
-                .disabled(unavailable != nil || ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isStarting)
+                .disabled(unavailable != nil || ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isBusy)
                 .help(unavailable ?? "")
             }
         }
@@ -166,6 +168,7 @@ struct ProbeBrowserWindow: View {
         return WebView(page)
             .webViewBackForwardNavigationGestures(.enabled)
             .webViewMagnificationGestures(.enabled)
+            .allowsHitTesting(!web.isStopping)
             .modifier(ProbeWebViewMount(view: .window))
             .onGeometryChange(for: CGSize.self, of: \.size) { viewport = $0 }
             .frame(maxWidth: iphone ? screen.width : .infinity, maxHeight: iphone ? screen.height : .infinity)

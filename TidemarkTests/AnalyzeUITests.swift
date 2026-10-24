@@ -363,12 +363,77 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         try await Self.waitUntil { session.host == .inline }
     }
 
+    /// The probe controller clears `running` before it saves a stopped session; until `stop()` returns, a new
+    /// probe must not start, or the old `stop()` would tear the new page down.
+    @Test func refusesToStartWhileTheLastProbeIsStillStopping() async throws {
+        let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: "tidemark-tests-\(UUID().uuidString)")!))
+        let actions = SlowStopProbeActions(model: model)
+        model.probeActions = actions
+        model.probe.running = ProbeSession(id: UUID(), deviceID: model.preferences.thisDeviceID, url: "https://example.com", host: "example.com",
+                                           mode: .desktop, startedAt: .now, endedAt: nil, steps: [], hosts: [])
+        let session = ProbeWebSession()
+        session.urlDraft = "https://example.com"
+
+        let stopping = Task { await session.stop(model: model) }
+        try await Self.waitUntil { actions.stopCalls == 1 }
+        #expect(session.isStopping && session.isBusy)
+        #expect(!model.probe.isRunning, "the controller already cleared the running probe")
+
+        try await session.start(model: model)
+        #expect(actions.startCalls == 0, "Start is refused while the stop is saving")
+        await session.stop(model: model)
+        #expect(actions.stopCalls == 1, "a second Stop is ignored")
+
+        actions.finishStop()
+        await stopping.value
+        #expect(!session.isStopping && !session.isBusy)
+        #expect(session.page == nil && session.port == nil)
+    }
+
     private static func waitUntil(_ condition: @MainActor () -> Bool) async throws {
         for _ in 0..<100 where !condition() {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(condition())
     }
+}
+
+/// Probe actions whose `stopProbe()` clears the running probe and then waits (like the controller's grace
+/// period and save) until the test lets it finish.
+@MainActor
+private final class SlowStopProbeActions: ProbeActions {
+    let model: AppModel
+    private(set) var startCalls = 0
+    private(set) var stopCalls = 0
+    private var release: CheckedContinuation<Void, Never>?
+
+    init(model: AppModel) {
+        self.model = model
+    }
+
+    func startProbe(url: String, mode: ProbeDeviceMode, tail: Bool) async throws -> UInt16 {
+        startCalls += 1
+        throw CancellationError()
+    }
+
+    func recordStep(label: String, url: String?) {}
+    func pageDidFinishLoading() {}
+
+    func stopProbe() async -> ProbeSession? {
+        stopCalls += 1
+        guard var session = model.probe.running else { return nil }
+        model.probe.running = nil
+        await withCheckedContinuation { release = $0 }
+        session.endedAt = .now
+        return session
+    }
+
+    func finishStop() {
+        release?.resume()
+        release = nil
+    }
+
+    func deleteProbe(_ id: UUID) async {}
 }
 
 @Suite @MainActor struct InventoryGroupTests {

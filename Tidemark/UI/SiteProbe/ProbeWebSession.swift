@@ -1,6 +1,7 @@
 import AppKit
 import Network
 import Observation
+import os
 import SwiftUI
 import WebKit
 
@@ -39,6 +40,11 @@ final class ProbeWebSession {
     private(set) var port: UInt16?
     private(set) var mode: ProbeDeviceMode = .desktop
     private(set) var isStarting = false
+    /// Stop was pressed and the probe is still finishing: waiting for the tail after the first load,
+    /// letting the last Surge records arrive and saving the session. A new probe can't start meanwhile.
+    private(set) var isStopping = false
+    /// Start Probe, Stop and New Probe are unavailable while a probe starts or stops.
+    var isBusy: Bool { isStarting || isStopping }
     /// The first page load finished (or failed); later navigations count as clicks.
     private(set) var firstLoadFinished = false
     /// Why the last navigation failed, shown in the status line.
@@ -59,6 +65,8 @@ final class ProbeWebSession {
     @ObservationIgnored private var mounted: Set<Host> = []
     @ObservationIgnored private var moveTask: Task<Void, Never>?
 
+    private static let log = Logger(subsystem: "io.tidemark.Tidemark", category: "probe-browser")
+
     /// Data store shared by non-isolated probes, so cookies and caches carry over between them.
     private static let sharedStoreID = UUID(uuidString: "6A0F6E52-6C0B-4C55-9F57-7D1E3C2B9A41")!
 
@@ -69,7 +77,9 @@ final class ProbeWebSession {
     /// The page is shown in the pop-out window when `inWindow` is true; by default when "Open in its own
     /// window" is on or the window is already open. The caller opens the window.
     func start(model: AppModel, inWindow: Bool? = nil) async throws {
-        guard !isStarting, !model.probe.isRunning else { return }
+        // The probe controller clears `running` before it saves the stopped session, so `isStopping` is what
+        // keeps a new probe from starting while the old `stop()` can still tear the browser down.
+        guard !isBusy, !model.probe.isRunning else { return }
         if let reason = Self.unavailableReason(remoteSurge: model.preferences.surgeRemote) {
             throw ProbeWebError(errorDescription: reason)
         }
@@ -110,12 +120,21 @@ final class ProbeWebSession {
     }
 
     /// Stops recording; keeps a snapshot of the last page for the "session ended" view.
+    ///
+    /// Stopping can take a while (the rest of the tail after the first load, the grace for Surge's last
+    /// records, saving to PostgreSQL); `isStopping` is set throughout and further presses are ignored. Only
+    /// the page this call stopped is torn down.
     func stop(model: AppModel) async {
+        guard !isStopping else { return }
+        isStopping = true
+        defer { isStopping = false }
+        let stoppingPage = page
         let sessionID = runningSessionID ?? model.probe.running?.id
-        if let page, let sessionID, let image = await Self.snapshot(of: page, mode: mode) {
+        if let stoppingPage, let sessionID, let image = await Self.snapshot(of: stoppingPage, mode: mode) {
             endedSnapshot = ProbeEndedSnapshot(sessionID: sessionID, image: image, mode: mode)
         }
         let saved = await model.probeActions.stopProbe()
+        guard page === stoppingPage else { return }
         if let saved, endedSnapshot?.sessionID != saved.id, let snapshot = endedSnapshot {
             endedSnapshot = ProbeEndedSnapshot(sessionID: saved.id, image: snapshot.image, mode: snapshot.mode)
         }
@@ -127,7 +146,7 @@ final class ProbeWebSession {
         model.preferences.probeMode = newMode
         guard newMode != mode else { return }
         mode = newMode
-        guard let page, model.probe.isRunning else { return }
+        guard let page, model.probe.isRunning, !isStopping else { return }
         page.customUserAgent = Self.userAgent(for: newMode)
         model.probeActions.recordStep(label: newMode == .iphone ? "Switched to iPhone" : "Switched to desktop",
                                       url: page.url?.absoluteString)
@@ -145,17 +164,17 @@ final class ProbeWebSession {
     }
 
     func goBack() {
-        guard let page, let item = page.backForwardList.backList.last else { return }
+        guard !isStopping, let page, let item = page.backForwardList.backList.last else { return }
         load(page, item: item)
     }
 
     func goForward() {
-        guard let page, let item = page.backForwardList.forwardList.first else { return }
+        guard !isStopping, let page, let item = page.backForwardList.forwardList.first else { return }
         load(page, item: item)
     }
 
-    var canGoBack: Bool { !(page?.backForwardList.backList.isEmpty ?? true) }
-    var canGoForward: Bool { !(page?.backForwardList.forwardList.isEmpty ?? true) }
+    var canGoBack: Bool { !isStopping && !(page?.backForwardList.backList.isEmpty ?? true) }
+    var canGoForward: Bool { !isStopping && !(page?.backForwardList.forwardList.isEmpty ?? true) }
 
     /// Snapshot of `sessionID`'s page, if it was the last probe stopped in this run of the app.
     func snapshot(for sessionID: UUID) -> ProbeEndedSnapshot? {
@@ -210,10 +229,17 @@ final class ProbeWebSession {
         host = nil
         moveTask = Task { [weak self] in
             // Up to a second for the old view to go away (a closing window tears its views down late),
-            // then one more beat so WebKit has released the page.
+            // then one more beat so WebKit has released the page. The views drop their `WebView` in the
+            // SwiftUI update right after `host` became nil, so the cap is only reached when a view
+            // registered without reporting its disappearance; nothing is bound to the page then.
             for _ in 0..<40 {
                 guard let self, !self.mounted.isEmpty else { break }
                 try? await Task.sleep(for: .milliseconds(25))
+            }
+            if let self, !self.mounted.isEmpty {
+                let views = self.mounted.map { "\($0)" }.sorted().joined(separator: ",")
+                let destination = "\(self.hostTarget)"
+                Self.log.notice("Probe page handed to \(destination, privacy: .public) while still registered in \(views, privacy: .public)")
             }
             try? await Task.sleep(for: .milliseconds(60))
             guard !Task.isCancelled, let self else { return }
