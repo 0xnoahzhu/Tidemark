@@ -28,6 +28,8 @@ struct FoundationTests {
         let geo = GeoInfo(countryCode: "us", asn: 13335, organization: "Cloudflare, Inc.")
         #expect(geo.display == "US · AS13335 Cloudflare")
         #expect(GeoInfo.shortOrganization("Amazon.com, Inc.") == "Amazon")
+        #expect(GeoInfo.shortOrganization("Anthropic, PBC") == "Anthropic")
+        #expect(GeoInfo.shortOrganization("Tencent Building, Kejizhongyi Avenue") == "Tencent Building")
     }
 
     @Test func parsesSurgeNotes() throws {
@@ -41,5 +43,24 @@ struct FoundationTests {
         #expect(Fmt.bytes(512) == "512 B")
         #expect(Fmt.bytes(15_770) == "15.4 KB")
         #expect(Fmt.bytes(1_258_291) == "1.2 MB")
+    }
+}
+
+@MainActor
+struct LiveStateOrderTests {
+    private func record(_ id: Int64, _ startedAt: Date) -> RequestRecord {
+        RequestRecord(key: RequestKey(deviceID: UUID(), session: 1, surgeID: id), rowID: nil, startedAt: startedAt,
+                      setupCompletedAt: nil, completedAt: nil, method: "HTTPS", host: "example.com", port: 443, url: nil,
+                      remoteIP: nil, remoteAddress: nil, geo: nil, policyPath: [], rule: nil, state: .active,
+                      inBytes: 0, outBytes: 0, pid: nil, processPath: nil, bundlePath: nil, chain: [], appID: nil,
+                      localAddress: nil, interface: nil, notes: [], isNew: false, writtenAt: nil, probeSessionID: nil)
+    }
+
+    @Test func keepsRowsNewestFirstWhenOlderRowsArriveLate() {
+        let live = LiveState()
+        let now = Date.now
+        live.upsert([record(1, now), record(2, now.addingTimeInterval(-10))])
+        live.upsert([record(3, now.addingTimeInterval(-5)), record(4, now.addingTimeInterval(5))])
+        #expect(live.rows.map(\.key.surgeID) == [4, 1, 3, 2])
     }
 }

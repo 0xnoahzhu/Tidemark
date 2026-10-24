@@ -106,10 +106,15 @@ extension PostgresDatabase {
         try await execute("UPDATE alerts SET read_at = now() WHERE id = ANY(\(ids)) AND read_at IS NULL")
     }
 
-    func markAllAlertsRead(appID: AppID?) async throws {
-        if let appID {
-            try await execute("UPDATE alerts SET read_at = now() WHERE read_at IS NULL AND app_id = \(appID)")
-        } else {
+    func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws {
+        switch (appID, scope.deviceID) {
+        case let (app?, device?):
+            try await execute("UPDATE alerts SET read_at = now() WHERE read_at IS NULL AND app_id = \(app) AND device_id = \(device)")
+        case let (app?, nil):
+            try await execute("UPDATE alerts SET read_at = now() WHERE read_at IS NULL AND app_id = \(app)")
+        case let (nil, device?):
+            try await execute("UPDATE alerts SET read_at = now() WHERE read_at IS NULL AND device_id = \(device)")
+        case (nil, nil):
             try await execute("UPDATE alerts SET read_at = now() WHERE read_at IS NULL")
         }
     }

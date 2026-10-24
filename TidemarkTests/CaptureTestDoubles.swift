@@ -256,7 +256,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func distinctPolicies(since: Date?) async throws -> [String] { [] }
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64 { Int64(rows.count) }
     func estimatedRequestCount() async throws -> Int64 { Int64(rows.count) }
-    func deleteRequests(olderThan: Date) async throws -> Int64 { 0 }
+    func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64 { 0 }
 
     func upsertProcessChain(deviceID: DeviceID, chain: [ProcessLink], appID: AppID?) async throws -> Int64? {
         try check()
@@ -299,7 +299,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func alerts(after id: Int64, excluding: DeviceID?) async throws -> [AlertItem] { [] }
     func unreadAlertCount(scope: DeviceScope) async throws -> Int { alertsInserted.filter(\.isUnread).count }
     func markAlertsRead(_ ids: [Int64]) async throws {}
-    func markAllAlertsRead(appID: AppID?) async throws {}
+    func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws {}
     func deleteAlert(_ id: Int64) async throws { alertsInserted.removeAll { $0.id == id } }
     func mutes() async throws -> [String] { mutesList }
     func addMute(_ pattern: String) async throws { mutesList.append(pattern) }

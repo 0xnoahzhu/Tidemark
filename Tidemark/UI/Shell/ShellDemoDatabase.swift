@@ -93,7 +93,7 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func requestsWritten(after cursor: Date, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] {
         try await base.requestsWritten(after: cursor, excluding: excluding, limit: limit)
     }
-    func deleteRequests(olderThan: Date) async throws -> Int64 { try await base.deleteRequests(olderThan: olderThan) }
+    func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64 { try await base.deleteRequests(olderThan: olderThan, deviceID: deviceID) }
     func upsertProcessChain(deviceID: DeviceID, chain: [ProcessLink], appID: AppID?) async throws -> Int64? {
         try await base.upsertProcessChain(deviceID: deviceID, chain: chain, appID: appID)
     }
@@ -115,7 +115,7 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func alerts(after id: Int64, excluding: DeviceID?) async throws -> [AlertItem] { try await base.alerts(after: id, excluding: excluding) }
     func unreadAlertCount(scope: DeviceScope) async throws -> Int { try await base.unreadAlertCount(scope: scope) }
     func markAlertsRead(_ ids: [Int64]) async throws { try await base.markAlertsRead(ids) }
-    func markAllAlertsRead(appID: AppID?) async throws { try await base.markAllAlertsRead(appID: appID) }
+    func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws { try await base.markAllAlertsRead(appID: appID, scope: scope) }
     func deleteAlert(_ id: Int64) async throws { try await base.deleteAlert(id) }
     func mutes() async throws -> [String] { try await base.mutes() }
     func addMute(_ pattern: String) async throws { try await base.addMute(pattern) }

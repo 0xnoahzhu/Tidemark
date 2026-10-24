@@ -62,7 +62,7 @@ struct InsightTestDatabase: TidemarkDatabase {
     func distinctPolicies(since: Date?) async throws -> [String] { [] }
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64 { 0 }
     func estimatedRequestCount() async throws -> Int64 { 0 }
-    func deleteRequests(olderThan: Date) async throws -> Int64 { 0 }
+    func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64 { 0 }
 
     func upsertProcessChain(deviceID: DeviceID, chain: [ProcessLink], appID: AppID?) async throws -> Int64? { nil }
     func processTree(appID: AppID, scope: DeviceScope) async throws -> [ProcessNode] { [] }
@@ -82,7 +82,7 @@ struct InsightTestDatabase: TidemarkDatabase {
     func alerts(after id: Int64, excluding: DeviceID?) async throws -> [AlertItem] { [] }
     func unreadAlertCount(scope: DeviceScope) async throws -> Int { 0 }
     func markAlertsRead(_ ids: [Int64]) async throws {}
-    func markAllAlertsRead(appID: AppID?) async throws {}
+    func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws {}
     func deleteAlert(_ id: Int64) async throws {}
     func mutes() async throws -> [String] { [] }
     func addMute(_ pattern: String) async throws {}

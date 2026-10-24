@@ -17,6 +17,7 @@ struct PolicyChip: View {
             .foregroundStyle(tint.foreground)
             .frame(maxWidth: maxWidth, alignment: .leading)
             .fixedSize(horizontal: maxWidth == nil, vertical: true)
+            .help(policyPath.joined(separator: " › "))
     }
 }
 

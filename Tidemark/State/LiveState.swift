@@ -38,7 +38,9 @@ final class LiveState {
     var serverVersion: String = ""
     var lastWriteAt: Date?
 
-    /// Inserts or replaces rows (matched by key), keeping newest first and trimming to `rowLimit`.
+    /// Inserts or replaces rows (matched by key), keeping them ordered newest first by start time and
+    /// trimming to `rowLimit`. Rows that started earlier than the newest one (long-lived connections,
+    /// other Macs' rows arriving late) are placed at their position instead of on top.
     func upsert(_ incoming: [RequestRecord]) {
         guard !incoming.isEmpty else { return }
         var index: [RequestKey: Int] = [:]
@@ -47,10 +49,17 @@ final class LiveState {
         for r in incoming {
             if let i = index[r.key] { rows[i] = r } else { fresh.append(r) }
         }
-        if !fresh.isEmpty {
-            rows.insert(contentsOf: fresh.sorted { $0.startedAt > $1.startedAt }, at: 0)
-            if rows.count > rowLimit { rows.removeLast(rows.count - rowLimit) }
+        guard !fresh.isEmpty else { return }
+        for record in fresh.sorted(by: { $0.startedAt > $1.startedAt }) {
+            // First position whose row started before `record` (rows are newest first).
+            var low = 0, high = rows.count
+            while low < high {
+                let mid = (low + high) / 2
+                if rows[mid].startedAt >= record.startedAt { low = mid + 1 } else { high = mid }
+            }
+            rows.insert(record, at: low)
         }
+        if rows.count > rowLimit { rows.removeLast(rows.count - rowLimit) }
     }
 
     func clear() { rows.removeAll() }

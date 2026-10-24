@@ -131,7 +131,14 @@ protocol TidemarkDatabase: Sendable {
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64
     /// Fast estimate of the total row count (`pg_class.reltuples` refined by exact counts when small).
     func estimatedRequestCount() async throws -> Int64
-    func deleteRequests(olderThan: Date) async throws -> Int64
+    /// Deletes requests that started before `olderThan`, only `deviceID`'s rows when given (each Mac applies
+    /// its own retention setting to its own history), every Mac's rows when nil.
+    func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64
+    /// Upserts like `upsertRequests` and also reports how many rows were inserted rather than updated.
+    func upsertRequestsCountingInserts(_ rows: [RequestRecord]) async throws -> RequestUpsertResult
+    /// Marks `deviceID`'s rows that are still `active` from Surge sessions before `session` as completed at
+    /// `date`: Surge restarted, so they will never be updated again. Returns the rows changed.
+    func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64
 
     // Processes
     /// Upserts by `(device_id, pid, start_time)`; links parents in chain order. Returns the leaf row ID.
@@ -160,7 +167,8 @@ protocol TidemarkDatabase: Sendable {
     func alerts(after id: Int64, excluding: DeviceID?) async throws -> [AlertItem]
     func unreadAlertCount(scope: DeviceScope) async throws -> Int
     func markAlertsRead(_ ids: [Int64]) async throws
-    func markAllAlertsRead(appID: AppID?) async throws
+    /// Marks every unread alert read, limited to `appID` when given and to the scope's Mac.
+    func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws
     func deleteAlert(_ id: Int64) async throws
     func mutes() async throws -> [String]
     func addMute(_ pattern: String) async throws
@@ -182,6 +190,23 @@ protocol TidemarkDatabase: Sendable {
     func egressChanges(deviceID: DeviceID, limit: Int) async throws -> [EgressChange]
 }
 
+/// Result of `upsertRequestsCountingInserts`.
+struct RequestUpsertResult: Sendable {
+    var ids: [RequestKey: Int64]
+    /// Rows that did not exist before (updates of known rows are not counted).
+    var inserted: Int
+}
+
+extension TidemarkDatabase {
+    /// Default for test doubles: every written row counts as inserted.
+    func upsertRequestsCountingInserts(_ rows: [RequestRecord]) async throws -> RequestUpsertResult {
+        let ids = try await upsertRequests(rows)
+        return RequestUpsertResult(ids: ids, inserted: ids.count)
+    }
+
+    func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64 { 0 }
+}
+
 /// One `(host or IP, source)` observation for the global inventory (`host_sources`).
 struct HostSourceTouch: Hashable, Sendable {
     var kind: HostKind
@@ -197,10 +222,15 @@ struct HostSourceTouch: Hashable, Sendable {
     var geo: GeoInfo?
 }
 
+/// Database failures, classified by whether retrying the same work can succeed.
 enum DatabaseError: Error, Sendable, Equatable, LocalizedError {
     case notConfigured
     case invalidURL(String)
+    /// The server cannot do the work right now (connection lost, timeout, shutting down, out of
+    /// connections or disk, read-only, serialization failure…). Retry later; keep the data.
     case unreachable(String)
+    /// The statement itself was rejected (bad data, constraint or foreign-key violation). Retrying the same
+    /// rows fails again.
     case query(String)
 
     var errorDescription: String? {

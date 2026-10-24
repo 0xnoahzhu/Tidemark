@@ -62,16 +62,14 @@ enum Theme {
         )
     }
 
-    /// Hue of a policy chip: DIRECT green, REJECT red, otherwise a stable hue per policy group.
+    /// Hue of a policy chip, as in the design: DIRECT green, REJECT red, AI groups purple, other proxies blue.
     static func policyHue(_ policyPath: [String]) -> Double {
         guard let first = policyPath.first else { return 240 }
         let upper = first.uppercased()
         if upper == "DIRECT" { return 150 }
         if upper.hasPrefix("REJECT") { return 27 }
-        let palette: [Double] = [240, 295, 200, 330, 265, 175]
-        var hash: UInt32 = 2166136261
-        for b in first.utf8 { hash = (hash ^ UInt32(b)) &* 16777619 }
-        return palette[Int(hash % UInt32(palette.count))]
+        if upper.hasPrefix("AI") { return 295 }
+        return 240
     }
 
     /// Fill of an app tile with the given hue (`oklch(0.6 0.15 h)`), or neutral grey.

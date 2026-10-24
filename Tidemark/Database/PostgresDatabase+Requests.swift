@@ -329,11 +329,13 @@ extension PostgresDatabase {
             return Histogram(start: end, end: end, counts: Array(repeating: 0, count: buckets))
         }
 
-        var sql = SQL("SELECT LEAST(width_bucket(extract(epoch FROM r.started_at)::float8, ")
+        // Clamped to 1…buckets: the row that defines `start` can land just below it after the round trip
+        // through `Date` (float rounding), and `width_bucket` would then report bucket 0.
+        var sql = SQL("SELECT GREATEST(LEAST(width_bucket(extract(epoch FROM r.started_at)::float8, ")
         let low = sql.bind(start.timeIntervalSince1970)
         let high = sql.bind(end.timeIntervalSince1970)
         let count = sql.bind(buckets)
-        sql.append("\(low)::float8, \(high)::float8, \(count)::int4), \(count)::int4) AS bucket, count(*) AS n FROM requests r")
+        sql.append("\(low)::float8, \(high)::float8, \(count)::int4), \(count)::int4), 1) AS bucket, count(*) AS n FROM requests r")
         Self.appendFilters(query, lowerBound: start, to: &sql)
         sql.append(" GROUP BY bucket")
 
@@ -387,16 +389,18 @@ extension PostgresDatabase {
         return try await rows("SELECT count(*) AS n FROM requests").first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
     }
 
-    /// Deletes requests that started before `olderThan` in batches of 10,000 (each its own
-    /// transaction, so retention never holds long locks) and lowers each device's `row_count`.
-    func deleteRequests(olderThan: Date) async throws -> Int64 {
+    /// Deletes requests that started before `olderThan` (only `deviceID`'s when given) in batches of 10,000
+    /// (each its own transaction, so retention never holds long locks) and lowers each device's `row_count`.
+    func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64 {
         let batchSize = 10_000
         var total: Int64 = 0
         while true {
             try Task.checkCancellation()
             let deleted = try await rows("""
                 WITH doomed AS (
-                    SELECT id FROM requests WHERE started_at < \(olderThan) ORDER BY started_at LIMIT \(batchSize)
+                    SELECT id FROM requests
+                    WHERE started_at < \(olderThan) AND (\(deviceID)::uuid IS NULL OR device_id = \(deviceID)::uuid)
+                    ORDER BY started_at LIMIT \(batchSize)
                 ), gone AS (
                     DELETE FROM requests r USING doomed WHERE r.id = doomed.id RETURNING r.device_id
                 ), counts AS (

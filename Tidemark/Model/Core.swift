@@ -40,8 +40,9 @@ struct GeoInfo: Codable, Hashable, Sendable {
 
     /// Trims legal suffixes so `Cloudflare, Inc.` reads as `Cloudflare`.
     static func shortOrganization(_ name: String) -> String {
-        var s = name
-        for suffix in [", Inc.", ", Inc", " Inc.", " Inc", ", LLC", " LLC", " Ltd.", " Ltd", ", Ltd.", " Co., Ltd.", " Corporation", " Corp.", " GmbH", " S.A.", " SRL", " B.V."] where s.hasSuffix(suffix) {
+        // ASN names may carry a legal form or an address after a comma: `Anthropic, PBC`, `Tencent Building, …`.
+        var s = name.components(separatedBy: ", ").first ?? name
+        for suffix in [" Inc.", " Inc", " LLC", " Ltd.", " Ltd", " Co.,Ltd.", " Co., Ltd", " Limited", " Corporation", " Corp.", " GmbH", " S.A.", " SRL", " B.V.", " PBC"] where s.hasSuffix(suffix) {
             s = String(s.dropLast(suffix.count))
         }
         // `Amazon.com, Inc.` → `Amazon`

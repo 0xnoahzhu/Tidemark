@@ -154,7 +154,7 @@ extension CaptureEngine: CaptureActions {
             model.alerts.items[index].readAt = now
         }
         do {
-            try await database.markAllAlertsRead(appID: appID)
+            try await database.markAllAlertsRead(appID: appID, scope: model.devices.scope)
             model.alerts.unreadCount = try await database.unreadAlertCount(scope: model.devices.scope)
         } catch {
             if appID == nil { model.alerts.unreadCount = 0 }

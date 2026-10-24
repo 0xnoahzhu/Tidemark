@@ -628,7 +628,7 @@ final class CaptureEngine {
         let days = model.preferences.retentionDays
         guard databaseReady, days > 0 else { return }
         let cutoff = Date.now.addingTimeInterval(-Double(days) * 86_400)
-        if let deleted = try? await database.deleteRequests(olderThan: cutoff), deleted > 0 {
+        if let deleted = try? await database.deleteRequests(olderThan: cutoff, deviceID: recordingDeviceID), deleted > 0 {
             Self.log.info("Retention removed \(deleted) requests")
             await refreshTotal()
         }

@@ -41,6 +41,15 @@ struct RequestQuery: Hashable, Sendable {
     var search: String = ""
     var limit: Int = 500
     var offset: Int = 0
+    /// Keyset paging: only rows older than this cursor (newest-first order); used instead of `offset`
+    /// when paging through a table that keeps growing (CSV export).
+    var before: RequestCursor? = nil
+}
+
+/// Position in the newest-first request order: `(started_at, id)`.
+struct RequestCursor: Hashable, Sendable {
+    var startedAt: Date
+    var rowID: Int64
 }
 
 /// A page of request rows with the total match count and query timing.
