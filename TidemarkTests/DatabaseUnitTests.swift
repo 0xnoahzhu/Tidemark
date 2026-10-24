@@ -122,8 +122,35 @@ struct DatabaseUnitTests {
         for limits in [main, writer] {
             #expect(Set(limits.keys) == ["statement_timeout", "lock_timeout", "idle_in_transaction_session_timeout"])
         }
-        #expect(writer["lock_timeout"] == "5s")
+        #expect(main == ["statement_timeout": "30s", "lock_timeout": "10s", "idle_in_transaction_session_timeout": "60s"])
+        #expect(writer == ["statement_timeout": "15s", "lock_timeout": "5s", "idle_in_transaction_session_timeout": "15s"])
+        // The server cancels a write before capture gives up on it (20 s per write).
+        #expect(PostgresDatabase.SessionLimits.writer.statement < .seconds(20))
+        #expect(PostgresDatabase.sessionCloseTimeout < .seconds(20))
         #expect(PostgresDatabase.mainPoolSize + PostgresDatabase.writerPoolSize == 8)
+    }
+
+    @Test func formatsDurationsForTheServerAndForMessages() {
+        #expect(PostgresDatabase.setting(.seconds(600)) == "600s")
+        #expect(PostgresDatabase.setting(.milliseconds(50)) == "50ms")
+        #expect(PostgresDatabase.setting(.milliseconds(1_500)) == "1500ms")
+        #expect(PostgresDatabase.spoken(.milliseconds(50)) == "50 ms")
+        #expect(PostgresDatabase.spoken(.seconds(30)) == "30 s")
+        #expect(PostgresDatabase.spoken(.seconds(300)) == "5 min")
+        #expect(PostgresDatabase.timedOutMessage(.seconds(300)) == "Query timed out: the server cancelled it after 5 min (statement timeout).")
+        #expect(PostgresDatabase.timedOutMessage(nil).hasPrefix("Query timed out"))
+    }
+
+    @Test func callLimitsLeaveTheServerTimeToAnswerFirst() {
+        typealias Limit = PostgresDatabase.CallLimit
+        #expect(Limit.pool.duration(on: .writer) == .seconds(35))
+        #expect(Limit.pool.duration(on: .main) == .seconds(65))
+        #expect(Limit.statement(.seconds(300)).duration(on: .main) == .seconds(605))
+        #expect(Limit.client(.seconds(2)).duration(on: .writer) == .seconds(2))
+        #expect(Limit.unbounded.duration(on: .main) == nil)
+        #expect(Limit.pool.statementTimeout(on: .writer) == .seconds(15))
+        #expect(Limit.statement(.seconds(300)).statementTimeout(on: .main) == .seconds(300))
+        #expect(Limit.unbounded.statementTimeout(on: .main) == nil)
     }
 
     @Test func invalidURLSurfacesOnConnect() async {

@@ -151,7 +151,7 @@ extension PostgresDatabase {
                    (SELECT count(DISTINCT COALESCE(p.path, p.name)) FROM processes p WHERE p.app_id = \(app)\(device.map { " AND p.device_id = \($0)" } ?? "")) AS processes
             FROM h
             """)
-        guard let row = try await rows(sql.query).first else { return AppStats() }
+        guard let row = try await rows(sql.query, statementTimeout: Self.longReadTimeout).first else { return AppStats() }
         let read = PostgresRowReader(row)
         return AppStats(
             domains: try read("domains", as: Int.self),
@@ -183,7 +183,7 @@ extension PostgresDatabase {
         let match = Self.bundleMatch(bundlePath)
         return try await rows("""
             SELECT count(*) AS n FROM requests r WHERE r.bundle_path = ANY(\(match.paths)) OR r.process_path LIKE \(match.pattern)
-            """).first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
+            """, statementTimeout: Self.longReadTimeout).first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
     }
 
     /// Attributes unattributed requests, processes and host sources inside `bundlePath` to the app, then
@@ -202,7 +202,7 @@ extension PostgresDatabase {
         let bounds = try await rows("""
             SELECT min(r.id) AS low, max(r.id) AS high FROM requests r
             WHERE r.app_id IS NULL AND (r.bundle_path = ANY(\(match.paths)) OR r.process_path LIKE \(match.pattern))
-            """).first.map { row in
+            """, statementTimeout: Self.maintenanceTimeout).first.map { row in
             let read = PostgresRowReader(row)
             return (low: try read("low", as: Int64?.self), high: try read("high", as: Int64?.self))
         }
@@ -433,7 +433,7 @@ extension PostgresDatabase {
             var firstSeen: Date
         }
         var entries: [Entry] = []
-        for row in try await rows(sql.query) {
+        for row in try await rows(sql.query, statementTimeout: Self.longReadTimeout) {
             let read = PostgresRowReader(row)
             let lineage = try read("lineage", as: [String].self)
             entries.append(Entry(

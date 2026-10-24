@@ -53,28 +53,76 @@ struct DatabaseLiveTests {
             for _ in 0..<PostgresDatabase.mainPoolSize {
                 #expect(try await settings(on: .main) == ["30s", "10s", "1min", "Tidemark"])
             }
-            #expect(try await settings(on: .writer) == ["1min", "5s", "30s", "Tidemark writer"])
+            #expect(try await settings(on: .writer) == ["15s", "5s", "15s", "Tidemark writer"])
 
             // A transaction can lift the statement timeout for itself only.
-            let lifted = try await db.withTransaction(statementTimeout: "10min") { connection in
+            let lifted = try await db.withTransaction(statementTimeout: PostgresDatabase.maintenanceTimeout) { connection in
                 try await connection.query("SHOW statement_timeout", logger: PostgresDatabase.logger).collect().first
                     .map { try $0.makeRandomAccess()[0].decode(String.self) }
             }
             #expect(lifted == "10min")
             #expect(try await settings(on: .main).first == "30s")
+            let longRead = try await db.rows("SHOW statement_timeout", statementTimeout: PostgresDatabase.longReadTimeout).first
+                .map { try $0.makeRandomAccess()[0].decode(String.self) }
+            #expect(longRead == "5min")
 
-            // A statement over its time limit is reported as unreachable (retry later), not as bad data.
+            // A statement over its time limit is reported as unreachable (retry later), not as bad data, and
+            // says that it timed out.
             do {
-                try await db.withTransaction(statementTimeout: "50ms") { connection in
+                try await db.withTransaction(statementTimeout: .milliseconds(50)) { connection in
                     _ = try await connection.query("SELECT pg_sleep(1)", logger: PostgresDatabase.logger).collect()
                 }
                 Issue.record("pg_sleep outlived its statement timeout")
             } catch let error as DatabaseError {
-                guard case .unreachable = error else {
+                guard case .unreachable(let message) = error else {
                     Issue.record("Expected .unreachable, got \(error)")
                     return
                 }
+                #expect(message == "Query timed out: the server cancelled it after 50 ms (statement timeout).")
             }
+        }
+    }
+
+    @Test func callsThatOutliveTheirLimitGiveTheirConnectionBack() async throws {
+        try await withTestDatabase { db in
+            // A server that stops answering: the call gives up after its client-side limit.
+            let clock = ContinuousClock()
+            let start = clock.now
+            do {
+                _ = try await db.withConnection(limit: .client(.milliseconds(300))) { connection in
+                    try await connection.query("SELECT pg_sleep(3)", logger: PostgresDatabase.logger).collect()
+                }
+                Issue.record("pg_sleep outlived the call limit")
+            } catch let error as DatabaseError {
+                guard case .unreachable(let message) = error else {
+                    Issue.record("Expected .unreachable, got \(error)")
+                    return
+                }
+                #expect(message.contains("No reply"), "\(message)")
+            }
+            #expect(start.duration(to: clock.now) < .seconds(2))
+
+            // Capture gave up on a write: the transaction rolls back and the writer connection is free at once.
+            let write = Task {
+                try await db.withTransaction(on: .writer) { connection in
+                    _ = try await connection.query("INSERT INTO mutes (pattern) VALUES ('abandoned.example')", logger: PostgresDatabase.logger).collect()
+                    _ = try await connection.query("SELECT pg_sleep(3)", logger: PostgresDatabase.logger).collect()
+                }
+            }
+            try await Task.sleep(for: .milliseconds(300))
+            let cancelledAt = clock.now
+            write.cancel()
+            do {
+                try await write.value
+                Issue.record("A cancelled writer transaction committed")
+            } catch {
+                #expect(error is CancellationError, "\(error)")
+            }
+            #expect(cancelledAt.duration(to: clock.now) < .seconds(1))
+            for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await db.ping() }
+            #expect(!(try await db.mutes()).contains("abandoned.example"))
+            try await Task.sleep(for: .seconds(3))
+            #expect(!(try await db.mutes()).contains("abandoned.example"))
         }
     }
 

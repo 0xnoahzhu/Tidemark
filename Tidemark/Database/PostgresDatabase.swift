@@ -15,7 +15,12 @@ import Synchronization
 /// Two pools: the capture write path (requests, processes, inventory, alerts) and `ping()` use a small
 /// `writer` pool the UI can never exhaust; UI reads and maintenance use the `main` pool. Every connection
 /// carries statement, lock and idle-in-transaction timeouts (`SessionLimits`), so a stuck query, a lock
-/// held by another Mac or a Mac that went to sleep mid-transaction cannot hang a pool for long.
+/// held by another Mac or a Mac that went to sleep mid-transaction cannot hang a pool for long. Reads that
+/// legitimately scan a long history run with a longer statement timeout (`longReadTimeout`), maintenance
+/// with `maintenanceTimeout`. On top of that, a call that holds its connection far beyond its statement
+/// timeout gets the connection closed (`CallLimit`), so a server that vanished without closing the TCP
+/// connection cannot keep a pool slot forever; a writer call whose task is cancelled (capture gave up on
+/// it) closes its connection at once, which also keeps its transaction from committing later.
 ///
 /// Every pooled connection runs with `search_path = <schema>, public`, so all SQL is written without a
 /// schema prefix and the same code serves production (`public`) and throwaway test schemas.
@@ -38,6 +43,8 @@ final class PostgresDatabase: TidemarkDatabase {
 
     private let setup: Result<Setup, DatabaseError>
     private let lifecycle = Mutex<Lifecycle>(.idle)
+    /// The background task applying index steps of migrations (`migrate()`), nil when none runs.
+    let indexMaintenance = Mutex<Task<Void, Never>?>(nil)
 
     /// The connection pool a call runs on.
     enum Pool: Sendable {
@@ -46,25 +53,96 @@ final class PostgresDatabase: TidemarkDatabase {
         /// The capture write path and `ping()`: connections reserved for writes, so a burst of slow
         /// History queries can never make a flush wait for a connection.
         case writer
+
+        var limits: SessionLimits {
+            switch self {
+            case .main: .main
+            case .writer: .writer
+            }
+        }
     }
 
     /// Per-connection limits, sent as startup parameters.
     struct SessionLimits: Sendable, Equatable {
         /// Longest a single statement may run (`statement_timeout`).
-        var statement: String
+        var statement: Duration
         /// Longest a statement waits for a lock held by another session (`lock_timeout`).
-        var lock: String
+        var lock: Duration
         /// Longest a session may sit idle inside an open transaction
         /// (`idle_in_transaction_session_timeout`); the server then ends the session and releases its
         /// locks, e.g. when a MacBook sleeps in the middle of a flush.
-        var idleInTransaction: String
+        var idleInTransaction: Duration
 
-        static let main = SessionLimits(statement: "30s", lock: "10s", idleInTransaction: "60s")
-        static let writer = SessionLimits(statement: "60s", lock: "5s", idleInTransaction: "30s")
+        static let main = SessionLimits(statement: .seconds(30), lock: .seconds(10), idleInTransaction: .seconds(60))
+        /// Below capture's 20 s bound per write (`CapturePipeline.writeTimeout`): the server cancels a
+        /// statement capture already gave up on instead of running it on one of the two writer connections.
+        static let writer = SessionLimits(statement: .seconds(15), lock: .seconds(5), idleInTransaction: .seconds(15))
 
         var parameters: [(String, String)] {
-            [("statement_timeout", statement), ("lock_timeout", lock), ("idle_in_transaction_session_timeout", idleInTransaction)]
+            [
+                ("statement_timeout", PostgresDatabase.setting(statement)),
+                ("lock_timeout", PostgresDatabase.setting(lock)),
+                ("idle_in_transaction_session_timeout", PostgresDatabase.setting(idleInTransaction)),
+            ]
         }
+    }
+
+    /// Statement timeout of reads that scan a long stretch of the request log: History over long ranges,
+    /// its histogram and totals, the policy list, an app's counters and process tree, the backfill preview.
+    static let longReadTimeout: Duration = .seconds(300)
+    /// Statement timeout of maintenance on large tables (retention, backfill, deleting an app).
+    static let maintenanceTimeout: Duration = .seconds(600)
+
+    /// How long a call may hold its leased connection before Tidemark stops waiting for the server, closes
+    /// the connection (the pool replaces it) and fails with `.unreachable`. The statement timeouts make the
+    /// server give up first; this only catches a server that can no longer answer, e.g. a TCP connection
+    /// left half-open while the Mac slept, which would otherwise keep its pool slot forever.
+    enum CallLimit: Sendable, Equatable {
+        /// Derived from the pool's statement timeout.
+        case pool
+        /// Derived from a statement timeout set for this call (`withTransaction(statementTimeout:)`).
+        case statement(Duration)
+        /// Exactly this long.
+        case client(Duration)
+        /// No limit: index builds, which may legitimately run for hours.
+        case unbounded
+
+        /// The client-side limit for `pool`, nil when unbounded. Generous (twice the statement timeout plus
+        /// a margin), because one call may run several statements.
+        func duration(on pool: Pool) -> Duration? {
+            switch self {
+            case .pool: Self.margin(pool.limits.statement)
+            case .statement(let timeout): Self.margin(timeout)
+            case .client(let limit): limit
+            case .unbounded: nil
+            }
+        }
+
+        /// The statement timeout the call runs with, for error messages.
+        func statementTimeout(on pool: Pool) -> Duration? {
+            switch self {
+            case .pool: pool.limits.statement
+            case .statement(let timeout): timeout
+            case .client, .unbounded: nil
+            }
+        }
+
+        private static func margin(_ statement: Duration) -> Duration { statement * 2 + .seconds(5) }
+    }
+
+    /// A duration as a PostgreSQL setting: whole seconds as `30s`, anything else in milliseconds.
+    static func setting(_ duration: Duration) -> String {
+        let (seconds, attoseconds) = duration.components
+        if attoseconds == 0 { return "\(seconds)s" }
+        return "\(seconds * 1_000 + attoseconds / 1_000_000_000_000_000)ms"
+    }
+
+    /// A duration for messages: `50 ms`, `30 s`, `5 min`.
+    static func spoken(_ duration: Duration) -> String {
+        let (seconds, attoseconds) = duration.components
+        if seconds == 0 { return "\(attoseconds / 1_000_000_000_000_000) ms" }
+        if seconds >= 120, seconds.isMultiple(of: 60) { return "\(seconds / 60) min" }
+        return "\(seconds) s"
     }
 
     /// Connections per pool; together they stay at the 8 connections per Mac Tidemark always used.
@@ -150,6 +228,7 @@ final class PostgresDatabase: TidemarkDatabase {
             if case .running(let task) = state { return task }
             return nil
         }
+        indexMaintenance.withLock { $0 }?.cancel()
         guard let task else { return }
         task.cancel()
         await withTaskCancellationShield {
@@ -195,13 +274,17 @@ final class PostgresDatabase: TidemarkDatabase {
         }
     }
 
-    /// The pool's client, once `connect()` started the pools.
-    private func runningClient(_ pool: Pool) throws -> PostgresClient {
-        let setup = try setup.get()
-        let isRunning = lifecycle.withLock { state in
+    /// Whether `connect()` started the pools and `shutdown()` has not stopped them.
+    var isRunning: Bool {
+        lifecycle.withLock { state in
             if case .running = state { return true }
             return false
         }
+    }
+
+    /// The pool's client, once `connect()` started the pools.
+    private func runningClient(_ pool: Pool) throws -> PostgresClient {
+        let setup = try setup.get()
         guard isRunning else { throw DatabaseError.unreachable("Not connected.") }
         switch pool {
         case .main: return setup.main
@@ -244,23 +327,33 @@ final class PostgresDatabase: TidemarkDatabase {
     }
 
     /// Leases a connection from `pool` for `body`. Fails with `.unreachable` when no connection becomes
-    /// available within `leaseTimeout`; once leased, `body` runs to completion. A connection handed over
-    /// after the timeout fired goes back unused: the caller was told the work failed, so it must not be
-    /// applied behind its back (a retry would apply it twice).
+    /// available within `leaseTimeout`. A connection handed over after the timeout fired goes back unused:
+    /// the caller was told the work failed, so it must not be applied behind its back (a retry would apply
+    /// it twice).
+    ///
+    /// Once leased, `body` runs until it finishes, or until `limit` passes: the connection is then closed
+    /// (the pool replaces it) and the call fails with `.unreachable`. On the writer pool, cancelling the
+    /// calling task closes the connection right away and throws `CancellationError`: the transaction rolls
+    /// back instead of committing after the caller gave up (capture keeps or spools that work and writes
+    /// it again). On the main pool a cancelled call's statement runs to completion first.
     func withConnection<Result: Sendable>(
         on pool: Pool = .main,
+        limit: CallLimit = .pool,
         _ body: @escaping @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
         let client = try runningClient(pool)
         let lease = LeaseState()
         let timeout = leaseTimeout
         let endpoint = self.endpoint
+        let clientLimit = limit.duration(on: pool)
+        let closesOnCancel = pool == .writer
         do {
             return try await withThrowingTaskGroup(of: LeaseOutcome<Result>.self) { group in
                 group.addTask(name: "PostgreSQL lease") {
                     try await client.withConnection { connection in
                         guard lease.claim() else { return LeaseOutcome.abandoned }
-                        return LeaseOutcome.finished(try await body(connection))
+                        let value = try await Self.run(body, on: connection, limit: clientLimit, closesOnCancel: closesOnCancel, endpoint: endpoint)
+                        return LeaseOutcome.finished(value)
                     }
                 }
                 group.addTask(name: "PostgreSQL lease timeout") {
@@ -277,22 +370,63 @@ final class PostgresDatabase: TidemarkDatabase {
                 throw CancellationError()
             }
         } catch {
-            throw Self.map(error, endpoint: endpoint)
+            throw Self.map(error, endpoint: endpoint, statementTimeout: limit.statementTimeout(on: pool))
+        }
+    }
+
+    /// Runs `body` on a leased connection, closing the connection when `limit` passes first or, with
+    /// `closesOnCancel`, when the task is cancelled.
+    private static func run<Result: Sendable>(
+        _ body: @escaping @Sendable (PostgresConnection) async throws -> Result,
+        on connection: PostgresConnection,
+        limit: Duration?,
+        closesOnCancel: Bool,
+        endpoint: PostgresConnectionURL?
+    ) async throws -> Result {
+        let watchdog = ConnectionWatchdog(connection)
+        let timer = limit.map { limit in
+            Task(name: "PostgreSQL call limit") {
+                do { try await Task.sleep(for: limit) } catch { return }
+                watchdog.close(.expired)
+            }
+        }
+        defer {
+            watchdog.disarm()
+            timer?.cancel()
+        }
+        do {
+            guard closesOnCancel else { return try await body(connection) }
+            return try await withTaskCancellationHandler {
+                try await body(connection)
+            } onCancel: {
+                watchdog.close(.cancelled)
+            }
+        } catch {
+            switch watchdog.reason {
+            case .expired:
+                let waited = limit.map(spoken) ?? "the limit"
+                throw DatabaseError.unreachable("No reply from \(endpoint?.redacted ?? "the server") within \(waited); the connection was closed.")
+            case .cancelled:
+                throw CancellationError()
+            case nil:
+                throw error
+            }
         }
     }
 
     /// Runs `body` inside `BEGIN … COMMIT` on one connection leased from `pool`; rolls back when it throws.
     /// A transaction chosen as a deadlock victim (or failing serialization) is retried up to two more
     /// times, so `body` must be safe to run again (all of ours rebuild their state inside the closure).
-    /// `statementTimeout` (e.g. `"10min"`) replaces the pool's limit for this transaction only, for
-    /// maintenance work on large tables.
+    /// `statementTimeout` replaces the pool's limit for this transaction only, for long reads and
+    /// maintenance on large tables (`longReadTimeout`, `maintenanceTimeout`).
     func withTransaction<Result: Sendable>(
         on pool: Pool = .main,
-        statementTimeout: String? = nil,
+        statementTimeout: Duration? = nil,
         _ body: @escaping @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
-        let setTimeout = statementTimeout.map { PostgresQuery(unsafeSQL: "SET LOCAL statement_timeout = '\($0)'") }
-        return try await withConnection(on: pool) { connection in
+        let setTimeout = statementTimeout.map { PostgresQuery(unsafeSQL: "SET LOCAL statement_timeout = '\(Self.setting($0))'") }
+        let limit: CallLimit = statementTimeout.map { .statement($0) } ?? .pool
+        return try await withConnection(on: pool, limit: limit) { connection in
             var attempt = 1
             while true {
                 try await connection.query("BEGIN", logger: Self.logger)
@@ -335,16 +469,22 @@ final class PostgresDatabase: TidemarkDatabase {
         }
     }
 
-    /// Runs a statement and returns its rows.
-    func rows(_ query: PostgresQuery, on pool: Pool = .main) async throws -> [PostgresRow] {
-        try await withConnection(on: pool) { connection in
+    /// Runs a statement and returns its rows. With `statementTimeout` it runs in a transaction of its own
+    /// with that limit instead of the pool's (`longReadTimeout` for reads over a long history).
+    func rows(_ query: PostgresQuery, on pool: Pool = .main, statementTimeout: Duration? = nil) async throws -> [PostgresRow] {
+        guard let statementTimeout else {
+            return try await withConnection(on: pool) { connection in
+                try await connection.query(query, logger: Self.logger).collect()
+            }
+        }
+        return try await withTransaction(on: pool, statementTimeout: statementTimeout) { connection in
             try await connection.query(query, logger: Self.logger).collect()
         }
     }
 
     /// Runs a statement and discards its result.
-    func execute(_ query: PostgresQuery, on pool: Pool = .main) async throws {
-        _ = try await rows(query, on: pool)
+    func execute(_ query: PostgresQuery, on pool: Pool = .main, statementTimeout: Duration? = nil) async throws {
+        _ = try await rows(query, on: pool, statementTimeout: statementTimeout)
     }
 
     // MARK: - Configuration
@@ -440,8 +580,10 @@ final class PostgresDatabase: TidemarkDatabase {
     ///
     /// `.query` is reserved for errors that retrying the same statement cannot fix (the server rejected
     /// the statement or its data, or a reply could not be decoded); everything else — including errors
-    /// of unknown origin — is `.unreachable`, so callers keep the data and retry later.
-    static func map(_ error: any Error, endpoint: PostgresConnectionURL? = nil) -> any Error {
+    /// of unknown origin — is `.unreachable`, so callers keep the data and retry later. A statement the
+    /// server cancelled at its `statementTimeout` says so in the message (`timedOutMessage`): the server
+    /// answered, the query was just too slow.
+    static func map(_ error: any Error, endpoint: PostgresConnectionURL? = nil, statementTimeout: Duration? = nil) -> any Error {
         switch error {
         case let error as DatabaseError:
             return error
@@ -450,8 +592,12 @@ final class PostgresDatabase: TidemarkDatabase {
         case let error as PSQLError:
             switch error.code {
             case .server:
+                let state = error.serverInfo?[.sqlState] ?? ""
+                if state == "57014", error.serverInfo?[.message]?.contains("statement timeout") == true {
+                    return DatabaseError.unreachable(timedOutMessage(statementTimeout))
+                }
                 let message = describe(error, endpoint: endpoint)
-                return isTransient(sqlState: error.serverInfo?[.sqlState] ?? "") ? DatabaseError.unreachable(message) : DatabaseError.query(message)
+                return isTransient(sqlState: state) ? DatabaseError.unreachable(message) : DatabaseError.query(message)
             case .queryCancelled:
                 return CancellationError()
             case .tooManyParameters:
@@ -473,6 +619,12 @@ final class PostgresDatabase: TidemarkDatabase {
             }
             return DatabaseError.unreachable(String(describing: error))
         }
+    }
+
+    /// The message of a statement the server cancelled at its statement timeout.
+    static func timedOutMessage(_ statementTimeout: Duration?) -> String {
+        guard let statementTimeout else { return "Query timed out: the server cancelled it at its statement timeout." }
+        return "Query timed out: the server cancelled it after \(spoken(statementTimeout)) (statement timeout)."
     }
 
     /// Whether a server error says nothing about the statement or its data, so the same work can succeed
@@ -609,4 +761,36 @@ private enum LeaseOutcome<Value: Sendable>: Sendable {
     case finished(Value)
     case leased
     case abandoned
+}
+
+/// Closes a leased connection when its call limit passes or its task is cancelled, but never after the
+/// call finished: by then the connection may already serve another call.
+private final class ConnectionWatchdog: Sendable {
+    enum Reason: UInt8 {
+        case expired = 1
+        case cancelled = 2
+    }
+
+    private static let armed: UInt8 = 0
+    private static let disarmed: UInt8 = 3
+
+    private let connection: PostgresConnection
+    private let state = Atomic<UInt8>(ConnectionWatchdog.armed)
+
+    init(_ connection: PostgresConnection) { self.connection = connection }
+
+    /// Why the connection was closed, nil when it was not.
+    var reason: Reason? { Reason(rawValue: state.load(ordering: .acquiring)) }
+
+    func close(_ reason: Reason) {
+        guard state.compareExchange(expected: Self.armed, desired: reason.rawValue, ordering: .acquiringAndReleasing).exchanged else { return }
+        // The future-returning close: this runs synchronously (in a cancellation handler or a timer task).
+        let closing: EventLoopFuture<Void> = connection.close()
+        closing.whenComplete { _ in }
+    }
+
+    /// The call finished; nothing closes the connection any more.
+    func disarm() {
+        _ = state.compareExchange(expected: Self.armed, desired: Self.disarmed, ordering: .acquiringAndReleasing)
+    }
 }

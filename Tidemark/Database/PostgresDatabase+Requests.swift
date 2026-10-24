@@ -133,8 +133,9 @@ extension PostgresDatabase {
         }
     }
 
-    /// Statement timeout of maintenance transactions on large tables (retention, backfill, deleting an app).
-    static let maintenanceTimeout = "10min"
+    /// Statement timeout of `closeActiveRequests` / `closeVanishedRequests`: below capture's 20 s bound per
+    /// write, so the server stops a statement capture gave up on.
+    static let sessionCloseTimeout: Duration = .seconds(15)
 
     private static func requestUpsertStatement(_ chunk: ArraySlice<RequestRecord>) throws -> PostgresQuery {
         let names = requestValueColumns.map(\.name)
@@ -350,7 +351,7 @@ extension PostgresDatabase {
         select.append(" ORDER BY r.started_at DESC, r.id DESC LIMIT \(select.bind(max(0, query.limit))) OFFSET \(select.bind(max(0, query.offset)))")
         let rowsQuery = select.query
 
-        async let page = rows(rowsQuery)
+        async let page = rows(rowsQuery, statementTimeout: Self.longReadTimeout)
         async let total = totalCount(for: query, window: window, searchApps: apps)
         let records = try await page.map(Self.decodeRequest)
         let count = try await total
@@ -376,7 +377,7 @@ extension PostgresDatabase {
         var count = SQL("SELECT count(*) AS n FROM (SELECT 1 FROM requests r")
         Self.appendFilters(query, window: window, searchApps: searchApps, includeCursor: false, to: &count)
         count.append(" LIMIT \(Self.exactCountCap + 1)) AS capped")
-        let exact = try await rows(count.query).first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
+        let exact = try await rows(count.query, statementTimeout: Self.longReadTimeout).first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
         guard exact > Self.exactCountCap else { return exact }
 
         var explain = SQL("EXPLAIN (FORMAT JSON) SELECT 1 FROM requests r")
@@ -411,7 +412,7 @@ extension PostgresDatabase {
         if window.lower == nil {
             var oldest = SQL("SELECT min(r.started_at) AS oldest FROM requests r")
             Self.appendFilters(query, window: window, searchApps: apps, includeCursor: false, to: &oldest)
-            window.lower = try await rows(oldest.query).first.flatMap { try PostgresRowReader($0)("oldest", as: Date?.self) }
+            window.lower = try await rows(oldest.query, statementTimeout: Self.longReadTimeout).first.flatMap { try PostgresRowReader($0)("oldest", as: Date?.self) }
         }
         guard let start = window.lower, start < end else {
             return Histogram(start: end, end: end, counts: Array(repeating: 0, count: buckets))
@@ -428,7 +429,7 @@ extension PostgresDatabase {
         sql.append(" GROUP BY bucket")
 
         var counts = Array(repeating: Int64(0), count: buckets)
-        for row in try await rows(sql.query) {
+        for row in try await rows(sql.query, statementTimeout: Self.longReadTimeout) {
             let read = PostgresRowReader(row)
             let bucket = try read("bucket", as: Int.self)
             if (1...buckets).contains(bucket) { counts[bucket - 1] += try read("n", as: Int64.self) }
@@ -453,7 +454,7 @@ extension PostgresDatabase {
         var sql = SQL("SELECT DISTINCT r.policy FROM requests r WHERE r.policy IS NOT NULL")
         if let since { sql.append(" AND r.started_at >= \(sql.bind(since))") }
         sql.append(" ORDER BY r.policy")
-        return try await rows(sql.query).map { try PostgresRowReader($0)("policy", as: String.self) }
+        return try await rows(sql.query, statementTimeout: Self.longReadTimeout).map { try PostgresRowReader($0)("policy", as: String.self) }
     }
 
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64 {

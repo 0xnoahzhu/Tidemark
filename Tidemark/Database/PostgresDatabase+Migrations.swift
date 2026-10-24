@@ -32,7 +32,8 @@ extension PostgresDatabase {
     func migrate(upTo target: Int?) async throws -> Int {
         let schema = schema
         let quotedSchema = quotedSchema
-        return try await withConnection { connection in
+        // Index builds may run for hours: no client-side limit.
+        return try await withConnection(limit: .unbounded) { connection in
             try await Self.acquireMigrationLock(on: connection)
             do {
                 // Index builds on a large table can outlast the pool's statement timeout.
