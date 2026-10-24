@@ -7,10 +7,12 @@ import Foundation
 /// Auxiliary queues (everything except requests) are capped so a long outage cannot grow memory
 /// without bound; requests go to the disk spool instead.
 struct CaptureWriteBuffer {
-    /// A process chain to upsert, with the app its subtree belongs to.
+    /// A process chain to upsert, with the app its subtree belongs to and the device it runs on (nil in files
+    /// saved before the device was recorded: the recording device then).
     struct ChainWrite: Hashable, Sendable, Codable {
         var chain: [ProcessLink]
         var appID: AppID?
+        var deviceID: DeviceID? = nil
     }
 
     /// Everything due for one flush, in write order.
@@ -83,9 +85,9 @@ struct CaptureWriteBuffer {
         if requests.updateValue(request, forKey: request.key) == nil { order.append(request.key) }
     }
 
-    mutating func add(chain: [ProcessLink], appID: AppID?) {
+    mutating func add(chain: [ProcessLink], appID: AppID?, deviceID: DeviceID? = nil) {
         guard !chain.isEmpty, chains.count < auxiliaryLimit else { return }
-        chains.append(ChainWrite(chain: chain, appID: appID))
+        chains.append(ChainWrite(chain: chain, appID: appID, deviceID: deviceID))
     }
 
     /// Queues a request's new inventory entries with their alert drafts. Entries and drafts are capped
@@ -201,7 +203,7 @@ struct CaptureWriteBuffer {
             requests[key]?.appID = nil
             requests[key]?.isNew = false
         }
-        chains = chains.map { $0.appID == appID ? ChainWrite(chain: $0.chain, appID: nil) : $0 }
+        chains = chains.map { $0.appID == appID ? ChainWrite(chain: $0.chain, appID: nil, deviceID: $0.deviceID) : $0 }
         newHosts.removeAll { $0.appID == appID }
         drafts.removeAll { $0.appID == appID }
         alerts.removeAll { $0.appID == appID }

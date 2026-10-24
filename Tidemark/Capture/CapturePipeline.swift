@@ -749,7 +749,7 @@ actor CapturePipeline {
         guard chain.allSatisfy({ $0.startTime != nil }) else { return }
         if upsertedProcesses.count > 50_000 { upsertedProcesses.removeAll() }
         upsertedProcesses[key] = (attribution.appID, now)
-        buffer.add(chain: chain, appID: attribution.appID)
+        buffer.add(chain: chain, appID: attribution.appID, deviceID: settings.deviceID)
     }
 
     private func matchProbe(_ entry: inout Entry) {

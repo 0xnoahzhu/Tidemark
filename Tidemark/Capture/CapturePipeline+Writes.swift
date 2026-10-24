@@ -123,8 +123,9 @@ extension CapturePipeline {
 
     private func writeChains(_ batch: inout CaptureWriteBuffer.Batch, deadline: ContinuousClock.Instant) async throws {
         let database = self.database
-        let device = settings.deviceID
         while let chain = batch.chains.first {
+            // Chains queued before a switch between local and remote Surge belong to the device they ran on.
+            let device = chain.deviceID ?? settings.deviceID
             do {
                 _ = try await write(until: deadline) { try await database.upsertProcessChain(deviceID: device, chain: chain.chain, appID: chain.appID) }
             } catch let rejection as CaptureWriteRejection {
@@ -300,7 +301,8 @@ extension CapturePipeline {
             if draft.requestKey.session == session, let entry = entries[draft.requestKey.surgeID], entry.record.key == draft.requestKey {
                 rowID = entry.record.rowID
             }
-            alerts.append(draft.item(deviceID: settings.deviceID, requestRowID: rowID, createdAt: now))
+            // The request's own Mac, also for drafts queued before a switch between local and remote Surge.
+            alerts.append(draft.item(deviceID: draft.requestKey.deviceID, requestRowID: rowID, createdAt: now))
         }
         return alerts
     }

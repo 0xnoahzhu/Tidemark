@@ -228,6 +228,27 @@ struct CaptureResilienceTests {
         #expect(await database.alertsInserted.map(\.value) == ["api.notion.com"])
     }
 
+    @Test func workQueuedBeforeADeviceSwitchKeepsItsDevice() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let raycast = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
+        let pipeline = makePipeline(database: database, directory: temp.url)
+        await pipeline.setApps([raycast], paused: [])
+        try await pipeline.loadKnownHosts()
+        await pipeline.beginSession(1_000)
+        await pipeline.ingest(nodeRequest(id: 1, host: "api.notion.com"), now: base)
+
+        // Switched to a remote Surge before the queue was written.
+        let gateway = UUID()
+        await pipeline.update(settings: CaptureSettings(deviceID: gateway, isRemote: true, batchRows: 200, batchInterval: 1,
+                                                        ownExecutablePath: ownExecutable), now: base.addingTimeInterval(1))
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.tick(now: base.addingTimeInterval(2))
+        #expect(await database.chains.map(\.deviceID) == [device])
+        #expect(await database.alertsInserted.map(\.deviceID) == [device])
+        #expect(await database.writes.allSatisfy { $0.key.deviceID == device })
+    }
+
     @Test func alertsLinkTheirRequestWhileTheSpoolDrains() async throws {
         let temp = CaptureTempDirectory()
         do {

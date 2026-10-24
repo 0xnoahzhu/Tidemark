@@ -226,7 +226,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var knownHostsCalls = 0
     /// Returned by `alerts(after:excluding:)` (alerts other Macs wrote).
     var otherMacAlerts: [AlertItem] = []
-    var chains: [(chain: [ProcessLink], appID: AppID?)] = []
+    var chains: [(chain: [ProcessLink], appID: AppID?, deviceID: DeviceID)] = []
     /// Every request row written, in order (spool replays included).
     var writes: [RequestRecord] = []
     var rows: [RequestKey: RequestRecord] = [:]
@@ -369,7 +369,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func upsertProcessChain(deviceID: DeviceID, chain: [ProcessLink], appID: AppID?) async throws -> Int64? {
         try check()
         try checkApp(appID)
-        chains.append((chain, appID))
+        chains.append((chain, appID, deviceID))
         return newID()
     }
     func processTree(appID: AppID, scope: DeviceScope) async throws -> [ProcessNode] { [] }
