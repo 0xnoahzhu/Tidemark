@@ -91,6 +91,46 @@ struct CaptureAttributionTests {
         #expect(attributor.attribute(chain: leaf, pathForStatistics: nil).appID == grok.id)
     }
 
+    @Test func followsAProcessThatExecsAnotherBinary() {
+        let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app", includeChildren: false)
+        var attributor = CaptureAttributor(isRemote: false)
+        attributor.setApps([cursor])
+        let start = boot.addingTimeInterval(2)
+        let wrapper = CaptureFakeProcesses([LiveProcess(pid: 1201, parentPID: 1, name: "sh", path: "/bin/sh", startTime: start)])
+        let before = attributor.chain(pid: 1201, processPath: "/bin/sh", startedAt: boot.addingTimeInterval(60), inspector: wrapper)
+        #expect(before.last?.path == "/bin/sh")
+
+        // `exec` keeps the PID and start time but runs the app's own binary.
+        let execd = CaptureFakeProcesses([LiveProcess(pid: 1201, parentPID: 1, name: "Cursor", path: "/Applications/Cursor.app/Contents/MacOS/Cursor",
+                                                      startTime: start)])
+        let after = attributor.chain(pid: 1201, processPath: nil, startedAt: boot.addingTimeInterval(61), inspector: execd)
+        #expect(after.last?.path == "/Applications/Cursor.app/Contents/MacOS/Cursor")
+        #expect(attributor.attribute(chain: after, pathForStatistics: nil).appID == cursor.id)
+    }
+
+    @Test func timeoutsReturnOnTimeEvenWhenTheWorkIgnoresCancellation() async {
+        let clock = ContinuousClock()
+        let started = clock.now
+        do {
+            _ = try await CaptureTimeout.unstructured(.milliseconds(100)) {
+                // A connection stuck on a dead network path does not notice cancellation.
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { continuation.resume() }
+                }
+                return 1
+            }
+            Issue.record("expected a timeout")
+        } catch {
+            #expect(error is CaptureTimeoutError)
+        }
+        #expect(started.duration(to: clock.now) < .milliseconds(900))
+        #expect(await CaptureTimeout.value(within: .seconds(1)) { 42 } == 42)
+        #expect(await CaptureTimeout.value(within: .milliseconds(50)) { () async -> Int? in
+            try? await Task.sleep(for: .seconds(2))
+            return 1
+        } == nil)
+    }
+
     @Test func bumpsTheVersionOnlyWhenAppsChange() {
         let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
         var attributor = CaptureAttributor(isRemote: false)

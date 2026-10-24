@@ -54,7 +54,9 @@ struct CaptureAttributor {
 
         if let live = inspector.process(pid: pid), live.startTime <= startedAt.addingTimeInterval(1) {
             let key = ProcessKey(pid: pid, startTime: live.startTime)
-            if let cached = chains[key] { return cached }
+            // A process that `exec`s keeps its PID and start time but runs another binary (`sh` → `node`):
+            // the cached chain only stands while its leaf still names the live executable.
+            if let cached = chains[key], live.path == nil || cached.last?.path == live.path { return cached }
             let chain = inspector.chain(pid: pid, notAfter: startedAt)
             guard !chain.isEmpty else { return fallback }
             store(chain, for: key)
