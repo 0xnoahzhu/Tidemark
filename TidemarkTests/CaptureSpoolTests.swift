@@ -23,7 +23,8 @@ struct CaptureSpoolTests {
         let temp = CaptureTempDirectory()
         var spool = CaptureSpool(directory: temp.url, limit: 1000, segmentSize: 4)
         try spool.append(rows(1...10))
-        #expect(spool.count == 10)
+        let written = spool.count
+        #expect(written == 10)
 
         var replayed: [RequestRecord] = []
         while let segment = spool.oldestSegment() {
@@ -31,7 +32,8 @@ struct CaptureSpoolTests {
             spool.removeSegment(segment.id)
         }
         #expect(replayed == rows(1...10))
-        #expect(spool.isEmpty)
+        let drained = spool.isEmpty
+        #expect(drained)
     }
 
     @Test func survivesARelaunch() throws {
@@ -41,7 +43,8 @@ struct CaptureSpoolTests {
             try spool.append(rows(1...5))
         }
         var reopened = CaptureSpool(directory: temp.url, limit: 1000, segmentSize: 3)
-        #expect(reopened.count == 5)
+        let found = reopened.count
+        #expect(found == 5)
         try reopened.append(rows(6...6))
         var ids: [Int64] = []
         while let segment = reopened.oldestSegment() {
@@ -56,7 +59,8 @@ struct CaptureSpoolTests {
         var spool = CaptureSpool(directory: temp.url, limit: 5, segmentSize: 3)
         try spool.append(rows(1...4))
         try spool.append(rows(5...8))
-        #expect(spool.count == 5)
+        let kept = spool.count
+        #expect(kept == 5)
         var ids: [Int64] = []
         while let segment = spool.oldestSegment() {
             ids += segment.rows.map(\.key.surgeID)
@@ -73,7 +77,8 @@ struct CaptureSpoolTests {
         let segment = try #require(oldest)
         try spool.append(rows(4...5))
         spool.removeSegment(segment.id)
-        #expect(spool.count == 2)
+        let left = spool.count
+        #expect(left == 2)
         let remaining = spool.oldestSegment()?.rows.map(\.key.surgeID)
         #expect(remaining == [4, 5])
     }

@@ -6,6 +6,9 @@ import Foundation
 /// `~/Library/Application Support/Tidemark/spool/`. Appends go to the newest segment; replay reads the
 /// oldest one, and once the database accepted its rows the segment is deleted. When the spool grows past
 /// `limit` rows the oldest rows are dropped.
+///
+/// Creating a spool touches nothing on disk; the existing segments are scanned on first use, so a large
+/// spool left by an outage is counted by whoever uses it (the capture pipeline, off the main actor).
 struct CaptureSpool {
     private struct Segment {
         var index: Int
@@ -18,10 +21,9 @@ struct CaptureSpool {
     let segmentSize: Int
     private var segments: [Segment] = []
     /// Index of the segment new rows are appended to.
-    private var activeIndex: Int
-
-    /// Rows currently on disk.
-    private(set) var count = 0
+    private var activeIndex = 1
+    private var loaded = false
+    private var rowCount = 0
 
     static var defaultDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -33,6 +35,24 @@ struct CaptureSpool {
         self.directory = directory
         self.limit = max(1, limit)
         self.segmentSize = max(1, segmentSize)
+    }
+
+    /// Rows currently on disk.
+    var count: Int {
+        mutating get {
+            loadIfNeeded()
+            return rowCount
+        }
+    }
+
+    var isEmpty: Bool {
+        mutating get { count == 0 }
+    }
+
+    /// Scans the segments left by a previous run.
+    private mutating func loadIfNeeded() {
+        guard !loaded else { return }
+        loaded = true
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path(percentEncoded: false))) ?? []
         let indexes = names.compactMap { name -> Int? in
@@ -43,7 +63,7 @@ struct CaptureSpool {
             let lines = Self.lineCount(at: Self.url(directory, index))
             if lines > 0 {
                 segments.append(Segment(index: index, lines: lines))
-                count += lines
+                rowCount += lines
             } else {
                 try? FileManager.default.removeItem(at: Self.url(directory, index))
             }
@@ -51,11 +71,10 @@ struct CaptureSpool {
         activeIndex = (segments.last?.index ?? 0) + 1
     }
 
-    var isEmpty: Bool { count == 0 }
-
     /// Appends rows (oldest first) and drops the oldest rows beyond `limit`.
     mutating func append(_ rows: [RequestRecord]) throws {
         guard !rows.isEmpty else { return }
+        loadIfNeeded()
         let encoder = JSONEncoder()
         var pending = rows[...]
         while !pending.isEmpty {
@@ -73,13 +92,14 @@ struct CaptureSpool {
             }
             try Self.append(data, to: Self.url(directory, activeIndex))
             segments[segments.count - 1].lines += chunk.count
-            count += chunk.count
+            rowCount += chunk.count
         }
         try trimToLimit()
     }
 
     /// Rows of the oldest segment, sealing it first so new appends go elsewhere. Unreadable lines are skipped.
     mutating func oldestSegment() -> (id: Int, rows: [RequestRecord])? {
+        loadIfNeeded()
         guard let first = segments.first else { return nil }
         if first.index == activeIndex { activeIndex += 1 }
         let decoder = JSONDecoder()
@@ -91,23 +111,24 @@ struct CaptureSpool {
     /// Deletes a replayed segment.
     mutating func removeSegment(_ id: Int) {
         guard let position = segments.firstIndex(where: { $0.index == id }) else { return }
-        count -= segments[position].lines
+        rowCount -= segments[position].lines
         segments.remove(at: position)
         try? FileManager.default.removeItem(at: Self.url(directory, id))
     }
 
     /// Deletes everything on disk.
     mutating func removeAll() {
+        loadIfNeeded()
         for segment in segments { try? FileManager.default.removeItem(at: Self.url(directory, segment.index)) }
         segments.removeAll()
-        count = 0
+        rowCount = 0
     }
 
     // MARK: Private
 
     private mutating func trimToLimit() throws {
-        while count > limit, let first = segments.first {
-            let excess = count - limit
+        while rowCount > limit, let first = segments.first {
+            let excess = rowCount - limit
             if first.lines <= excess {
                 removeSegment(first.index)
                 continue
@@ -123,7 +144,7 @@ struct CaptureSpool {
             }
             try kept.write(to: url, options: .atomic)
             segments[0].lines = lines.count - excess
-            count -= min(excess, lines.count)
+            rowCount -= min(excess, lines.count)
         }
     }
 
