@@ -65,6 +65,32 @@ struct IntentsTodayFiguresTests {
         #expect(IntentsTodayFigures.newDestinations(in: alerts, since: start, device: me) == 2)
         #expect(IntentsTodayFigures.newDestinations(in: [], since: start, device: me) == 0)
     }
+
+    /// With a remote Surge, rows and alerts are written under the remote's device row, which the live Today
+    /// counter also follows; the summary must count that device, not this Mac's own row.
+    @MainActor
+    @Test func countsTheRecordingDevice() async {
+        let suite = "tidemark-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = Preferences(defaults: defaults)
+        preferences.surgeRemote = "10.0.0.2:6171"
+        let model = AppModel(preferences: preferences)
+        let remote = CaptureDeviceInfo.recordingDeviceID(preferences)
+        #expect(remote != preferences.thisDeviceID)
+
+        let now = Date.now
+        model.alerts.items = [
+            alert("linear.app", device: remote, at: now),
+            alert("104.16.27.34", kind: .ip, device: remote, at: now),
+            alert("own-row.example", device: preferences.thisDeviceID, at: now),
+        ]
+        model.live.todayCount = 42
+        // The placeholder database is offline, so the figures come from the live state alone.
+        let figures = await IntentsTodayFigures.load(model, now: now)
+        #expect(figures.requests == 42)
+        #expect(figures.newDestinations == 2)
+    }
 }
 
 struct IntentsEntityTests {

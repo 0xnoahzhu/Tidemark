@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import System
 import Testing
 @testable import Tidemark
 
@@ -73,6 +74,150 @@ struct UIChromeTests {
         #expect(a.brightnessComponent > b.brightnessComponent + 0.2)
         #expect(DockIconUpdater.isDark(try #require(NSAppearance(named: .darkAqua))))
         #expect(!DockIconUpdater.isDark(try #require(NSAppearance(named: .aqua))))
+    }
+
+    /// The Dock follows the system: the app's effective appearance while it follows the system too, the
+    /// global interface style while Settings › Appearance forces Light or Dark.
+    @Test func dockIconFollowsTheSystemAppearance() throws {
+        let light = try #require(NSAppearance(named: .aqua))
+        let dark = try #require(NSAppearance(named: .darkAqua))
+        #expect(DockIconUpdater.systemIsDark(appOverride: nil, effective: dark, interfaceStyle: nil))
+        #expect(!DockIconUpdater.systemIsDark(appOverride: nil, effective: light, interfaceStyle: "Dark"))
+        // Forced Dark inside Tidemark on a light system keeps the light Dock icon, and the reverse.
+        #expect(!DockIconUpdater.systemIsDark(appOverride: dark, effective: dark, interfaceStyle: nil))
+        #expect(DockIconUpdater.systemIsDark(appOverride: light, effective: light, interfaceStyle: "Dark"))
+    }
+
+    // MARK: Menu bar panel
+
+    @Test func menuBarPanelMatchesTheDesignWidth() {
+        #expect(MenuBarPanel.width == 320)
+    }
+
+    // MARK: Settings chrome
+
+    @Test func settingsWindowMatchesTheDesignWidth() {
+        #expect(SettingsLayout.width == 660)
+    }
+
+    /// Each tab icon is a full-color 26 pt tile in the design's color with a white glyph on it, centered on the
+    /// toolbar's 32 pt canvas.
+    @Test func settingsTabIconsAreColoredTiles() throws {
+        for tab in SettingsTab.allCases {
+            let image = SettingsTabIcon.image(tab)
+            #expect(!image.isTemplate)
+            #expect(image.size == NSSize(width: 32, height: 32))
+            let rep = try render(image, pixels: 64)
+            // Near the left edge, halfway down: the tile color (rendered the same way), no glyph.
+            let color = SettingsTabIcon.tileColor(tab)
+            let swatch = try render(NSImage(size: image.size, flipped: false) { rect in
+                color.setFill()
+                rect.fill()
+                return true
+            }, pixels: 64)
+            // 2 pt inside the tile's left edge (3 pt canvas margin), halfway down.
+            let tile = try #require(rep.colorAt(x: 10, y: 32))
+            let expected = try #require(swatch.colorAt(x: 10, y: 32))
+            #expect(abs(tile.redComponent - expected.redComponent) < 0.02, "\(tab) tile red")
+            #expect(abs(tile.greenComponent - expected.greenComponent) < 0.02, "\(tab) tile green")
+            #expect(abs(tile.blueComponent - expected.blueComponent) < 0.02, "\(tab) tile blue")
+            // The margin and the tile's rounded corners are transparent.
+            #expect((rep.colorAt(x: 2, y: 32)?.alphaComponent ?? 1) < 0.1, "\(tab) margin")
+            #expect((rep.colorAt(x: 7, y: 7)?.alphaComponent ?? 1) < 0.5, "\(tab) corner")
+            // Some pixels are white: the glyph.
+            var white = 0
+            for x in 0..<rep.pixelsWide {
+                for y in 0..<rep.pixelsHigh {
+                    if let c = rep.colorAt(x: x, y: y), c.redComponent > 0.95, c.greenComponent > 0.95, c.blueComponent > 0.95 {
+                        white += 1
+                    }
+                }
+            }
+            #expect(white > 20, "\(tab) glyph")
+        }
+        withLanguage(.chinese) {
+            #expect(SettingsTabIcon.title(.database) == "数据库")
+            #expect(SettingsTabIcon.title(.surge) == "Surge")
+        }
+    }
+
+    private func render(_ image: NSImage, pixels: Int) throws -> NSBitmapImageRep {
+        let rep = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8, samplesPerPixel: 4,
+                                                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        rep.size = image.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        image.draw(in: NSRect(origin: .zero, size: image.size))
+        NSGraphicsContext.restoreGraphicsState()
+        return rep
+    }
+
+    /// One status line, rebuilt in the current language, local or remote.
+    @Test func surgeStatusLine() {
+        withLanguage(.english) {
+            #expect(SettingsSurgePane.connectedText(remote: false) == "Found · controller connected · streaming")
+            #expect(SettingsSurgePane.connectedText(remote: true) == "Remote · controller connected · streaming")
+        }
+        withLanguage(.chinese) {
+            #expect(SettingsSurgePane.connectedText(remote: false) == "已找到 · 控制器已连接 · 正在订阅")
+            #expect(SettingsSurgePane.connectedText(remote: true) == "远程 · 控制器已连接 · 正在订阅")
+        }
+    }
+
+    @Test func surgeCLIPathProblems() {
+        withLanguage(.english) {
+            #expect(SettingsSurgePane.message(for: .missing) == "No file at this path.")
+            #expect(SettingsSurgePane.message(for: .inaccessible(.permissionDenied)).hasPrefix("This path cannot be read: "))
+            #expect(!SettingsSurgePane.message(for: .inaccessible(.permissionDenied)).contains("%@"))
+        }
+        withLanguage(.chinese) {
+            #expect(SettingsSurgePane.message(for: .missing) == "此路径下没有文件。")
+            #expect(SettingsSurgePane.message(for: .notAFile) == "此路径是文件夹，不是 surge-cli 可执行文件。")
+            #expect(SettingsSurgePane.message(for: .notExecutable) == "此文件不可执行。")
+            #expect(SettingsSurgePane.message(for: .inaccessible(.permissionDenied)).hasPrefix("无法读取此路径："))
+        }
+    }
+
+    @Test func ipInfoServiceNames() {
+        withLanguage(.english) {
+            #expect(SettingsGeneralPane.ipInfoServiceName(.proxycheck) == "proxycheck.io")
+            #expect(SettingsGeneralPane.ipInfoServiceName(.off) == "Off")
+        }
+        withLanguage(.chinese) {
+            #expect(SettingsGeneralPane.ipInfoServiceName(.proxycheck) == "proxycheck.io")
+            #expect(SettingsGeneralPane.ipInfoServiceName(.off) == "关闭")
+        }
+    }
+
+    @Test func explainHostsNoteGivesTheReason() {
+        withLanguage(.english) {
+            #expect(SettingsNotificationsPane.explainHostsNote(available: true, reason: nil).contains("generated on this Mac"))
+            #expect(SettingsNotificationsPane.explainHostsNote(available: false, reason: "Model is downloading") == "Model is downloading")
+            #expect(SettingsNotificationsPane.explainHostsNote(available: false, reason: nil) == "Apple Intelligence is unavailable on this Mac.")
+        }
+    }
+
+    // MARK: Commands
+
+    /// File › New Site Probe starts from an empty URL bar with no saved session selected, unless a probe runs.
+    @Test func newSiteProbeCommandResetsThePage() {
+        let (defaults, suite) = Self.scratchDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = AppModel(preferences: Preferences(defaults: defaults))
+        let web = ProbeWebSession()
+        model.probe.selectedID = UUID()
+        web.urlDraft = "https://example.com"
+        model.nav.open(.requests)
+        TidemarkCommands.newSiteProbe(model, web: web)
+        #expect(model.probe.selectedID == nil)
+        #expect(web.urlDraft.isEmpty)
+        #expect(model.nav.page == .probe)
+    }
+
+    /// A private defaults suite; remove it with `removePersistentDomain(forName:)` when done.
+    static func scratchDefaults() -> (UserDefaults, String) {
+        let name = "tidemark-tests-\(UUID().uuidString)"
+        return (UserDefaults(suiteName: name)!, name)
     }
 
     // MARK: Settings helpers
