@@ -219,6 +219,8 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var stallingRequests = false
     /// Closing rows of ended sessions fails (`DatabaseError.unreachable`) while everything else works.
     var failingMaintenance = false
+    /// `apps()` answers with the list as it was when called, this much later.
+    var appsDelay: Duration = .zero
     var closedSessions: [(deviceID: DeviceID, before: Int64, at: Date)] = []
     var vanishedCloses: [(deviceID: DeviceID, session: Int64, keeping: Set<Int64>, startedBefore: Date, at: Date)] = []
     var knownHostsCalls = 0
@@ -248,6 +250,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func setRefusedHosts(_ hosts: Set<String>) { refusedHosts = hosts }
     func setStallingRequests(_ on: Bool) { stallingRequests = on }
     func setFailingMaintenance(_ on: Bool) { failingMaintenance = on }
+    func setAppsDelay(_ delay: Duration) { appsDelay = delay }
     func setApps(_ apps: [MonitoredApp]) { appList = apps }
     func setMutes(_ patterns: [String]) { mutesList = patterns }
     func setOtherMacAlerts(_ alerts: [AlertItem]) { otherMacAlerts = alerts }
@@ -281,7 +284,12 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func devices() async throws -> [Device] { [] }
     func renameDevice(_ id: DeviceID, name: String) async throws {}
 
-    func apps() async throws -> [MonitoredApp] { try check(); return appList }
+    func apps() async throws -> [MonitoredApp] {
+        try check()
+        let snapshot = appList
+        if appsDelay > .zero { try await Task.sleep(for: appsDelay) }
+        return snapshot
+    }
     func insertApp(_ app: MonitoredApp) async throws { try check(); appList.append(app) }
     func updateApp(_ app: MonitoredApp) async throws {
         try check()

@@ -46,6 +46,9 @@ final class CaptureEngine {
     let streamSilenceLimit: TimeInterval = 15
     /// Explaining a host may delay its notification by at most this much.
     let explanationTimeout: Duration = .milliseconds(1500)
+    /// Apps another Mac added are evaluated against their inventory once that Mac's backfill has had this long
+    /// (counted from the app's creation) to rebuild it.
+    let remoteInventoryAllowance: TimeInterval = 90
 
     private var started = false
     private var jobs: [String: Task<Void, Never>] = [:]
@@ -76,6 +79,11 @@ final class CaptureEngine {
     private var lastAlertID: Int64 = 0
     private var notifiedAlerts: Set<Int64> = []
     private var liveCursor = Date.now.addingTimeInterval(-60)
+    /// The app list was loaded from PostgreSQL at least once (apps that appear later were added elsewhere).
+    private var catalogLoaded = false
+    /// Bumped by every local change of the app list: a database read of the apps that started before it is
+    /// stale and must not be applied.
+    var catalogGeneration = 0
 
     /// Preferences the engine reacts to.
     private struct PreferenceValues: Equatable {
@@ -291,8 +299,9 @@ final class CaptureEngine {
     private func loadSharedState() async {
         await registerDevices()
         do {
+            let generation = catalogGeneration
             let apps = try await database.apps()
-            await applyCatalog(apps)
+            if generation == catalogGeneration { await applyCatalog(apps) }
         } catch {
             Self.log.error("Loading apps failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -329,11 +338,26 @@ final class CaptureEngine {
         await pushApps()
     }
 
-    /// Replaces the app list, purging apps another Mac deleted from everything queued.
-    private func applyCatalog(_ apps: [MonitoredApp]) async {
-        let removed = Set(model.catalog.apps.map(\.id)).subtracting(apps.map(\.id))
+    /// Replaces the app list, purging apps another Mac deleted from everything queued. Apps another Mac added
+    /// wait for their inventory, which that Mac's backfill is rebuilding: until it is loaded here, every host
+    /// they contact would look new.
+    private func applyCatalog(_ apps: [MonitoredApp], now: Date = .now) async {
+        let previous = Set(model.catalog.apps.map(\.id))
+        let removed = previous.subtracting(apps.map(\.id))
+        let added = catalogLoaded ? apps.filter { !previous.contains($0.id) && !$0.isArchived } : []
+        catalogLoaded = true
+        var loads: [(AppID, Date)] = []
+        for app in added {
+            // Counted from the app's creation on the other Mac, but never more than `remoteInventoryAllowance`
+            // from now (its clock may differ from this Mac's).
+            let allowed = app.createdAt.addingTimeInterval(remoteInventoryAllowance)
+            let ready = min(max(allowed, now), now.addingTimeInterval(remoteInventoryAllowance))
+            await pipeline.awaitInventory(for: app.id, loadingAfter: ready, now: now)
+            loads.append((app.id, ready))
+        }
         if apps != model.catalog.apps { model.catalog.apps = apps }
         await pushApps()
+        for (id, ready) in loads { scheduleInventoryLoad(for: id, at: ready, now: now) }
         for id in removed {
             model.catalog.paused.remove(id)
             model.catalog.stats[id] = nil
@@ -818,13 +842,27 @@ final class CaptureEngine {
         if stats != model.catalog.stats { model.catalog.stats = stats }
     }
 
-    /// Apps and mutes changed on other Macs (added, archived, deleted, muted).
+    /// Apps and mutes changed on other Macs (added, archived, deleted, muted). A list read while this Mac
+    /// changed its apps is dropped (the next refresh reads it again).
     func refreshSharedState() async {
         guard databaseReady else { return }
-        if let apps = try? await database.apps(), apps != model.catalog.apps { await applyCatalog(apps) }
+        let generation = catalogGeneration
+        if let apps = try? await database.apps(), generation == catalogGeneration, apps != model.catalog.apps { await applyCatalog(apps) }
         if let mutes = try? await database.mutes(), Set(mutes) != Set(model.alerts.mutes) {
             model.alerts.mutes = mutes
             await pipeline.setMutes(mutes)
+        }
+    }
+
+    /// Loads the inventory of an app another Mac added once its wait is over (see `applyCatalog`).
+    private func scheduleInventoryLoad(for appID: AppID, at date: Date, now: Date) {
+        let delay = max(0, date.timeIntervalSince(now))
+        debounce("added-app-inventory-\(appID.uuidString)", .seconds(delay)) { engine in
+            do {
+                try await engine.pipeline.loadKnownHosts()
+            } catch {
+                Self.log.error("Loading the inventory of apps added on another Mac failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 

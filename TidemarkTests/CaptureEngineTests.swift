@@ -369,6 +369,61 @@ struct CaptureEngineTests {
         #expect(CaptureEngine.message(for: CaptureTimeoutError(seconds: 20)) == "PostgreSQL did not answer in time")
     }
 
+    // MARK: Apps
+
+    @Test func anAppAddedOnAnotherMacWaitsForItsInventory() async throws {
+        let database = CaptureFakeDatabase()
+        let earlier = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app", createdAt: .now)
+        await database.setApps([earlier])
+        let (engine, model) = makeEngine(database: database)
+        #expect(await engine.connectDatabase())
+        #expect(await engine.pipeline.awaitingInventory.isEmpty, "apps loaded at launch come with their inventory")
+
+        let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app", createdAt: .now)
+        await database.setApps([earlier, cursor])
+        await engine.refreshSharedState()
+        #expect(model.catalog.apps.map(\.id) == [earlier.id, cursor.id])
+        let loadAfter = try #require(await engine.pipeline.inventoryLoadAfter[cursor.id])
+        #expect(loadAfter > .now.addingTimeInterval(60), "the other Mac's backfill gets time to rebuild the inventory")
+        // An earlier load (another app, a reconnect) does not end the wait.
+        try await engine.pipeline.loadKnownHosts()
+        #expect(await engine.pipeline.awaitingInventory[cursor.id] != nil)
+
+        // An app added long ago (seen after this Mac was offline) only needs a load.
+        let docker = CaptureFixtures.app("Docker", path: "/Applications/Docker.app", createdAt: .now.addingTimeInterval(-86_400))
+        await database.setApps([earlier, cursor, docker])
+        await engine.refreshSharedState()
+        #expect(await eventually { await engine.pipeline.awaitingInventory[docker.id] == nil })
+        #expect(await engine.pipeline.awaitingInventory[cursor.id] != nil)
+    }
+
+    @Test func aStaleAppListDoesNotUndoALocalChange() async throws {
+        let database = CaptureFakeDatabase()
+        let (engine, model) = makeEngine(database: database)
+        #expect(await engine.connectDatabase())
+        await database.setAppsDelay(.milliseconds(400))
+        let refresh = Task { await engine.refreshSharedState() }
+        // The refresh has read the (still empty) list when the app is added here.
+        try await Task.sleep(for: .milliseconds(100))
+        await database.setAppsDelay(.zero)
+        let app = try await engine.monitorApp(path: "/Applications/Imaginary Tool.app", includeChildren: true, alertOnDomain: true,
+                                              alertOnIP: true, backfill: false)
+        await refresh.value
+        #expect(model.catalog.apps.map(\.id) == [app.id])
+        #expect(await engine.pipeline.isMonitoring(app.id))
+    }
+
+    @Test func aFailedDeleteKeepsTheApp() async throws {
+        let database = CaptureFakeDatabase()
+        let (engine, model) = makeEngine(database: database)
+        let app = try await engine.monitorApp(path: "/Applications/Imaginary Tool.app", includeChildren: true, alertOnDomain: true,
+                                              alertOnIP: true, backfill: false)
+        await database.setFailing(true)
+        await #expect(throws: DatabaseError.self) { try await engine.deleteApp(app.id) }
+        #expect(model.catalog.apps.map(\.id) == [app.id])
+        #expect(await engine.pipeline.isMonitoring(app.id), "attribution and first contact go on")
+    }
+
     @Test func keepsTheRecordingMacsActivityFresh() {
         let (engine, model) = makeEngine()
         let me = model.preferences.thisDeviceID

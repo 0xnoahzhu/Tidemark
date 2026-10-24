@@ -38,8 +38,10 @@ extension CaptureEngine: CaptureActions {
         )
         try await database.insertApp(app)
         model.catalog.apps.append(app)
-        // Its inventory (rebuilt by the backfill) loads below; until then its requests are not judged new.
-        await pipeline.awaitInventory(for: app.id)
+        catalogGeneration += 1
+        // Its inventory (rebuilt by the backfill, which may take minutes on a large table) loads below; until
+        // then its requests are not judged new.
+        await pipeline.awaitInventory(for: app.id, until: .now.addingTimeInterval(backfill ? 900 : 120))
         await pushApps()
 
         let installed = FileManager.default.fileExists(atPath: bundlePath)
@@ -70,6 +72,7 @@ extension CaptureEngine: CaptureActions {
         } else {
             model.catalog.apps.append(app)
         }
+        catalogGeneration += 1
         await pushApps()
         await refreshStats()
     }
@@ -87,25 +90,20 @@ extension CaptureEngine: CaptureActions {
         try await updateApp(app)
     }
 
-    /// Deletes an app. Attribution to it stops and every queued write that references it is dropped or
-    /// unlinked before its row disappears, so no insert can hit the deleted row's foreign keys.
+    /// Deletes an app. The database goes first, so a failed delete changes nothing here (queued rows keep their
+    /// link and pending first contacts their alerts). Then attribution to it stops and every queued write that
+    /// references it is dropped or unlinked; a write already in flight that still names it is refused by the
+    /// database and written again without the link.
     func deleteApp(_ id: AppID) async throws {
-        await pipeline.setApps(model.catalog.apps.filter { $0.id != id }, paused: model.catalog.paused)
-        await pipeline.purgeApp(id)
-        do {
-            try await database.deleteApp(id)
-        } catch {
-            await pushApps()
-            throw error
-        }
+        try await database.deleteApp(id)
         model.catalog.apps.removeAll { $0.id == id }
+        catalogGeneration += 1
         model.catalog.stats[id] = nil
         model.catalog.installs[id] = nil
         model.catalog.paused.remove(id)
         model.alerts.items.removeAll { $0.appID == id }
-        // Anything a flush in progress put back meanwhile.
-        await pipeline.purgeApp(id)
         await pushApps()
+        await pipeline.purgeApp(id)
         if let unread = try? await database.unreadAlertCount(scope: model.devices.scope) { model.alerts.unreadCount = unread }
         if model.nav.page == .app(id) { model.nav.open(.requests) }
     }
@@ -247,9 +245,10 @@ extension CaptureEngine: CaptureActions {
 
     // MARK: Helpers
 
-    /// Apps, installs and stats after a mutation.
+    /// Apps, installs and stats after a mutation. A list read while another local change happened is dropped.
     func refreshCatalog() async {
-        if let apps = try? await database.apps() {
+        let generation = catalogGeneration
+        if let apps = try? await database.apps(), generation == catalogGeneration {
             model.catalog.apps = apps
             await pushApps()
         }

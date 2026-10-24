@@ -176,6 +176,8 @@ actor CapturePipeline {
     var knownLoaded = false
     /// New apps whose inventory (and backfill) is still loading → give up waiting at this time.
     var awaitingInventory: [AppID: Date] = [:]
+    /// Only a load of the inventory that starts after this time ends the app's wait (apps another Mac added).
+    var inventoryLoadAfter: [AppID: Date] = [:]
     var upsertedProcesses: [CaptureAttributor.ProcessKey: (appID: AppID?, at: Date)] = [:]
     /// surge ID → evaluate first contact no later than this.
     var contactQueue: [Int64: Date] = [:]
@@ -298,10 +300,13 @@ actor CapturePipeline {
         }
     }
 
-    /// A newly monitored app's inventory (and backfill) arrives with the next `loadKnownHosts()`; until then
-    /// (at most `inventoryWait`) its first contacts wait, so its whole history doesn't look new.
-    func awaitInventory(for appID: AppID, now: Date = .now) {
-        awaitingInventory[appID] = now.addingTimeInterval(inventoryWait)
+    /// A newly monitored app's inventory (and backfill) arrives with the next `loadKnownHosts()`; until then its
+    /// first contacts wait (queued, until `until`, by default `inventoryWait` after the load may start), so its
+    /// whole history doesn't look new. With `loadingAfter` only a load that starts after that time ends the
+    /// wait: an app another Mac added gets its inventory from that Mac's backfill, which takes a while.
+    func awaitInventory(for appID: AppID, loadingAfter: Date? = nil, until: Date? = nil, now: Date = .now) {
+        awaitingInventory[appID] = until ?? (loadingAfter ?? now).addingTimeInterval(inventoryWait)
+        inventoryLoadAfter[appID] = loadingAfter
     }
 
     func setMutes(_ patterns: [String]) { mutes = patterns }
@@ -315,7 +320,9 @@ actor CapturePipeline {
     /// Loads every app's inventory for first-contact detection. Entries still on their way to the database
     /// stay known.
     func loadKnownHosts() async throws {
-        let waiting = Set(awaitingInventory.keys)
+        // A load scheduled for `loadingAfter` may start a moment early by the wall clock.
+        let cutoff = Date.now.addingTimeInterval(1)
+        let waiting = Set(awaitingInventory.keys.filter { (inventoryLoadAfter[$0] ?? .distantPast) <= cutoff })
         let loaded = try await database.knownHosts()
         var index = CaptureKnownHosts(loaded: loaded, classifier: classifier)
         for host in buffer.pendingNewHosts + inFlightHosts {
@@ -323,7 +330,10 @@ actor CapturePipeline {
         }
         known = index
         knownLoaded = true
-        for id in waiting { awaitingInventory[id] = nil }
+        for id in waiting {
+            awaitingInventory[id] = nil
+            inventoryLoadAfter[id] = nil
+        }
     }
 
     /// Adds inventory entries other Macs recorded since the last load (nothing known is forgotten).
@@ -349,6 +359,7 @@ actor CapturePipeline {
         known.remove(appID: id)
         monitored[id] = nil
         awaitingInventory[id] = nil
+        inventoryLoadAfter[id] = nil
         buffer.purge(appID: id)
         for key in Array(entries.keys) where entries[key]?.record.appID == id {
             guard var entry = entries[key] else { continue }
@@ -802,8 +813,9 @@ actor CapturePipeline {
             let record = entry.record
             let awaiting = record.appID.map { isAwaitingInventory($0, now: now) } ?? false
             guard knownLoaded, !awaiting else {
-                // Without the inventory every host would look new; skip requests that waited too long.
-                if now.timeIntervalSince(deadline) > 60 { contactQueue[id] = nil }
+                // Without the inventory every host would look new. An app's own wait for its inventory is bounded,
+                // so its requests stay queued; without any inventory, requests that waited too long are skipped.
+                if !awaiting, now.timeIntervalSince(deadline) > 60 { contactQueue[id] = nil }
                 continue
             }
             let ipReady: Bool
@@ -1007,6 +1019,7 @@ actor CapturePipeline {
         dnsFailures = dnsFailures.filter { $0.value > now }
         geoFailures = geoFailures.filter { $0.value > now }
         awaitingInventory = awaitingInventory.filter { $0.value > now }
+        inventoryLoadAfter = inventoryLoadAfter.filter { awaitingInventory[$0.key] != nil }
     }
 
     // MARK: UI
