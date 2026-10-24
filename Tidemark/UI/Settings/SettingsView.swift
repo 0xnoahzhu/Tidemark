@@ -43,9 +43,7 @@ struct SettingsStatusLine: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
+            StatusDot(color: color, size: 7, pulsing: tone == .pending)
                 .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
             VStack(alignment: .leading, spacing: 2) {
                 Text(text)

@@ -23,6 +23,9 @@ struct SettingsDatabasePane: View {
         .formStyle(.grouped)
         .frame(width: SettingsLayout.width, height: 640)
         .onAppear(perform: load)
+        .onChange(of: model.devices.thisDevice?.name) { _, name in
+            if nameDraft.isEmpty, let name { nameDraft = name }
+        }
         .task(id: model.live.database) { await loadSchema() }
     }
 

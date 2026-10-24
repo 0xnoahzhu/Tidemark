@@ -95,8 +95,8 @@ struct SettingsSurgePane: View {
 
     @ViewBuilder
     private var status: some View {
-        let path = model.preferences.surgeCLIPath
-        if model.preferences.surgeRemote.isEmpty, !FileManager.default.isExecutableFile(atPath: path) {
+        // A remote Surge is also reached through the local surge-cli (`--remote`).
+        if !FileManager.default.isExecutableFile(atPath: model.preferences.surgeCLIPath) {
             SettingsStatusLine(tone: .failed, text: tr("surge-cli was not found at this path", "Settings"))
         } else {
             switch model.live.surge {
