@@ -8,7 +8,7 @@ import Foundation
 /// `http probe`, which go out to the network); on timeout the child gets SIGTERM, then SIGKILL.
 /// Output is parsed in a `@concurrent` function, so a 300 KB `dump recent` never decodes on the caller's
 /// actor. Commands never change Surge's state.
-struct SurgeCLIClient: SurgeClient {
+struct SurgeCLIClient: SurgeClientDetails {
     /// How long one-shot commands may run.
     struct Timeouts: Sendable, Hashable {
         var standard: Duration = .seconds(20)
@@ -20,8 +20,6 @@ struct SurgeCLIClient: SurgeClient {
 
     /// Events subscribed by `events()`. All six are accepted by Surge 6.10 (it ignores names it does not know).
     static let watchedEvents = ["request", "request-update", "real-time-speed", "environment", "reload", "shutdown"]
-    /// Surge's default `http-listen` port, used when `dump event` has no listener entry.
-    static let defaultHTTPProxyPort = 6152
 
     let endpoint: SurgeEndpoint
     let timeouts: Timeouts
@@ -118,10 +116,22 @@ struct SurgeCLIClient: SurgeClient {
         return try SurgeOutputParser.network(summary: summary, status: await status, command: "summary")
     }
 
-    /// Parsed from `dump event` ("HTTP proxy listen on interface: 0.0.0.0, port: 6152"), else 6152.
+    /// Parsed from `dump event` ("HTTP proxy listen on interface: 0.0.0.0, port: 6152"). Throws
+    /// `SurgeHTTPProxyOff` when Surge reports no HTTP listener instead of guessing a port.
     func httpProxyPort() async throws -> Int {
-        let port = try await run(["dump", "event"]) { try SurgeOutputParser.httpProxyPort(fromEvents: $0, command: $1) }
-        return port ?? Self.defaultHTTPProxyPort
+        try await httpProxyListener().port
+    }
+
+    /// Interface and port of the HTTP proxy listener from `dump event`; throws `SurgeHTTPProxyOff` when there is none.
+    func httpProxyListener() async throws -> SurgeHTTPListener {
+        let listener = try await run(["dump", "event"]) { try SurgeOutputParser.httpProxyListener(fromEvents: $0, command: $1) }
+        guard let listener else { throw SurgeHTTPProxyOff() }
+        return listener
+    }
+
+    /// The policy the profile's FINAL rule names, from `dump rule`.
+    func finalRulePolicy() async throws -> String? {
+        try await run(["dump", "rule"]) { try SurgeOutputParser.finalRulePolicy(fromRules: $0, command: $1) }
     }
 
     private func statusIfAvailable() async -> SurgeStatus? {

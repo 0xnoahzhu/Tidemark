@@ -127,12 +127,29 @@ enum SurgeOutputParser {
 
     /// `policy-group list` → `{"groups":[{"name":"AI","type":"Manual Selection Group","selected":"…",
     /// "options":[{"name":…,"typeDescription":…,"lineHash":"POLICY::…","enabled":true,"isGroup":false}]}]}`.
-    /// `selections` (from `environment`) fills in groups the list does not report a selection for.
+    /// `selections` (from `environment`) fills in groups the list does not report a selection for. The group
+    /// `type` is kept, so an automatic pick (URL test, fallback, smart) can be told apart from a manual switch.
     static func policyGroups(from data: Data, selections: [String: String] = [:], command: String) throws(SurgeError) -> [SurgePolicyGroup] {
         let list = try decode(GroupList.self, from: data, command: command)
         return list.groups.map { group in
-            SurgePolicyGroup(name: group.name, options: group.options ?? [], selected: group.selected ?? selections[group.name])
+            let type = group.type?.trimmingCharacters(in: .whitespaces)
+            return SurgePolicyGroup(name: group.name, type: type?.isEmpty == false ? type : nil, options: group.options ?? [],
+                                    selected: group.selected ?? selections[group.name])
         }
+    }
+
+    /// `dump rule` → `{"rules":["DOMAIN-SUFFIX,apple.com,DIRECT",…,"FINAL,Select,dns-failed"],…}`: the policy
+    /// the last `FINAL` rule names, nil when there is none.
+    static func finalRulePolicy(fromRules data: Data, command: String) throws(SurgeError) -> String? {
+        let dump = try decode(RuleDump.self, from: data, command: command)
+        for rule in (dump.rules ?? []).reversed() {
+            let fields = rule.split(separator: ",", maxSplits: 2, omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            guard fields.count >= 2, fields[0].uppercased() == "FINAL" else { continue }
+            let policy = fields[1].trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            return policy.isEmpty ? nil : policy
+        }
+        return nil
     }
 
     /// `test external-ip` / `test-policy-external-ip <policy>` → `{"address":"203.0.113.7"}`.
@@ -212,16 +229,23 @@ enum SurgeOutputParser {
         return [takeover, route].compactMap { $0 }.joined(separator: " · ")
     }
 
-    /// `dump event` → `{"events":[{"content":"HTTP proxy listen on interface: 0.0.0.0, port: 6152",…}]}`.
-    static func httpProxyPort(fromEvents data: Data, command: String) throws(SurgeError) -> Int? {
+    /// `dump event` → `{"events":[{"content":"HTTP proxy listen on interface: 0.0.0.0, port: 6152",…}]}`:
+    /// the interface and port of the HTTP proxy listener, nil when Surge reports none (its HTTP proxy is off).
+    static func httpProxyListener(fromEvents data: Data, command: String) throws(SurgeError) -> SurgeHTTPListener? {
         let dump = try decode(EventDump.self, from: data, command: command)
         for event in dump.events ?? [] {
             guard let content = event.content, content.localizedStandardContains("HTTP proxy listen"),
                   let match = content.firstMatch(of: #/port:\s*(\d+)/#), let port = Int(match.1), (1...65535).contains(port)
             else { continue }
-            return port
+            let interface = content.firstMatch(of: #/interface:\s*([^,\s]+)/#).map { String($0.1) } ?? "0.0.0.0"
+            return SurgeHTTPListener(interface: interface, port: port)
         }
         return nil
+    }
+
+    /// Port of the HTTP proxy listener (see `httpProxyListener(fromEvents:command:)`).
+    static func httpProxyPort(fromEvents data: Data, command: String) throws(SurgeError) -> Int? {
+        try httpProxyListener(fromEvents: data, command: command)?.port
     }
 
     // MARK: - Wire shapes
@@ -263,6 +287,10 @@ enum SurgeOutputParser {
 
     private struct AddressReply: Decodable {
         var address: String?
+    }
+
+    private struct RuleDump: Decodable {
+        var rules: [String]?
     }
 
     private struct Summary: Decodable {

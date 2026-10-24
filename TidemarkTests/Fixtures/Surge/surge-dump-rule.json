@@ -1,0 +1,1 @@
+{"rules":["RULE-SET,RuleSets/lan.list,DIRECT","DOMAIN-SUFFIX,openai.com,AI","GEOIP,CN,DIRECT,no-resolve","FINAL,Select,dns-failed"],"available-policies":["DIRECT","REJECT","REJECT-DROP","REJECT-NO-DROP","AI","Select"]}

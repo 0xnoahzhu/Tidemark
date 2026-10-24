@@ -38,6 +38,15 @@ struct SurgeLiveTests {
         #expect(network.surgeMode != nil)
         let port = try await client.httpProxyPort()
         #expect((1...65535).contains(port))
+        let listener = try await client.httpProxyListener()
+        #expect(listener.port == port)
+        #expect(!listener.connectHost.isEmpty)
+        #expect(groups.allSatisfy { $0.type?.isEmpty != true }, "types are kept when Surge reports them")
+    }
+
+    @Test func readsTheFinalRule() async throws {
+        let policy = try await client.finalRulePolicy()
+        #expect(policy?.isEmpty != true)
     }
 
     @Test func reportsCommandErrors() async {

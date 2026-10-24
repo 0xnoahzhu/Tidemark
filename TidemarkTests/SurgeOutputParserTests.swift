@@ -79,6 +79,19 @@ struct SurgeOutputParserTests {
         #expect(groups[2].selected == "AI", "taken from the environment when the list has none")
         #expect(groups[2].options[1].isGroup == true)
         #expect(groups[2].options[1].lineHash == nil)
+        #expect(groups.map(\.type) == ["Manual Selection Group", "Manual Selection Group", "Manual Selection Group"])
+
+        let untyped = try SurgeOutputParser.policyGroups(from: Data(#"{"groups":[{"name":"Auto","type":" ","options":[]}]}"#.utf8), command: "policy-group list")
+        #expect(untyped.first?.type == nil)
+    }
+
+    @Test func findsTheFinalRulePolicy() throws {
+        #expect(try SurgeOutputParser.finalRulePolicy(fromRules: SurgeFixtures.data("surge-dump-rule.json"), command: "dump rule") == "Select")
+        let plain = Data(#"{"rules":["final, Proxy"]}"#.utf8)
+        #expect(try SurgeOutputParser.finalRulePolicy(fromRules: plain, command: "dump rule") == "Proxy")
+        let none = Data(#"{"rules":["DOMAIN,final.example.com,DIRECT"]}"#.utf8)
+        #expect(try SurgeOutputParser.finalRulePolicy(fromRules: none, command: "dump rule") == nil)
+        #expect(try SurgeOutputParser.finalRulePolicy(fromRules: Data("{}".utf8), command: "dump rule") == nil)
     }
 
     @Test func readsExternalIP() throws {
@@ -130,6 +143,23 @@ struct SurgeOutputParserTests {
         let custom = Data(#"{"events":[{"content":"HTTP proxy listen on interface: 127.0.0.1, port: 7890"}]}"#.utf8)
         #expect(try SurgeOutputParser.httpProxyPort(fromEvents: custom, command: "dump event") == 7890)
         #expect(try SurgeOutputParser.httpProxyPort(fromEvents: Data(#"{"events":[]}"#.utf8), command: "dump event") == nil)
+    }
+
+    @Test func findsTheHTTPProxyListenerInterface() throws {
+        let wildcard = try #require(try SurgeOutputParser.httpProxyListener(fromEvents: SurgeFixtures.data("surge-dump-event.json"), command: "dump event"))
+        #expect(wildcard == SurgeHTTPListener(interface: "0.0.0.0", port: 6152))
+        #expect(wildcard.connectHost == "127.0.0.1")
+
+        let lan = Data(#"{"events":[{"content":"HTTP proxy listen on interface: 192.168.1.20, port: 8888"}]}"#.utf8)
+        let bound = try #require(try SurgeOutputParser.httpProxyListener(fromEvents: lan, command: "dump event"))
+        #expect(bound.interface == "192.168.1.20" && bound.port == 8888)
+        #expect(bound.connectHost == "192.168.1.20", "a listener bound to a LAN address does not accept loopback connections")
+
+        #expect(SurgeHTTPListener(interface: "127.0.0.1", port: 1).connectHost == "127.0.0.1")
+        #expect(SurgeHTTPListener(interface: "::", port: 1).connectHost == "::1")
+        #expect(SurgeHTTPListener(interface: "[::1]", port: 1).connectHost == "::1")
+        let socksOnly = Data(#"{"events":[{"content":"SOCKS5 proxy listen on interface: 0.0.0.0, port: 6153"}]}"#.utf8)
+        #expect(try SurgeOutputParser.httpProxyListener(fromEvents: socksOnly, command: "dump event") == nil)
     }
 
     @Test func decodesLookups() throws {
