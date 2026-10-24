@@ -124,7 +124,11 @@ final class Preferences {
     }
 
     /// Full connection URL including the Keychain password.
+    /// `TIDEMARK_DATABASE_URL` in the environment overrides it (development and testing).
     var databaseURLWithPassword: String {
+        if let override = ProcessInfo.processInfo.environment["TIDEMARK_DATABASE_URL"], !override.isEmpty {
+            return override
+        }
         guard let password = Keychain.read(account: Keychain.databaseAccount), !password.isEmpty,
               var components = URLComponents(string: databaseURL) else { return databaseURL }
         components.password = password
