@@ -21,6 +21,11 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 访问了新站点 %2$@" } }
       }
     },
+    "%1$@ — %2$@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@——%2$@" } }
+      }
+    },
     "Connected · PostgreSQL %@ · %lld ms" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已连接 · PostgreSQL %@ · %lld ms" } }
