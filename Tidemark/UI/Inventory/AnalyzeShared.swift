@@ -1,0 +1,299 @@
+import SwiftUI
+import UniformTypeIdentifiers
+
+// Building blocks shared by the Analyze pages (monitored app, Domains & IPs, Site Probe, Egress IP).
+
+// MARK: - Column layout
+
+/// Lays out the cells of a hand-built table row: fixed columns keep their width and flexible columns
+/// share the rest by weight, never shrinking below their minimum. Every row of a table uses the same
+/// column list, so cells line up without a `Grid`. Cells are centered vertically; a cell that should
+/// fill its column (right-aligned numbers, chips) uses `.frame(maxWidth: .infinity, alignment:)`.
+struct AnalyzeColumnsLayout: Layout {
+    enum Column: Hashable, Sendable {
+        case fixed(CGFloat)
+        case flexible(weight: CGFloat = 1, min: CGFloat = 0)
+    }
+
+    var columns: [Column]
+    var spacing: CGFloat = 10
+    /// Aligns cells to the top of the row instead of centering them (multi-line cards).
+    var topAligned = false
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? idealWidth
+        let widths = Self.widths(for: columns, spacing: spacing, total: width)
+        var height: CGFloat = 0
+        for (index, subview) in subviews.enumerated() where index < widths.count {
+            height = max(height, subview.sizeThatFits(ProposedViewSize(width: widths[index], height: nil)).height)
+        }
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let widths = Self.widths(for: columns, spacing: spacing, total: bounds.width)
+        var x = bounds.minX
+        for (index, subview) in subviews.enumerated() {
+            guard index < widths.count else {
+                subview.place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .leading, proposal: .zero)
+                continue
+            }
+            subview.place(at: CGPoint(x: x, y: topAligned ? bounds.minY : bounds.midY),
+                          anchor: topAligned ? .topLeading : .leading,
+                          proposal: ProposedViewSize(width: widths[index], height: nil))
+            x += widths[index] + spacing
+        }
+    }
+
+    private var idealWidth: CGFloat {
+        columns.reduce(spacing * CGFloat(max(0, columns.count - 1))) { total, column in
+            switch column {
+            case .fixed(let width): total + width
+            case .flexible(_, let minimum): total + max(minimum, 80)
+            }
+        }
+    }
+
+    /// Column widths for a row `total` points wide.
+    static func widths(for columns: [Column], spacing: CGFloat, total: CGFloat) -> [CGFloat] {
+        var result = [CGFloat](repeating: 0, count: columns.count)
+        var available = total - spacing * CGFloat(max(0, columns.count - 1))
+        var pool: [Int] = []
+        for (index, column) in columns.enumerated() {
+            switch column {
+            case .fixed(let width):
+                result[index] = width
+                available -= width
+            case .flexible:
+                pool.append(index)
+            }
+        }
+        available = max(0, available)
+        while !pool.isEmpty {
+            let totalWeight = pool.reduce(CGFloat(0)) { $0 + weight(columns[$1]) }
+            // Pin the first column whose share falls below its minimum, then share the rest again.
+            if let pinned = pool.first(where: { share(available, weight(columns[$0]), totalWeight) < minimum(columns[$0]) }) {
+                result[pinned] = minimum(columns[pinned])
+                available = max(0, available - result[pinned])
+                pool.removeAll { $0 == pinned }
+                continue
+            }
+            for index in pool { result[index] = share(available, weight(columns[index]), totalWeight) }
+            break
+        }
+        return result
+    }
+
+    private static func share(_ available: CGFloat, _ weight: CGFloat, _ totalWeight: CGFloat) -> CGFloat {
+        totalWeight > 0 ? available * weight / totalWeight : 0
+    }
+
+    private static func weight(_ column: Column) -> CGFloat {
+        if case .flexible(let weight, _) = column { return max(0, weight) }
+        return 0
+    }
+
+    private static func minimum(_ column: Column) -> CGFloat {
+        if case .flexible(_, let minimum) = column { return minimum }
+        return 0
+    }
+}
+
+/// Grey column titles above a hand-built table, with a hairline underneath.
+struct AnalyzeHeaderRow<Content: View>: View {
+    var columns: [AnalyzeColumnsLayout.Column]
+    var spacing: CGFloat = 10
+    var height: CGFloat = 28
+    var horizontalPadding: CGFloat = 20
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        AnalyzeColumnsLayout(columns: columns, spacing: spacing) { content }
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Theme.ink2)
+            .lineLimit(1)
+            .padding(.horizontal, horizontalPadding)
+            .frame(height: height)
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
+    }
+}
+
+/// Policy chip that hugs short names and truncates long ones at `maxWidth`.
+struct AnalyzePolicyChip: View {
+    var policyPath: [String]
+    var maxWidth: CGFloat
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            PolicyChip(policyPath: policyPath)
+            PolicyChip(policyPath: policyPath, maxWidth: maxWidth)
+        }
+        .frame(maxWidth: maxWidth, alignment: .leading)
+    }
+}
+
+/// A rounded chip such as `4 new domains in 24 h` or `Rule FINAL`.
+struct AnalyzePill: View {
+    enum Style { case new, neutral }
+    var text: String
+    var style: Style = .new
+    var size: CGFloat = 11.5
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: size, weight: style == .new ? .semibold : .regular))
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 3)
+            .background(style == .new ? Color(oklch: 0.8, 0.14, 75, alpha: 0.24) : Theme.fill, in: Capsule())
+            .foregroundStyle(style == .new ? Theme.amberInk : Theme.ink2)
+            .fixedSize()
+    }
+}
+
+// MARK: - Formatting
+
+/// Localized date labels and emphasized sentences used by the Analyze pages.
+@MainActor
+enum AnalyzeFormat {
+    /// `Today 14:31`, `Yesterday 21:16`, `Sep 30` (and `14:31` for today when `timeOnlyToday`).
+    static func seen(_ date: Date, timeOnlyToday: Bool = false, now: Date = .now) -> String {
+        switch Fmt.seen(date, now: now, timeOnlyToday: timeOnlyToday) {
+        case .time(let time): time
+        case .today(let time): trf("Today %@", "Inventory", time)
+        case .yesterday(let time): trf("Yesterday %@", "Inventory", time)
+        case .date(let day): Fmt.monthDay(day, locale: Localizer.shared.locale)
+        }
+    }
+
+    /// Fills the single `%@` of a localized `format` with `value` in a heavier, darker style.
+    static func emphasized(_ format: String, _ value: String, weight: Font.Weight = .semibold) -> AttributedString {
+        let parts = format.components(separatedBy: "%@")
+        var result = AttributedString(parts.first ?? "")
+        guard parts.count > 1 else { return result }
+        var highlighted = AttributedString(value)
+        highlighted.swiftUI.font = .system(size: 12, weight: weight)
+        highlighted.swiftUI.foregroundColor = Theme.ink
+        result += highlighted
+        result += AttributedString(parts.dropFirst().joined(separator: "%@"))
+        return result
+    }
+}
+
+// MARK: - Muting
+
+/// Mute state of a host or IP, shown as the hover action on inventory rows.
+enum AnalyzeMuteState: Equatable {
+    case unmuted
+    case muted
+    /// Matched by a wildcard pattern (`*.apple.com`); it can only be unmuted in Settings.
+    case mutedByRule
+
+    @MainActor
+    init(_ value: String, alerts: AlertState) {
+        if alerts.isMutedByRule(value) { self = .mutedByRule } else if alerts.isMuted(value) { self = .muted } else { self = .unmuted }
+    }
+}
+
+/// Small borderless Mute / Unmute / "Muted by rule" button for inventory rows.
+struct AnalyzeMuteButton: View {
+    @Environment(AppModel.self) private var model
+    var value: String
+
+    var body: some View {
+        let state = AnalyzeMuteState(value, alerts: model.alerts)
+        Button {
+            Task { await Self.toggle(value, state: state, model: model) }
+        } label: {
+            Text(Self.title(state))
+                .font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 7)
+                .frame(height: 20)
+                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(state == .mutedByRule ? Theme.ink3 : Theme.ink)
+        .disabled(state == .mutedByRule)
+        .fixedSize()
+    }
+
+    static func title(_ state: AnalyzeMuteState) -> String {
+        switch state {
+        case .unmuted: tr("Mute", "Inventory")
+        case .muted: tr("Unmute", "Inventory")
+        case .mutedByRule: tr("Muted by rule", "Inventory")
+        }
+    }
+
+    static func toggle(_ value: String, state: AnalyzeMuteState, model: AppModel) async {
+        switch state {
+        case .unmuted: await model.capture.mute(value, dismissingAlert: nil)
+        case .muted: await model.capture.unmute(value)
+        case .mutedByRule: break
+        }
+    }
+}
+
+// MARK: - CSV export
+
+/// Builds RFC 4180 CSV text for the Domains & IPs exports.
+enum AnalyzeCSV {
+    static func escape(_ field: String) -> String {
+        guard field.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" || $0 == "\r" }) else { return field }
+        return "\"" + field.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+    }
+
+    static func make(header: [String], rows: [[String]]) -> String {
+        ([header] + rows).map { $0.map(escape).joined(separator: ",") }.joined(separator: "\r\n") + "\r\n"
+    }
+
+    /// One row per domain or IP of a monitored app's inventory.
+    static func appHosts(_ hosts: [AppHost], mutes: [String], now: Date = .now) -> String {
+        let header = ["kind", "value", "site", "first_seen", "last_seen", "requests", "new", "muted",
+                      "by_ip_only", "resolved_from", "country", "asn", "organization", "policy", "first_process"]
+        let rows = hosts.map { host in
+            [host.kind.rawValue, host.value, host.site ?? "", timestamp(host.firstSeen), timestamp(host.lastSeen),
+             String(host.requestCount), host.isNew(now: now) ? "yes" : "no",
+             AlertState.matches(host.value, patterns: mutes) ? "yes" : "no",
+             host.kind == .ip && host.isDirect ? "yes" : "no", host.hosts.joined(separator: " "),
+             host.geo?.countryCode ?? "", host.geo?.asn.map { "AS\($0)" } ?? "", host.geo?.organization ?? "",
+             host.policy ?? "", host.processName ?? ""]
+        }
+        return make(header: header, rows: rows)
+    }
+
+    /// One row per entry of the global Domains & IPs page.
+    static func inventory(_ entries: [InventoryEntry]) -> String {
+        let header = ["kind", "value", "first_seen", "last_seen", "requests", "country", "asn", "organization", "seen_by"]
+        let rows = entries.map { entry in
+            [entry.kind.rawValue, entry.value, timestamp(entry.firstSeen), timestamp(entry.lastSeen),
+             String(entry.requestCount), entry.geo?.countryCode ?? "", entry.geo?.asn.map { "AS\($0)" } ?? "",
+             entry.geo?.organization ?? "", entry.sources.map(\.path).joined(separator: " | ")]
+        }
+        return make(header: header, rows: rows)
+    }
+
+    private static func timestamp(_ date: Date) -> String {
+        date.formatted(.iso8601)
+    }
+}
+
+/// A CSV file for the macOS 27 document-based `fileExporter(isPresented:document:…)`.
+final class AnalyzeCSVDocument: WritableDocument {
+    static var writableContentTypes: [UTType] { [.commaSeparatedText] }
+
+    private let data: Data
+
+    init(text: String) {
+        data = Data(text.utf8)
+    }
+
+    func writer(configuration: sending WriteConfiguration) -> sending FileWrapperDocumentWriter<Data> {
+        FileWrapperDocumentWriter(configuration) { snapshot, _ in
+            FileWrapper(regularFileWithContents: snapshot)
+        }
+    }
+
+    @MainActor
+    func snapshot(contentType: UTType) async throws -> sending Data { data }
+}
