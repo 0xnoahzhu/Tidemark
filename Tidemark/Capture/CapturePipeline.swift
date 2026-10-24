@@ -77,7 +77,7 @@ actor CapturePipeline {
         /// Latest event (or backfill) that reported the request.
         var lastSeen: Date
         var dirty = false
-        /// Changed in a way worth writing soon (attribution, remote IP, GeoIP, NEW, probe), not only bytes.
+        /// Changed in a way worth writing soon (attribution, remote IP, GeoIP, NEW, probe, policy), not only bytes.
         var urgent = false
         var finishedAt: Date?
         var probeMatched = false
@@ -111,7 +111,8 @@ actor CapturePipeline {
     let contactGrace: TimeInterval
     /// Active requests are rewritten at most this often while they change.
     let activeRewriteInterval: TimeInterval = 10
-    /// Rows with attribution, IP, GeoIP or NEW changes are rewritten after this short pause (to coalesce them).
+    /// Rows with attribution, IP, GeoIP, NEW, probe or policy changes are rewritten after this short pause (to
+    /// coalesce them).
     let urgentRewriteDelay: TimeInterval = 2
     let maxConcurrentLookups = 4
     /// Longest wait for a new app's inventory before its first contacts are evaluated anyway.
@@ -512,7 +513,10 @@ actor CapturePipeline {
 
     private func ingest(_ request: SurgeRequest, backfill: Bool, now: Date, trusted: Bool) {
         guard recording else {
-            if entries[request.id] == nil {
+            if var entry = entries[request.id] {
+                finishWhilePaused(&entry, request: request, now: now)
+                entries[request.id] = entry
+            } else {
                 if ignored.count > 100_000 { ignored.removeAll() }
                 ignored.insert(request.id)
             }
@@ -651,8 +655,10 @@ actor CapturePipeline {
             enqueue(&entry, now: now)
         } else if entry.record != before {
             entry.dirty = true
+            // Changes History shows (attribution, IP, GeoIP, probe, policy) go out soon; bytes alone wait.
             if entry.record.remoteIP != before.remoteIP || entry.record.appID != before.appID
-                || entry.record.probeSessionID != before.probeSessionID || entry.record.geo != before.geo {
+                || entry.record.probeSessionID != before.probeSessionID || entry.record.geo != before.geo
+                || entry.record.policyPath != before.policyPath || entry.record.rule != before.rule {
                 entry.urgent = true
             }
         } else {
@@ -661,9 +667,25 @@ actor CapturePipeline {
         markChanged(entry.record, fresh: false)
         // Contact evaluation reads the stored entry.
         entries[request.id] = entry
+        // A contact still queued is evaluated with its IP (now, or when its grace ends); only one evaluated
+        // before needs the late-IP pass, or the IP would be counted twice.
+        let contactQueued = contactQueue[request.id] != nil
         if finished { processContacts(now: now, only: request.id) }
-        if !hadIP, entry.record.remoteIP != nil { lateIPContact(id: request.id, now: now) }
+        if !hadIP, !contactQueued, entry.record.remoteIP != nil { lateIPContact(id: request.id, now: now) }
         if let stored = entries[request.id] { entry = stored }
+    }
+
+    /// While recording is paused, a request recorded before the pause still gets its end (state and time
+    /// only: no bytes, attribution or first contact), so its row does not stay active until the next reconnect.
+    private func finishWhilePaused(_ entry: inout Entry, request: SurgeRequest, now: Date) {
+        guard entry.record.state == .active, !looksRecycled(request, now: now) else { return }
+        let mapped = CaptureRecordMapper.record(from: request, deviceID: settings.deviceID, session: session, now: now)
+        guard mapped.state != .active else { return }
+        entry.record.state = mapped.state
+        entry.record.completedAt = mapped.completedAt ?? max(entry.record.startedAt, now)
+        entry.finishedAt = now
+        enqueue(&entry, now: now)
+        markChanged(entry.record, fresh: false)
     }
 
     // MARK: Attribution

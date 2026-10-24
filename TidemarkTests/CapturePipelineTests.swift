@@ -262,6 +262,67 @@ struct CapturePipelineTests {
         #expect(update.newRequests == 1)
     }
 
+    @Test func pausingStillEndsRequestsRecordedBefore() async {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let pipeline = makePipeline(database: database, surge: CaptureFakeSurge(), spoolDirectory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.ingest(CaptureFixtures.request(id: 1, host: "a.com", processPath: "/usr/bin/curl"), now: base)
+        await pipeline.tick(now: base.addingTimeInterval(1))
+        await pipeline.setRecording(false)
+
+        var finished = CaptureFixtures.request(id: 1, host: "a.com", processPath: "/usr/bin/curl", completed: true)
+        finished.inBytes = 9_999
+        await pipeline.ingest(finished, now: base.addingTimeInterval(2))
+        await pipeline.ingest(CaptureFixtures.request(id: 2, host: "b.com", processPath: "/usr/bin/curl"), now: base.addingTimeInterval(2))
+        await pipeline.tick(now: base.addingTimeInterval(3))
+
+        let row = await database.rows[RequestKey(deviceID: device, session: 0, surgeID: 1)]
+        #expect(row?.state == .completed, "its row does not stay active until the next reconnect")
+        #expect(row?.completedAt == Date(timeIntervalSince1970: 1_792_871_001))
+        #expect(row?.inBytes == 0, "nothing else is recorded while paused")
+        #expect(await database.rows.count == 1, "requests first seen while paused stay ignored")
+    }
+
+    @Test func aPolicyThatArrivesLaterIsWrittenSoon() async {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let pipeline = makePipeline(database: database, surge: CaptureFakeSurge(), spoolDirectory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        var undecided = CaptureFixtures.request(id: 1, host: "a.com", processPath: "/usr/bin/curl")
+        undecided.policyName = nil
+        undecided.notes = []
+        await pipeline.ingest(undecided, now: base)
+        await pipeline.tick(now: base.addingTimeInterval(1))
+        let key = RequestKey(deviceID: device, session: 0, surgeID: 1)
+        #expect(await database.rows[key]?.policyPath.isEmpty == true)
+
+        await pipeline.ingest(CaptureFixtures.request(id: 1, host: "a.com", processPath: "/usr/bin/curl", policy: "AI -> HK-01"),
+                              now: base.addingTimeInterval(1.5))
+        await pipeline.tick(now: base.addingTimeInterval(3.2))
+        #expect(await database.rows[key]?.policyPath == ["AI", "HK-01"], "History shows the policy within seconds, not after the 10 s rewrite")
+    }
+
+    @Test func anIPThatArrivesWithTheCompletionIsCountedOnce() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let raycast = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
+        await database.setKnown([raycast.id: ["api.notion.com"]])
+        let pipeline = makePipeline(database: database, surge: CaptureFakeSurge(), spoolDirectory: temp.url, contactGrace: 30)
+        await pipeline.setApps([raycast], paused: [])
+        try await pipeline.loadKnownHosts()
+        await pipeline.setDatabaseOnline(true)
+
+        // Proxied: no IP yet, so the contact waits for one.
+        await pipeline.ingest(nodeRequest(id: 1, host: "api.notion.com", remoteAddress: "23.254.139.175 (Proxy)"), now: base)
+        await pipeline.ingest(nodeRequest(id: 1, host: "api.notion.com", remoteAddress: "10.0.0.8", completed: true), now: base.addingTimeInterval(1))
+        await pipeline.tick(now: base.addingTimeInterval(2))
+
+        #expect(Set(await database.appHosts.values.map(\.value)) == ["10.0.0.8"])
+        #expect(await database.touches.filter { $0.kind == .ip }.isEmpty, "the new IP is inserted once, not touched as well")
+        #expect(await database.touches.filter { $0.kind == .domain }.count == 1)
+    }
+
     @Test func backfillIsNotCountedAsNewTraffic() async {
         let temp = CaptureTempDirectory()
         let pipeline = makePipeline(database: CaptureFakeDatabase(), surge: CaptureFakeSurge(), spoolDirectory: temp.url)
