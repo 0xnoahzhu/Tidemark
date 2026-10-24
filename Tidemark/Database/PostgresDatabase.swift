@@ -102,19 +102,16 @@ final class PostgresDatabase: TidemarkDatabase {
         case pool
         /// Derived from a statement timeout set for this call (`withTransaction(statementTimeout:)`).
         case statement(Duration)
-        /// Exactly this long.
+        /// Exactly this long (migrations and index builds, which set their own statement timeouts).
         case client(Duration)
-        /// No limit: index builds, which may legitimately run for hours.
-        case unbounded
 
-        /// The client-side limit for `pool`, nil when unbounded. Generous (twice the statement timeout plus
-        /// a margin), because one call may run several statements.
-        func duration(on pool: Pool) -> Duration? {
+        /// The client-side limit on `pool`. Derived limits are generous (twice the statement timeout plus a
+        /// margin), because one call may run several statements.
+        func duration(on pool: Pool) -> Duration {
             switch self {
             case .pool: Self.margin(pool.limits.statement)
             case .statement(let timeout): Self.margin(timeout)
             case .client(let limit): limit
-            case .unbounded: nil
             }
         }
 
@@ -123,7 +120,7 @@ final class PostgresDatabase: TidemarkDatabase {
             switch self {
             case .pool: pool.limits.statement
             case .statement(let timeout): timeout
-            case .client, .unbounded: nil
+            case .client: nil
             }
         }
 
@@ -379,20 +376,18 @@ final class PostgresDatabase: TidemarkDatabase {
     private static func run<Result: Sendable>(
         _ body: @escaping @Sendable (PostgresConnection) async throws -> Result,
         on connection: PostgresConnection,
-        limit: Duration?,
+        limit: Duration,
         closesOnCancel: Bool,
         endpoint: PostgresConnectionURL?
     ) async throws -> Result {
         let watchdog = ConnectionWatchdog(connection)
-        let timer = limit.map { limit in
-            Task(name: "PostgreSQL call limit") {
-                do { try await Task.sleep(for: limit) } catch { return }
-                watchdog.close(.expired)
-            }
+        let timer = Task(name: "PostgreSQL call limit") {
+            do { try await Task.sleep(for: limit) } catch { return }
+            watchdog.close(.expired)
         }
         defer {
             watchdog.disarm()
-            timer?.cancel()
+            timer.cancel()
         }
         do {
             guard closesOnCancel else { return try await body(connection) }
@@ -404,8 +399,7 @@ final class PostgresDatabase: TidemarkDatabase {
         } catch {
             switch watchdog.reason {
             case .expired:
-                let waited = limit.map(spoken) ?? "the limit"
-                throw DatabaseError.unreachable("No reply from \(endpoint?.redacted ?? "the server") within \(waited); the connection was closed.")
+                throw DatabaseError.unreachable("No reply from \(endpoint?.redacted ?? "the server") within \(spoken(limit)); the connection was closed.")
             case .cancelled:
                 throw CancellationError()
             case nil:

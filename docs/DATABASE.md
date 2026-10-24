@@ -62,7 +62,8 @@ the message "Query timed out: the server cancelled it after …", so a slow quer
 server that cannot be reached.
 
 On top of these, Tidemark closes a connection whose call has gone unanswered for twice its statement
-timeout plus 5 s (a server that vanished without closing the TCP connection, e.g. while the Mac slept), and
+timeout plus 5 s, 15 min for a migration and 6 h for index builds (a server that vanished without closing
+the TCP connection, e.g. while the Mac slept), and
 a writer connection as soon as capture gives up on its call. Its transaction then rolls back instead of
 committing later (unless its `COMMIT` was already under way), and calls capture abandoned never hold on to
 the two writer connections.

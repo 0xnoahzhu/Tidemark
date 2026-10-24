@@ -147,10 +147,11 @@ struct DatabaseUnitTests {
         #expect(Limit.pool.duration(on: .main) == .seconds(65))
         #expect(Limit.statement(.seconds(300)).duration(on: .main) == .seconds(605))
         #expect(Limit.client(.seconds(2)).duration(on: .writer) == .seconds(2))
-        #expect(Limit.unbounded.duration(on: .main) == nil)
         #expect(Limit.pool.statementTimeout(on: .writer) == .seconds(15))
         #expect(Limit.statement(.seconds(300)).statementTimeout(on: .main) == .seconds(300))
-        #expect(Limit.unbounded.statementTimeout(on: .main) == nil)
+        #expect(Limit.client(.seconds(2)).statementTimeout(on: .main) == nil)
+        // Index builds may take hours; their limit only frees a connection the server can no longer answer on.
+        #expect(PostgresDatabase.indexPassLimit >= .seconds(3 * 3_600))
     }
 
     @Test func invalidURLSurfacesOnConnect() async {

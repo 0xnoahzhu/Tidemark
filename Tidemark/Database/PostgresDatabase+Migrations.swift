@@ -44,6 +44,10 @@ extension PostgresDatabase {
     /// `maintenance_work_mem` for index builds (raised to this, never lowered): GIN builds on a large table
     /// are much faster with more than the 64 MB default.
     static let indexBuildMemory = "256MB"
+    /// Client-side limit of one pass over the index steps: far beyond any build, it only frees a connection
+    /// left half-open (e.g. the Mac slept during a build). A build still running on the server keeps
+    /// holding the index lock, so the next pass waits for it instead of dropping it.
+    static let indexPassLimit: Duration = .seconds(6 * 3_600)
 
     private static let maintenanceLog = os.Logger(subsystem: "io.tidemark.Tidemark", category: "database")
 
@@ -334,7 +338,7 @@ extension PostgresDatabase {
     func indexPass(upTo target: Int?, lockTimeout: String) async throws -> IndexPass {
         let schema = schema
         let quotedSchema = quotedSchema
-        return try await withConnection(limit: .unbounded) { connection in
+        return try await withConnection(limit: .client(Self.indexPassLimit)) { connection in
             let locked = try await connection.query(
                 "SELECT pg_try_advisory_lock(\(Self.indexLockClass), hashtext(\(schema))) AS locked", logger: Self.logger
             ).collect().first.map { try PostgresRowReader($0)("locked", as: Bool.self) }
