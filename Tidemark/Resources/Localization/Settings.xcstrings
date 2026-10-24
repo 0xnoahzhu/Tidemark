@@ -71,6 +71,26 @@
         }
       }
     },
+    "Adds a short description of the host, generated on this Mac. It never delays the alert." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "附上一句在这台 Mac 上生成的主机说明，不会延迟提醒。"
+          }
+        }
+      }
+    },
+    "Adds the network type (hosting, residential…) to egress IPs and IPs you look up. Only those addresses are sent. Off keeps lookups to Surge's own GeoIP data." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为出口 IP 和你查询的 IP 补充网络类型（机房、家庭宽带等），只会发送这些地址。关闭后只使用 Surge 自带的 GeoIP 数据。"
+          }
+        }
+      }
+    },
     "Alerts from other Macs" : {
       "localizations" : {
         "zh-Hans" : {
@@ -107,6 +127,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "外观"
+          }
+        }
+      }
+    },
+    "Apple Intelligence is unavailable on this Mac." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 上无法使用 Apple 智能。"
           }
         }
       }
@@ -271,6 +301,16 @@
         }
       }
     },
+    "Explain new hosts with Apple Intelligence" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用 Apple 智能解释新主机"
+          }
+        }
+      }
+    },
     "Follows System Settings › Appearance until you move it here." : {
       "localizations" : {
         "zh-Hans" : {
@@ -327,6 +367,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "主机和端口"
+          }
+        }
+      }
+    },
+    "IP info service" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IP 信息服务"
           }
         }
       }
@@ -547,6 +597,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "系统设置里关闭了 Tidemark 的通知。"
+          }
+        }
+      }
+    },
+    "Off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
           }
         }
       }

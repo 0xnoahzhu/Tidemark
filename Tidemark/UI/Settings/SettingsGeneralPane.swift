@@ -22,6 +22,10 @@ struct SettingsGeneralPane: View {
             }
 
             Section {
+                ipInfoServicePicker
+            }
+
+            Section {
                 Toggle(isOn: loginBinding) {
                     Text(tr("Open at login", "Settings"))
                     Text(tr("Starts recording right away and monitors every app except archived ones.", "Settings"))
@@ -47,7 +51,7 @@ struct SettingsGeneralPane: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: SettingsLayout.width, height: 390)
+        .frame(width: SettingsLayout.width, height: 470)
         .onAppear { loginStatus = SMAppService.mainApp.status }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             loginStatus = SMAppService.mainApp.status
@@ -119,24 +123,42 @@ struct SettingsGeneralPane: View {
     private var glassSlider: some View {
         @Bindable var preferences = model.preferences
         return LabeledContent {
-            Slider(value: $preferences.glass, in: 0...100) {
-                Text(tr("Liquid Glass", "Settings"))
-            } minimumValueLabel: {
+            // A plain 150 pt track between the two end labels, as in the design (no tick marks).
+            HStack(spacing: 8) {
                 Text(tr("Clear", "Settings"))
-            } maximumValueLabel: {
-                Text(tr("Tinted", "Settings"))
-            } ticks: {
-                SliderTickContentForEach(Array(stride(from: 0.0, through: 100.0, by: 25.0)), id: \.self) { value in
-                    SliderTick(value)
+                Slider(value: $preferences.glass, in: 0...100) {
+                    Text(tr("Liquid Glass", "Settings"))
                 }
+                .labelsHidden()
+                .frame(width: 150)
+                Text(tr("Tinted", "Settings"))
             }
-            .labelsHidden()
             .font(.system(size: 11))
             .foregroundStyle(Theme.ink2)
-            .frame(width: 250)
         } label: {
             Text(tr("Liquid Glass", "Settings"))
             Text(tr("Follows System Settings › Appearance until you move it here.", "Settings"))
+        }
+    }
+
+    /// Where the network type (hosting, residential…) of egress and looked-up IPs comes from.
+    private var ipInfoServicePicker: some View {
+        @Bindable var preferences = model.preferences
+        return Picker(selection: $preferences.ipInfoService) {
+            ForEach(Preferences.IPInfoService.allCases, id: \.self) { service in
+                Text(Self.ipInfoServiceName(service)).tag(service)
+            }
+        } label: {
+            Text(tr("IP info service", "Settings"))
+            Text(tr("Adds the network type (hosting, residential…) to egress IPs and IPs you look up. Only those addresses are sent. Off keeps lookups to Surge's own GeoIP data.", "Settings"))
+        }
+        .pickerStyle(.menu)
+    }
+
+    static func ipInfoServiceName(_ service: Preferences.IPInfoService) -> String {
+        switch service {
+        case .proxycheck: "proxycheck.io"
+        case .off: tr("Off", "Settings")
         }
     }
 

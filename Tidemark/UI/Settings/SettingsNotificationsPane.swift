@@ -48,6 +48,7 @@ struct SettingsNotificationsPane: View {
                     Text(tr("Group bursts", "Settings"))
                     Text(tr("One alert per app for anything new within 30 seconds", "Settings"))
                 }
+                explainHostsToggle
             }
             .disabled(!preferences.systemNotifications)
 
@@ -89,11 +90,34 @@ struct SettingsNotificationsPane: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: SettingsLayout.width, height: 600)
+        .frame(width: SettingsLayout.width, height: 650)
         .task { authorization = await Self.authorizationStatus() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { authorization = await Self.authorizationStatus() }
         }
+    }
+
+    // MARK: Host insights
+
+    /// Opt-in on-device explanation under new-host notifications. Shown off and disabled, with the reason,
+    /// while Apple Intelligence is unavailable.
+    private var explainHostsToggle: some View {
+        let available = model.insights.isAvailable
+        return Toggle(isOn: Binding(
+            get: { available && model.preferences.notifyExplainHosts },
+            set: { model.preferences.notifyExplainHosts = $0 }
+        )) {
+            Text(tr("Explain new hosts with Apple Intelligence", "Settings"))
+            Text(Self.explainHostsNote(available: available, reason: model.insights.unavailableReason))
+        }
+        .disabled(!available)
+    }
+
+    static func explainHostsNote(available: Bool, reason: String?) -> String {
+        guard !available else {
+            return tr("Adds a short description of the host, generated on this Mac. It never delays the alert.", "Settings")
+        }
+        return reason ?? tr("Apple Intelligence is unavailable on this Mac.", "Settings")
     }
 
     // MARK: System notifications
