@@ -113,14 +113,14 @@ final class EgressMonitor: EgressActions {
         guard HostName.isIPAddress(ip) else { return result }
         let surge = model.surge
         async let geo = try? CaptureTimeout.run(.seconds(5)) { try await surge.geoIP(ip) }
-        async let reverse = EgressIPInfo.reverseDNS(ip)
+        async let reverse = try? CaptureTimeout.run(.seconds(5)) { await EgressIPInfo.reverseDNS(ip) }
         async let service = EgressIPInfo.service(ip)
         let (surgeGeo, ptr, info) = await (geo, reverse, service)
         result.country = EgressPlanner.countryName(surgeGeo?.country ?? info?.countryCode)
         result.asn = surgeGeo?.asn ?? info?.asn
         result.organization = surgeGeo?.organization ?? info?.organization
         result.networkType = info?.networkType
-        result.reverseDNS = ptr ?? info?.hostname
+        result.reverseDNS = (ptr ?? nil) ?? info?.hostname
         return result
     }
 
