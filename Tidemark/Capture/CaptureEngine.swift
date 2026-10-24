@@ -46,6 +46,10 @@ final class CaptureEngine {
     let streamSilenceLimit: TimeInterval = 15
     /// Explaining a host may delay its notification by at most this much.
     let explanationTimeout: Duration = .milliseconds(1500)
+    /// Longest wait for connecting to PostgreSQL or a ping (migrations may take longer and are not bounded).
+    let connectTimeout: Duration = .seconds(20)
+    /// After this many failed reconnects in a row the client is rebuilt: its pooled connections may be dead.
+    let rebuildAfterFailures = 3
     /// Apps another Mac added are evaluated against their inventory once that Mac's backfill has had this long
     /// (counted from the app's creation) to rebuild it.
     let remoteInventoryAllowance: TimeInterval = 90
@@ -222,13 +226,17 @@ final class CaptureEngine {
     // MARK: PostgreSQL
 
     /// One connection attempt: connect, migrate, ping, register this Mac and load the shared state.
+    /// Connecting and the ping are bounded (a pooled connection may be dead); migrations are not, since
+    /// building an index on a large table may take minutes. Writes resume before the shared state has loaded,
+    /// so a slow read there never keeps capture offline.
     @discardableResult
     func connectDatabase() async -> Bool {
         model.live.database = .connecting
+        let database = self.database
         do {
-            try await database.connect()
+            try await CaptureTimeout.unstructured(connectTimeout) { try await database.connect() }
             try await database.migrate()
-            let ping = try await database.ping()
+            let ping = try await CaptureTimeout.unstructured(connectTimeout) { try await database.ping() }
             model.live.lastRoundTrip = ping.roundTrip
             model.live.serverVersion = ping.serverVersion
             model.live.database = .connected(detail: "PostgreSQL \(ping.serverVersion)")
@@ -237,8 +245,8 @@ final class CaptureEngine {
             await pipeline.setDatabaseOnline(false)
             return false
         }
-        await loadSharedState()
         await pipeline.setDatabaseOnline(true)
+        await loadSharedState()
         return true
     }
 
@@ -248,12 +256,19 @@ final class CaptureEngine {
     func scheduleDatabaseReconnect() {
         databaseTask?.cancel()
         databaseTask = Task { [weak self] in
+            var failures = 0
             while !Task.isCancelled {
                 guard let self else { return }
                 self.reconnectAttempt += 1
                 try? await Task.sleep(for: .seconds(Self.backoff(self.reconnectAttempt)))
                 guard !Task.isCancelled else { return }
                 if await self.connectDatabase() { return }
+                failures += 1
+                // Statements abandoned on dead sockets may still hold the pool's connections: start afresh.
+                if failures % self.rebuildAfterFailures == 0, self.makeDatabase != nil {
+                    let url = self.settingsDatabaseURL()
+                    await self.replaceDatabase(url: url, fingerprint: Self.fingerprint(url))
+                }
             }
         }
     }
@@ -281,18 +296,22 @@ final class CaptureEngine {
             guard let self else { return }
             // Rows are spooled until the (new) connection is up.
             await self.pipeline.setDatabaseOnline(false)
-            if let replacement, let make = self.makeDatabase {
-                let old = self.database
-                let database = make(replacement.url)
-                self.database = database
-                self.model.database = database
-                self.databaseFingerprint = replacement.fingerprint
-                self.databaseChanged?(database)
-                await self.pipeline.setServices(surge: self.surge, database: database)
-                if let retire = self.retireDatabase { Task.detached { await retire(old) } }
-            }
+            if let replacement { await self.replaceDatabase(url: replacement.url, fingerprint: replacement.fingerprint) }
             if !(await self.connectDatabase()) { self.scheduleDatabaseReconnect() }
         }
+    }
+
+    /// Switches to a new client for `url` and retires the old one (closing its pools) in the background.
+    private func replaceDatabase(url: String, fingerprint: String) async {
+        guard let make = makeDatabase else { return }
+        let old = database
+        let database = make(url)
+        self.database = database
+        model.database = database
+        databaseFingerprint = fingerprint
+        databaseChanged?(database)
+        await pipeline.setServices(surge: surge, database: database)
+        if let retire = retireDatabase { Task.detached { await retire(old) } }
     }
 
     /// Devices, apps, installs, mutes, inventory, alerts, probe sessions and counters.
