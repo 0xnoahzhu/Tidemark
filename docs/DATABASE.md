@@ -1,9 +1,21 @@
 # Tidemark database
 
 Tidemark keeps everything in one PostgreSQL database (PostgreSQL 14 or later; developed against 18.3).
-The app creates and upgrades the schema itself: on launch it takes an advisory lock, applies any pending
-migration from `Tidemark/Database/Schema.swift` inside a transaction and records it in
-`schema_migrations`. Several Macs can write to the same database at once.
+The app creates and upgrades the schema itself from the migrations in `Tidemark/Database/Schema.swift`.
+Several Macs can write to the same database at once.
+
+On every connect Tidemark reads `schema_migrations` without taking any lock. Only when this build has a
+migration to apply does it take an advisory lock (waiting at most 30 s for another Mac's migration), apply
+each pending migration in one transaction and record it in that same transaction. A Mac with nothing to
+apply never waits for another Mac.
+
+Index changes (`CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`, BRIN settings) are not part of
+those transactions and are not recorded: Tidemark compares the catalog with what the applied migrations
+ask for and applies whatever is missing under a second, per-schema advisory lock, so one Mac builds while
+every other Mac keeps connecting and writing. On small tables (up to 16 MB) this happens while
+connecting; on larger ones it runs in the background with no statement or lock timeout (these builds
+block no reads or writes), retrying with a backoff of 30 s up to 15 min after a failure. A build that
+fails drops the invalid index it left behind, so it is never maintained by writes in the meantime.
 
 All timestamps are `timestamptz` (stored in UTC). Request IDs from Surge restart whenever the Surge engine
 restarts, so a request is identified by `(device_id, surge_session, surge_id)`, where `surge_session` is the
@@ -14,7 +26,16 @@ engine start time in milliseconds.
 | Version | Changes |
 |---|---|
 | 1 | Initial tables. |
-| 2 | `egress_checks.network_type` / `has_ipv6`; `requests` fillfactor 80; the btree on `requests.updated_at` replaced by a BRIN index (so rewriting a request row can stay a HOT update on PostgreSQL 16+); one trigram index over host, process name, remote IP and bundle path for searches, replacing the separate host and remote-IP indexes; `schema_migrations.requires_version`. Indexes are built `CONCURRENTLY`, so the upgrade never blocks other Macs' writes. |
+| 2 | `egress_checks.network_type` / `has_ipv6`; `requests` fillfactor 80; the btree on `requests.updated_at` replaced by a BRIN index (so rewriting a request row can stay a HOT update on PostgreSQL 16+); one trigram index over host, process name, remote IP and bundle path for searches, replacing the separate `host`, host-trigram and remote-IP indexes; `host_sources_last_seen_idx` dropped (no query used it); `schema_migrations.requires_version`. |
+| 3 | `requests_active_idx`, a partial index on `requests (device_id, surge_session) WHERE state = 'active'`, so closing the requests left active by an ended Surge session or by a crash reads only the rows still active; `autosummarize = on` for the BRIN index on `requests.updated_at`, so block ranges are summarized as they fill instead of at the next vacuum. Index changes only: every older Tidemark keeps writing. |
+
+Indexes are built and dropped `CONCURRENTLY`, so an upgrade does not block reads or writes (v3's BRIN
+setting locks that index for a moment and gives up after 3 s, to try again). Tidemark builds whose schema
+is 2 applied a migration's index steps while holding the migration lock and recorded the migration only
+afterwards: while such a build upgraded a large database, every other Mac that reconnected failed to
+connect (and spooled) until the build finished. Later builds take the migration lock only for the
+migrations' transactions, so a Mac still running a schema-2 build connects normally while a later build
+creates indexes.
 
 A migration records the oldest schema its writers still understand (`requires_version`). A Mac running an
 older Tidemark keeps writing as long as that version is not newer than its own schema, and otherwise asks to
@@ -23,10 +44,31 @@ be updated.
 ## Connections
 
 Tidemark opens a 6-connection pool for reads and a 2-connection writer pool (`Tidemark writer` in
-`pg_stat_activity`). Each sets `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout`
-(30 s / 10 s / 60 s for reads, 60 s / 5 s / 30 s for writes). URLs without `sslmode` use `prefer` for remote
-hosts (TLS when the server offers it) and `disable` for loopback; `sslmode=require`, `verify-ca` and
-`verify-full` (with `sslrootcert=`) are supported.
+`pg_stat_activity`). Each sets `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout`:
+
+| Work | Statement | Lock | Idle in transaction |
+|---|---|---|---|
+| Reads, settings (`Tidemark`) | 30 s | 10 s | 60 s |
+| Reads over a long history: History pages, totals and histogram, the policy list, an app's counters and process tree, the backfill preview | 5 min (`SET LOCAL` in its own transaction) | 10 s | 60 s |
+| Maintenance: retention, backfill, deleting an app | 10 min (`SET LOCAL`) | 10 s | 60 s |
+| Capture writes (`Tidemark writer`) | 15 s | 5 s | 15 s |
+| Closing requests of ended sessions or that ended while Tidemark was not running | 15 s (`SET LOCAL`) | 10 s | 60 s |
+| Migration transactions | 5 min | 3 s per statement (retried) | 60 s |
+| Index builds of migrations | none | none in the background; 10 s while connecting; 3 s for a BRIN setting | 60 s |
+
+The capture writes and the session closing stay below capture's own 20 s bound per write, so the server
+cancels a statement capture already gave up on. A statement cancelled at its statement timeout fails with
+the message "Query timed out: the server cancelled it after …", so a slow query is not mistaken for a
+server that cannot be reached.
+
+On top of these, Tidemark closes a connection whose call has gone unanswered for twice its statement
+timeout plus 5 s (a server that vanished without closing the TCP connection, e.g. while the Mac slept), and
+a writer connection as soon as capture gives up on its call. Its transaction then rolls back instead of
+committing later (unless its `COMMIT` was already under way), and calls capture abandoned never hold on to
+the two writer connections.
+
+URLs without `sslmode` use `prefer` for remote hosts (TLS when the server offers it) and `disable` for
+loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`) are supported.
 
 ## Tables
 
@@ -51,7 +93,7 @@ hosts (TLS when the server offers it) and `disable` for loopback; `sslmode=requi
 
 | Column | Meaning |
 |---|---|
-| `started_at`, `setup_completed_at`, `completed_at` | Surge's timestamps |
+| `started_at`, `setup_completed_at`, `completed_at` | Surge's timestamps. When Tidemark never saw a request end (Surge restarted, or the connection ended while Tidemark was not running), `completed_at` is the request's last write by Tidemark (its last observed change), never later than the restart or relaunch and never before `started_at` |
 | `method` | `HTTPS`, `TCP`, `UDP`, `QUIC` or an HTTP verb |
 | `host`, `port`, `is_ip_literal` | destination as requested; `is_ip_literal` when the app connected to an IP with no hostname |
 | `remote_ip`, `geo` | best known destination IP and its GeoIP data (`{"countryCode":"US","asn":13335,"organization":"Cloudflare, Inc."}`) |
@@ -87,14 +129,22 @@ WHERE h.first_seen > now() - interval '24 hours'
 ORDER BY h.first_seen DESC;
 ```
 
+There is no index on `requests.host` (v2 dropped it): filter hosts through the search expression below,
+which the trigram index `requests_search_trgm_idx` serves, and add an exact condition when needed. A plain
+`WHERE host = …` reads the table newest first until it has found enough rows, which for a rare host means
+most of the table.
+
 Every process (and its parents) that talked to a host:
 
 ```sql
-SELECT started_at, process_name, chain, remote_ip, policy_path
-FROM requests WHERE host = 'api.github.com' ORDER BY started_at DESC LIMIT 50;
+SELECT started_at, process_name, chain, remote_ip, policy_path FROM requests
+WHERE (host || E'\n' || COALESCE(process_name, '') || E'\n' || COALESCE(host(remote_ip), '') || E'\n' || COALESCE(bundle_path, ''))
+      ILIKE '%api.github.com%'
+  AND host = 'api.github.com'
+ORDER BY started_at DESC LIMIT 50;
 ```
 
-Every request that touched a host (uses the v2 search index for `ILIKE`, so prefer it over `host = …`):
+Every request that touched a host, by name, process, IP or bundle path (the same index):
 
 ```sql
 SELECT started_at, process_name, remote_ip, policy_path FROM requests
@@ -119,3 +169,10 @@ GROUP BY host ORDER BY requests DESC LIMIT 25;
   `SELECT pg_size_pretty(pg_total_relation_size('requests'));`.
 * **Schema changes** — never edit the tables by hand while Tidemark runs; new versions of the app add
   migrations instead of changing existing ones.
+* **Index builds** — after an upgrade on a large database, `pg_stat_progress_create_index` shows a
+  background build's progress (`SELECT * FROM pg_stat_progress_create_index;`). It waits for transactions
+  older than itself (a long `pg_dump`, a psql session left idle in a transaction) before it can finish.
+  Tidemark logs failed builds under the `database` category of `io.tidemark.Tidemark` and retries them.
+* **Backfill** — monitoring an app with "include past requests" attributes its past requests in windows of
+  50,000 row IDs, then its processes and host sources, each in a statement of its own, then merges the
+  rebuilt inventory 500 entries per transaction; capture's writes to the same rows never wait long.
