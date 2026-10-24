@@ -1,0 +1,41 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Hong Kong" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "香港" } }
+      }
+    },
+    "Macao" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "澳门" } }
+      }
+    },
+    "Russia" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "俄罗斯" } }
+      }
+    },
+    "South Korea" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "韩国" } }
+      }
+    },
+    "Taiwan" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "台湾" } }
+      }
+    },
+    "United Kingdom" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "英国" } }
+      }
+    },
+    "United States" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "美国" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}
