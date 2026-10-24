@@ -119,6 +119,24 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(summary.visibleIPCount(selectedHost: nil) == 2)
     }
 
+    /// "x of y" counts only the groups the Direct / From domains switch lists.
+    @Test func ipCountFollowsTheDirectAndResolvedFilter() {
+        let now = Date()
+        let hosts = [
+            host("api2.cursor.sh", now: now),
+            host("104.18.19.125", kind: .ip, hosts: ["api2.cursor.sh"], now: now),
+            host("104.18.18.125", kind: .ip, hosts: ["api3.cursor.sh"], now: now),
+            host("149.154.175.60", kind: .ip, direct: true, now: now),
+        ]
+        let summary = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(summary.visibleIPCount(selectedHost: nil, filter: .all) == 3)
+        #expect(summary.visibleIPCount(selectedHost: nil, filter: .direct) == 1)
+        #expect(summary.visibleIPCount(selectedHost: nil, filter: .resolved) == 2)
+        #expect(summary.visibleIPCount(selectedHost: "api2.cursor.sh", filter: .direct) == 0)
+        #expect(summary.visibleIPCount(selectedHost: "api2.cursor.sh", filter: .resolved) == 1)
+        #expect(summary.ipCount == 3, "the total stays every IP")
+    }
+
     @Test func headlineMentionsDirectIPsOnlyWhenThereAreSome() {
         let now = Date()
         let resolved = host("104.18.19.125", kind: .ip, hosts: ["api2.cursor.sh"], now: now)

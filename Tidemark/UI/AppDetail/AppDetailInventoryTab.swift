@@ -171,7 +171,7 @@ struct AppDetailInventoryTab: View {
     private var ipsPane: some View {
         @Bindable var nav = model.nav
         let selected = summary.selectedHost(nav.appSelectedHost)
-        let shown = summary.visibleIPCount(selectedHost: selected)
+        let shown = summary.visibleIPCount(selectedHost: selected, filter: nav.appIPFilter)
         let title = HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(selected.map { trf("IPs used by %@", "AppDetail", $0) } ?? tr("All IPs", "AppDetail"))
                 .font(.system(size: 12.5, weight: .bold))
@@ -526,10 +526,15 @@ struct AppDetailInventorySummary {
         return host
     }
 
-    /// IPs not dimmed by the host selection (all of them when nothing is selected).
-    func visibleIPCount(selectedHost: String?) -> Int {
-        let all = directIPs + resolvedIPs
-        guard let selectedHost else { return all.count }
-        return all.filter { $0.hosts.contains(selectedHost) }.count
+    /// IPs the pane lists for `filter` (Direct, From domains or both) that the host selection doesn't dim
+    /// (all of them when nothing is selected).
+    func visibleIPCount(selectedHost: String?, filter: Navigation.IPFilter = .all) -> Int {
+        let listed: [AppHost] = switch filter {
+        case .all: directIPs + resolvedIPs
+        case .direct: directIPs
+        case .resolved: resolvedIPs
+        }
+        guard let selectedHost else { return listed.count }
+        return listed.filter { $0.hosts.contains(selectedHost) }.count
     }
 }
