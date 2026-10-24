@@ -1,5 +1,4 @@
 import AppKit
-import SwiftUI
 
 /// The menu bar glyph (the "dots" variant of the design's `MenuGlyph`): a dashed threshold, a rising
 /// line of dots and a marker circle, drawn as an 18 × 18 pt template image.
@@ -95,16 +94,6 @@ enum MenuBarGlyph {
 
         context.endTransparencyLayer()
         context.restoreGState()
-    }
-}
-
-/// SwiftUI rendering of the menu bar glyph for the current model state (used by `MenuBarExtra` hosts and previews).
-struct MenuBarLabel: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        Image(nsImage: MenuBarGlyph.image(for: MenuBarGlyph.state(for: model)))
-            .accessibilityLabel(MenuBarStatusText.accessibilityLabel(for: MenuBarGlyph.state(for: model), unread: model.alerts.unreadCount))
     }
 }
 

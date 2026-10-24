@@ -8,7 +8,12 @@ import SwiftUI
 /// item is clicked (`statusItem(_:didBegin:)`) and ends it when the user clicks the item again, opens
 /// another menu or navigates away (`statusItemDidEndExpandedInterfaceSession(_:animated:)`). The panel is
 /// shown and hidden in those callbacks; anything else that should close it (an action inside it, a click in
-/// another window, Escape) cancels the session, which then ends through the delegate.
+/// another window, Escape) cancels the session, which then ends through the delegate. As the SDK asks, the
+/// button has no target/action of its own: the session is the only way a click opens the panel.
+///
+/// The panel's SwiftUI content exists only while the panel is on screen. It is released when the panel is
+/// ordered out and rebuilt when it is shown, so the live counters it observes stop driving updates while
+/// nobody can see them.
 @MainActor
 final class StatusItemController: NSObject {
     private static var shared: StatusItemController?
@@ -40,8 +45,6 @@ final class StatusItemController: NSObject {
     private var eventMonitors: [Any] = []
     /// Incremented on every show, so a stale fade-out never hides a panel that was shown again.
     private var presentation = 0
-    /// Time of the last session begin / end, used to ignore the button action of the same click.
-    private var lastSessionChange = Date.distantPast
 
     private init(model: AppModel) {
         self.model = model
@@ -49,11 +52,7 @@ final class StatusItemController: NSObject {
         super.init()
         statusItem.autosaveName = "io.tidemark.status-item"
         statusItem.expandedInterfaceDelegate = self
-        if let button = statusItem.button {
-            button.imagePosition = .imageOnly
-            button.target = self
-            button.action = #selector(buttonAction(_:))
-        }
+        statusItem.button?.imagePosition = .imageOnly
         observation = withContinuousObservation(options: [.didSet]) { [weak self] _ in
             self?.refresh()
         }
@@ -79,22 +78,6 @@ final class StatusItemController: NSObject {
         button.setAccessibilityLabel(label)
     }
 
-    /// Fallback for a click delivered as a plain button action rather than as an expanded-interface session.
-    @objc private func buttonAction(_ sender: Any?) {
-        let clickedAt = Date.now
-        Task { @MainActor [weak self] in
-            await Task.yield()
-            guard let self else { return }
-            // The same click already began or ended a system session.
-            if statusItem.expandedInterfaceSession != nil || lastSessionChange > clickedAt.addingTimeInterval(-0.6) { return }
-            if panel?.isVisible == true {
-                closePanel(animated: true)
-            } else {
-                showPanel()
-            }
-        }
-    }
-
     /// Closes the panel: cancels the session (the delegate then hides the panel) or hides it directly.
     func dismiss() {
         if let session = statusItem.expandedInterfaceSession {
@@ -106,7 +89,24 @@ final class StatusItemController: NSObject {
 
     // MARK: Panel
 
+    /// The borderless panel and its glass. The SwiftUI content is installed by `installContent()`.
     private func makePanel() -> MenuBarPanelWindow {
+        let glass = NSGlassEffectView()
+        glass.cornerRadius = 18
+        glass.effectIsInteractive = true
+        glassView = glass
+        applyGlass(model.preferences.glass)
+
+        let panel = MenuBarPanelWindow(contentRect: NSRect(x: 0, y: 0, width: MenuBarPanel.width, height: 300))
+        panel.contentView = glass
+        panel.onCancel = { [weak self] in self?.dismiss() }
+        panel.delegate = self
+        return panel
+    }
+
+    /// Builds the panel's SwiftUI content. The model is passed explicitly: views hosted by AppKit do not
+    /// inherit SwiftUI environment objects.
+    private func installContent() -> NSView {
         let root = MenuBarPanel(onDismiss: { [weak self] in self?.dismiss() })
             .fixedSize()
             .onGeometryChange(for: CGSize.self, of: { $0.size }) { [weak self] size in
@@ -116,19 +116,13 @@ final class StatusItemController: NSObject {
             .environment(Localizer.shared)
         let hosting = NSHostingView(rootView: root)
         hosting.sizingOptions = [.intrinsicContentSize]
+        glassView?.contentView = hosting
+        return hosting
+    }
 
-        let glass = NSGlassEffectView()
-        glass.cornerRadius = 18
-        glass.effectIsInteractive = true
-        glass.contentView = hosting
-        glassView = glass
-        applyGlass(model.preferences.glass)
-
-        let panel = MenuBarPanelWindow(contentRect: NSRect(origin: .zero, size: hosting.fittingSize))
-        panel.contentView = glass
-        panel.onCancel = { [weak self] in self?.dismiss() }
-        panel.delegate = self
-        return panel
+    /// Drops the SwiftUI content of a hidden panel, ending its observation of live state.
+    private func releaseContent() {
+        glassView?.contentView = nil
     }
 
     /// Settings › General › Liquid Glass: nearly clear glass at 0, a window-colored frost at 100.
@@ -151,12 +145,11 @@ final class StatusItemController: NSObject {
         let panel = panel ?? makePanel()
         self.panel = panel
         presentation += 1
-        // Like a menu, the panel appears at once; it may already be up when a fallback action raced the session.
+        // Like a menu, the panel appears at once, sized to fresh content.
         if !panel.isVisible {
-            if let hosting = glassView?.contentView {
-                let size = hosting.fittingSize
-                if size.width > 0, size.height > 0 { panel.setContentSize(size) }
-            }
+            let hosting = glassView?.contentView ?? installContent()
+            let size = hosting.fittingSize
+            if size.width > 0, size.height > 0 { panel.setContentSize(size) }
             position(panel)
         }
         panel.alphaValue = 1
@@ -170,6 +163,7 @@ final class StatusItemController: NSObject {
         guard let panel, panel.isVisible else { return }
         guard animated else {
             panel.orderOut(nil)
+            releaseContent()
             return
         }
         // Fade out like a menu. The window is ordered out on a timer rather than in the animation's
@@ -184,6 +178,7 @@ final class StatusItemController: NSObject {
             guard let self, presentation == closing else { return }
             panel.orderOut(nil)
             panel.alphaValue = 1
+            releaseContent()
         }
     }
 
@@ -232,12 +227,10 @@ final class StatusItemController: NSObject {
 
 extension StatusItemController: @MainActor NSStatusItemExpandedInterfaceDelegate {
     func statusItem(_ statusItem: NSStatusItem, didBegin expandedInterfaceSession: NSStatusItemExpandedInterfaceSession) {
-        lastSessionChange = .now
         showPanel()
     }
 
     func statusItemDidEndExpandedInterfaceSession(_ statusItem: NSStatusItem, animated: Bool) {
-        lastSessionChange = .now
         closePanel(animated: animated)
     }
 }
