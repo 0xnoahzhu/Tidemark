@@ -1,0 +1,346 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ new destinations" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 个新目的地"
+          }
+        }
+      }
+    },
+    "%@ request today" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日 %@ 个请求"
+          }
+        }
+      }
+    },
+    "%@ requests today" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日 %@ 个请求"
+          }
+        }
+      }
+    },
+    "1 new destination" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 个新目的地"
+          }
+        }
+      }
+    },
+    "App" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App"
+          }
+        }
+      }
+    },
+    "Counts the requests this Mac recorded today and the new destinations its monitored apps reached." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "统计这台 Mac 今天记录的请求数，以及被监控的 App 访问的新目的地。"
+          }
+        }
+      }
+    },
+    "IP Address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IP 地址"
+          }
+        }
+      }
+    },
+    "IP Details" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IP 信息"
+          }
+        }
+      }
+    },
+    "Look up ${ip}" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查询 ${ip}"
+          }
+        }
+      }
+    },
+    "Look Up IP" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查询 IP"
+          }
+        }
+      }
+    },
+    "Look Up IP Address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查询 IP 地址"
+          }
+        }
+      }
+    },
+    "Monitored App" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "被监控的 App"
+          }
+        }
+      }
+    },
+    "Monitored Application" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "被监控的应用"
+          }
+        }
+      }
+    },
+    "New destinations today" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日新目的地"
+          }
+        }
+      }
+    },
+    "No details found for %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有找到 %@ 的信息。"
+          }
+        }
+      }
+    },
+    "no new destinations" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有新目的地"
+          }
+        }
+      }
+    },
+    "Off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
+          }
+        }
+      }
+    },
+    "On" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启"
+          }
+        }
+      }
+    },
+    "Open ${target}" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 ${target}"
+          }
+        }
+      }
+    },
+    "Open Monitored App" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开被监控的 App"
+          }
+        }
+      }
+    },
+    "Pause or Resume Recording" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂停或恢复记录"
+          }
+        }
+      }
+    },
+    "Recording" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "记录"
+          }
+        }
+      }
+    },
+    "Recording paused. Requests Surge handles from now on won't be saved to PostgreSQL, and no new-site alerts will fire until you resume." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停记录。从现在起 Surge 处理的请求不会写入 PostgreSQL，也不会再有新站点提醒，直到你恢复记录。"
+          }
+        }
+      }
+    },
+    "Recording resumed. Every request Surge sees will be saved to PostgreSQL again, and alerts turn back on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已恢复记录。Surge 看到的每个请求会重新写入 PostgreSQL，提醒也会恢复。"
+          }
+        }
+      }
+    },
+    "Requests Today" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日请求"
+          }
+        }
+      }
+    },
+    "Requests today" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日请求"
+          }
+        }
+      }
+    },
+    "Shows a monitored app's requests, domains and IPs in Tidemark." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Tidemark 中显示被监控 App 的请求、域名与 IP。"
+          }
+        }
+      }
+    },
+    "Shows the country, network and organization of an IP address." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示 IP 地址所属的国家或地区、网络和组织。"
+          }
+        }
+      }
+    },
+    "That app is no longer monitored." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 App 已不再被监控。"
+          }
+        }
+      }
+    },
+    "Today's Summary" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日摘要"
+          }
+        }
+      }
+    },
+    "Turn recording ${recording}" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将记录设为${recording}"
+          }
+        }
+      }
+    },
+    "Turns Tidemark's recording on or off. Leave Recording empty to switch it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开或关闭 Tidemark 的记录。“记录”留空时会切换当前状态。"
+          }
+        }
+      }
+    },
+    "Which IP address?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要查询哪个 IP 地址？"
+          }
+        }
+      }
+    },
+    "“%@” isn't an IP address." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”不是 IP 地址。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
