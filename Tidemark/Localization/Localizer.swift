@@ -20,7 +20,8 @@ final class Localizer {
     }
 
     private(set) var languageCode = "en"
-    private(set) var bundle: Bundle = .main
+    /// Translation bundle; nil for English, whose catalog keys are the English text.
+    private(set) var bundle: Bundle?
     private(set) var locale = Locale(identifier: "en")
 
     var isChinese: Bool { languageCode == "zh-Hans" }
@@ -38,18 +39,15 @@ final class Localizer {
         }
         languageCode = code
         locale = Locale(identifier: code)
-        if let path = Bundle.main.path(forResource: code, ofType: "lproj"), let b = Bundle(path: path) {
-            bundle = b
-        } else {
-            bundle = .main
-        }
+        bundle = code == "en" ? nil : Bundle.main.path(forResource: code, ofType: "lproj").flatMap(Bundle.init(path:))
     }
 }
 
 /// Localized string for `key` from catalog `table`, in the language chosen in Settings.
 @MainActor
 func tr(_ key: String, _ table: String) -> String {
-    Localizer.shared.bundle.localizedString(forKey: key, value: key, table: table)
+    guard let bundle = Localizer.shared.bundle else { return key }
+    return bundle.localizedString(forKey: key, value: key, table: table)
 }
 
 /// Localized format string for `key`, filled with `args` (`%@`, `%lld`, `%d`, positional `%1$@` supported).
