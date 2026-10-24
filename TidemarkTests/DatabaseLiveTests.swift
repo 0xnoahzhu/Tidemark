@@ -33,7 +33,14 @@ struct DatabaseLiveTests {
                 let read = PostgresRowReader(row)
                 return "\(try read("version", as: Int.self)):\(try read("requires_version", as: Int?.self).map(String.init) ?? "-")"
             }
-            #expect(requires == ["1:-", "2:1"])
+            #expect(requires == ["1:-", "2:1", "3:1"])
+
+            // Every index step is in effect.
+            let built = try await indexes(db)
+            for name in ["requests_active_idx", "requests_updated_brin_idx", "requests_search_trgm_idx"] {
+                #expect(built[name] == true, "\(name)")
+            }
+            #expect(try await indexOptions(db, "requests_updated_brin_idx") == ["pages_per_range=16", "autosummarize=on"])
         }
     }
 
@@ -1009,7 +1016,7 @@ struct DatabaseLiveTests {
                 VALUES (\(mac.id), \(Fixture.now), \(["DIRECT"]), '203.0.113.7', true)
                 """)
 
-            #expect(try await db.migrate() == 2)
+            #expect(try await db.migrate(upTo: 2) == 2)
             #expect(try await db.schemaVersion() == 2)
 
             // Every row survived.
@@ -1049,10 +1056,63 @@ struct DatabaseLiveTests {
             #expect(try await db.queryRequests(RequestQuery(range: .all, search: "SVC4")).totalCount == 11)
             #expect(try await db.queryRequests(RequestQuery(range: .all, search: "104.18.0.7")).rows.map(\.key.surgeID) == [7])
 
-            // An upgrade interrupted after its index steps (version not recorded) simply runs again.
+            // A migration whose record is missing simply runs again.
             try await db.execute("DELETE FROM schema_migrations WHERE version = 2")
-            #expect(try await db.migrate() == 2)
+            #expect(try await db.migrate(upTo: 2) == 2)
             #expect(try await indexes(db) == upgraded)
+
+            // v3: the active-request index and BRIN autosummarize; closing old sessions uses the new index.
+            #expect(try await db.migrate() == 3)
+            let v3 = try await indexes(db)
+            #expect(v3["requests_active_idx"] == true)
+            #expect(v3.count == upgraded.count + 1)
+            #expect(try await indexOptions(db, "requests_updated_brin_idx") == ["pages_per_range=16", "autosummarize=on"])
+            #expect(try await db.closeActiveRequests(deviceID: mac.id, before: Fixture.session + 1, at: Fixture.now) == 50)
+            #expect(try await db.queryRequests(RequestQuery(range: .all, status: .active)).totalCount == 0)
+        }
+    }
+
+    @Test func indexStepsRunInTheBackgroundAndReplaceInvalidLeftovers() async throws {
+        try await withTestDatabase(upTo: 2) { db in
+            let mac = Fixture.device("MacBook Pro")
+            try await db.upsertDevice(mac)
+            try await db.upsertRequests([Fixture.request(device: mac.id, id: 1), Fixture.request(device: mac.id, id: 2)])
+
+            // A build that failed half-way (here: a unique index over duplicates) leaves an invalid index behind.
+            await #expect(throws: DatabaseError.self) {
+                try await db.execute("CREATE UNIQUE INDEX CONCURRENTLY requests_active_idx ON requests (device_id) WHERE state = 'active'")
+            }
+            #expect(try await indexes(db)["requests_active_idx"] == false)
+
+            // The transaction part is recorded at once; the index steps follow in the background.
+            #expect(try await db.migrate(upTo: nil, indexBuilds: .background) == 3)
+            #expect(try await db.schemaVersion() == 3)
+            await db.indexMaintenanceFinished()
+            #expect(try await indexes(db)["requests_active_idx"] == true)
+            let unique = try await db.rows("""
+                SELECT i.indisunique AS unique FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+                JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = \(db.schema) AND c.relname = 'requests_active_idx'
+                """).first.map { try PostgresRowReader($0)("unique", as: Bool.self) }
+            #expect(unique == false)
+            #expect(try await indexOptions(db, "requests_updated_brin_idx") == ["pages_per_range=16", "autosummarize=on"])
+
+            // While another Mac holds the index lock, nothing is built here and connecting does not wait.
+            try await db.execute("DROP INDEX requests_active_idx")
+            let schema = db.schema
+            try await db.withConnection { connection in
+                _ = try await connection.query(
+                    "SELECT pg_advisory_lock(\(PostgresDatabase.indexLockClass), hashtext(\(schema)))", logger: PostgresDatabase.logger
+                ).collect()
+                let clock = ContinuousClock()
+                let start = clock.now
+                #expect(try await db.migrate() == 3)
+                #expect(start.duration(to: clock.now) < .seconds(2))
+                #expect(try await indexes(db)["requests_active_idx"] == nil)
+                _ = try await connection.query("SELECT pg_advisory_unlock_all()", logger: PostgresDatabase.logger).collect()
+            }
+            // Once the lock is free the steps are applied (here or by the background task started meanwhile).
+            try await db.buildIndexes(upTo: nil, waitingForLock: .seconds(30))
+            #expect(try await indexes(db)["requests_active_idx"] == true)
         }
     }
 
@@ -1079,13 +1139,21 @@ struct DatabaseLiveTests {
         }
     }
 
-    @Test func migrationWaitsForAnotherMacsMigration() async throws {
+    @Test func onlyAMacWithMigrationsToApplyWaitsForAnotherMacsMigration() async throws {
         try await withTestDatabase { db in
-            let waited = try await db.withConnection { connection in
+            let (unblocked, waited) = try await db.withConnection { connection in
                 // This connection plays another Mac that is migrating.
                 _ = try await connection.query("SELECT pg_advisory_lock(\(PostgresDatabase.migrationLockKey))", logger: PostgresDatabase.logger).collect()
                 let clock = ContinuousClock()
-                let start = clock.now
+
+                // Up to date: connecting reads the versions and goes on without the lock.
+                var start = clock.now
+                #expect(try await db.migrate() == Schema.latestVersion)
+                let unblocked = start.duration(to: clock.now)
+
+                // A migration to apply: it waits for the other Mac.
+                try await db.execute(PostgresQuery(unsafeSQL: "DELETE FROM schema_migrations WHERE version = \(Schema.latestVersion)"))
+                start = clock.now
                 let migration = Task { () throws -> Duration in
                     let version = try await db.migrate()
                     #expect(version == Schema.latestVersion)
@@ -1093,9 +1161,11 @@ struct DatabaseLiveTests {
                 }
                 try await Task.sleep(for: .milliseconds(700))
                 _ = try await connection.query("SELECT pg_advisory_unlock(\(PostgresDatabase.migrationLockKey))", logger: PostgresDatabase.logger).collect()
-                return try await migration.value
+                return (unblocked, try await migration.value)
             }
+            #expect(unblocked < .milliseconds(500))
             #expect(waited >= .milliseconds(600))
+            #expect(try await db.schemaVersion() == Schema.latestVersion)
         }
     }
 
@@ -1320,10 +1390,37 @@ struct DatabaseLiveTests {
             #expect(try await db.queryRequests(RequestQuery(range: .all, search: "github.com")).totalCount == 1)
             #expect(try await db.queryRequests(RequestQuery(range: .all, search: "CURL")).totalCount == 1)
             #expect(try await db.queryRequests(RequestQuery(range: .all, search: "github.com\ncurl")).totalCount == 0)
+
+            // Closing old sessions' and vanished requests reads only the few active rows, not the history.
+            var history: [RequestRecord] = []
+            for index in 0..<2_000 {
+                var row = Fixture.request(device: mac.id, id: Int64(100 + index), host: "history.example.com")
+                row.state = .completed
+                history.append(row)
+            }
+            try await db.upsertRequests(history)
+            try await db.execute("ANALYZE requests")
+            var closeOld = PostgresDatabase.SQL("EXPLAIN UPDATE requests SET state = 'completed' WHERE device_id = ")
+            closeOld.append(closeOld.bind(mac.id) + " AND state = 'active' AND surge_session < " + closeOld.bind(Fixture.session))
+            let closeOldPlan = try await plan(closeOld)
+            #expect(closeOldPlan.contains("requests_active_idx") && !closeOldPlan.contains("Seq Scan"), "\(closeOldPlan)")
+            var closeVanished = PostgresDatabase.SQL("EXPLAIN UPDATE requests SET state = 'completed' WHERE device_id = ")
+            closeVanished.append(closeVanished.bind(mac.id) + " AND surge_session = " + closeVanished.bind(Fixture.session))
+            closeVanished.append(" AND state = 'active' AND NOT (surge_id = ANY(" + closeVanished.bind([Int64(1)]) + "))")
+            let closeVanishedPlan = try await plan(closeVanished)
+            #expect(closeVanishedPlan.contains("requests_active_idx") && !closeVanishedPlan.contains("Seq Scan"), "\(closeVanishedPlan)")
         }
     }
 
     // MARK: - Harness
+
+    /// The storage parameters of an index of the test schema (`pg_class.reloptions`).
+    private func indexOptions(_ db: PostgresDatabase, _ name: String) async throws -> [String] {
+        try await db.rows("""
+            SELECT COALESCE(c.reloptions, '{}') AS options FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = \(db.schema) AND c.relname = \(name)
+            """).first.map { try PostgresRowReader($0)("options", as: [String].self) } ?? []
+    }
 
     /// Every index of the test schema → whether it is valid.
     private func indexes(_ db: PostgresDatabase) async throws -> [String: Bool] {

@@ -230,6 +230,64 @@ struct DatabaseUnitTests {
             if case .createIndex(let name, "requests", let definition) = step { return name == "requests_search_trgm_idx" && definition.contains(Schema.requestSearchText) }
             return false
         })
+
+        // v3 only adds index changes: every older build keeps writing.
+        let v3 = try #require(Schema.migrations.first { $0.version == 3 })
+        #expect(Schema.statements(in: v3.sql).isEmpty)
+        #expect(v3.requiresVersion == 1)
+        #expect(v3.concurrentSteps == [
+            .createIndex(name: "requests_active_idx", table: "requests", definition: "(device_id, surge_session) WHERE state = 'active'"),
+            .enableAutosummarize(index: "requests_updated_brin_idx"),
+        ])
+        // Shipped migrations never change.
+        #expect(Schema.migrations.map(\.name) == ["initial", "write path and egress details", "active requests and brin autosummarize"])
+    }
+
+    @Test func indexStepsFollowTheCatalog() {
+        let valid = Schema.IndexState(valid: true, options: [])
+        let all = Schema.migrations
+        let v1Indexes = ["requests_updated_idx", "requests_host_idx", "requests_host_trgm_idx", "requests_remote_ip_idx",
+                         "host_sources_last_seen_idx", "requests_started_idx"]
+        let v1Catalog = Dictionary(uniqueKeysWithValues: v1Indexes.map { ($0, valid) })
+
+        // A v1 schema gets every step of v2 and v3, in order.
+        #expect(Schema.pendingSteps(of: all, catalog: v1Catalog) == all[1].concurrentSteps + all[2].concurrentSteps)
+
+        // A finished v2 schema only gets v3's.
+        var v2Catalog: [String: Schema.IndexState] = [
+            "requests_started_idx": valid, "requests_search_trgm_idx": valid,
+            "requests_updated_brin_idx": Schema.IndexState(valid: true, options: ["pages_per_range=16"]),
+        ]
+        #expect(Schema.pendingSteps(of: all, catalog: v2Catalog) == all[2].concurrentSteps)
+        #expect(Schema.pendingSteps(of: Array(all.prefix(2)), catalog: v2Catalog).isEmpty)
+
+        // Everything in effect: nothing to do.
+        v2Catalog["requests_active_idx"] = valid
+        v2Catalog["requests_updated_brin_idx"]?.options.append("autosummarize=on")
+        #expect(Schema.pendingSteps(of: all, catalog: v2Catalog).isEmpty)
+
+        // An invalid leftover is built again; a BRIN index rebuilt here gets autosummarize again.
+        var broken = v2Catalog
+        broken["requests_active_idx"] = Schema.IndexState(valid: false, options: [])
+        #expect(Schema.pendingSteps(of: all, catalog: broken) == [all[2].concurrentSteps[0]])
+        broken["requests_updated_brin_idx"] = nil
+        #expect(Schema.pendingSteps(of: all, catalog: broken) == [
+            .createIndex(name: "requests_updated_brin_idx", table: "requests", definition: "USING brin (updated_at) WITH (pages_per_range = 16)"),
+            all[2].concurrentSteps[0],
+            .enableAutosummarize(index: "requests_updated_brin_idx"),
+        ])
+
+        // An index a later migration drops again is never built, and only dropped while it exists.
+        let later = Schema.Migration(version: 99, name: "test", sql: "", concurrentSteps: [.dropIndex(name: "requests_active_idx")])
+        let withoutActive = v2Catalog.filter { $0.key != "requests_active_idx" }
+        #expect(!Schema.pendingSteps(of: all + [later], catalog: withoutActive).contains { $0.indexName == "requests_active_idx" })
+        #expect(Schema.pendingSteps(of: all + [later], catalog: v2Catalog) == [.dropIndex(name: "requests_active_idx")])
+    }
+
+    @Test func indexRetriesBackOff() {
+        #expect(PostgresDatabase.indexRetryPause(after: 1) == .seconds(30))
+        #expect(PostgresDatabase.indexRetryPause(after: 4) == .seconds(300))
+        #expect(PostgresDatabase.indexRetryPause(after: 40) == .seconds(900))
     }
 
     @Test func escapesLikePatternsAndBundlePaths() {

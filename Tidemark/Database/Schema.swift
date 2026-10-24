@@ -4,11 +4,15 @@ import Foundation
 /// Never edit a migration that has shipped; append a new one instead.
 ///
 /// Migrations run on a live database that several Macs write to at the same time, so from v2 on:
-/// * every statement is idempotent (`IF NOT EXISTS`, `IF EXISTS`), because a migration interrupted between
-///   its transaction and its index steps runs again from the start;
+/// * every statement is idempotent (`IF NOT EXISTS`, `IF EXISTS`), because a migration whose record was lost
+///   runs again from the start;
 /// * DDL runs with a short `lock_timeout` (and is retried), so it never queues every Mac's writes behind it;
 /// * nothing rewrites a large table; indexes on large tables are built and dropped `CONCURRENTLY`, outside
 ///   the transaction (`ConcurrentStep`).
+///
+/// A migration's transaction is recorded in `schema_migrations` as soon as it commits; its index steps run
+/// afterwards, outside the migration lock, and are tracked through the catalog instead (see
+/// `PostgresDatabase.migrate()`), so a long index build never keeps any Mac from connecting.
 ///
 /// Statements are written without a schema prefix: `PostgresDatabase` runs them with
 /// `search_path = <schema>, public`, so the same migrations build the production schema and the
@@ -18,10 +22,11 @@ enum Schema {
     struct Migration: Sendable {
         var version: Int
         var name: String
-        /// Statements run in one transaction.
+        /// Statements run in one transaction, which also records the migration.
         var sql: String
-        /// Index builds and drops run after `sql`, each on its own outside any transaction, so they never
-        /// block writes. The migration is recorded once they all succeeded.
+        /// Index changes that run after `sql` commits, each on its own outside any transaction, so they never
+        /// block writes. Writers never depend on them (they only make queries faster): Tidemark applies the
+        /// missing ones in the background, in this order, until the catalog shows every one in effect.
         var concurrentSteps: [ConcurrentStep] = []
         /// The oldest schema version whose Tidemark can still write correctly once this migration is applied
         /// (`schema_migrations.requires_version`, from v2 on). An older Tidemark that finds a newer migration
@@ -29,13 +34,26 @@ enum Schema {
         var requiresVersion: Int? = nil
     }
 
-    /// A schema change PostgreSQL cannot run inside a transaction block.
+    /// An index change that runs outside the migration's transaction. Each one can tell from the catalog
+    /// whether it is already in effect, so applying the steps again is harmless.
     enum ConcurrentStep: Sendable, Equatable {
         /// `CREATE INDEX CONCURRENTLY IF NOT EXISTS <name> ON <table> <definition>`. An invalid index left
-        /// behind by an interrupted build is dropped and built again.
+        /// behind by an interrupted or failed build is dropped first and built again.
         case createIndex(name: String, table: String, definition: String)
         /// `DROP INDEX CONCURRENTLY IF EXISTS <name>`.
         case dropIndex(name: String)
+        /// `ALTER INDEX <name> SET (autosummarize = on)` on a BRIN index, after summarizing the ranges filled
+        /// since the last vacuum (`brin_summarize_new_values`). The `ALTER` briefly locks the index, so it
+        /// runs with the migrations' short lock timeout and is retried.
+        case enableAutosummarize(index: String)
+
+        /// The index the step changes.
+        var indexName: String {
+            switch self {
+            case .createIndex(let name, _, _), .dropIndex(let name): name
+            case .enableAutosummarize(let index): index
+            }
+        }
     }
 
     static var latestVersion: Int { migrations.last?.version ?? 0 }
@@ -51,6 +69,22 @@ enum Schema {
     static let migrations: [Migration] = [
         Migration(version: 1, name: "initial", sql: v1),
         Migration(version: 2, name: "write path and egress details", sql: v2, concurrentSteps: v2Indexes, requiresVersion: 1),
+        Migration(version: 3, name: "active requests and brin autosummarize", sql: "", concurrentSteps: v3Indexes, requiresVersion: 1),
+    ]
+
+    /// v3 — index changes only, so every older Tidemark keeps writing (`requiresVersion` 1).
+    ///
+    /// * `requests_active_idx`: the rows still `active`, by device and Surge session. Closing the requests of
+    ///   an ended Surge session (`closeActiveRequests`, on every launch) and the ones that ended while
+    ///   Tidemark was not running (`closeVanishedRequests`, on every stream connect) read only these rows
+    ///   instead of every row of the device or session. It stays tiny: a row leaves it when its request
+    ///   ends. Rewrites that keep the state (progress updates) stay HOT where they were (PostgreSQL 16+);
+    ///   only a request's one change from `active` to a final state now touches the indexes.
+    /// * `requests_updated_brin_idx` gets `autosummarize`: without it the block ranges filled since the last
+    ///   vacuum stay unsummarized and every `requestsWritten(after:)` poll rechecks all of their rows.
+    private static let v3Indexes: [ConcurrentStep] = [
+        .createIndex(name: "requests_active_idx", table: "requests", definition: "(device_id, surge_session) WHERE state = 'active'"),
+        .enableAutosummarize(index: "requests_updated_brin_idx"),
     ]
 
     /// The text every request search matches (`requests_search_trgm_idx`, v2): host, process name, remote IP
