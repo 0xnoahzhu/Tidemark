@@ -69,6 +69,22 @@ struct CaptureSessionTests {
         )
     }
 
+    @Test func quittingLeavesOpenConnectionsActive() async {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let pipeline = makePipeline(database: database, directory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.beginSession(1_000)
+        await pipeline.ingest(curl(1, start: requestStart), now: base)
+        await pipeline.ingest(curl(2, start: requestStart, completed: true), now: base)
+        await pipeline.flushAll(now: base.addingTimeInterval(1), final: true)
+
+        let open = await database.rows[RequestKey(deviceID: device, session: 1_000, surgeID: 1)]
+        #expect(open?.state == .active && open?.completedAt == nil,
+                "a connection that outlives Tidemark stays active (a completed row could never become active again)")
+        #expect(await database.rows[RequestKey(deviceID: device, session: 1_000, surgeID: 2)]?.state == .completed)
+    }
+
     @Test func closingEndedSessionsNeverTakesCaptureOffline() async {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()

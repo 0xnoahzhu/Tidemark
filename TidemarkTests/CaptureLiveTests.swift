@@ -95,6 +95,50 @@ struct CaptureLiveTests {
         }
     }
 
+    @Test func connectionsOpenAtQuitStayActiveUntilTheNextLaunchClosesTheOnesThatEnded() async throws {
+        try await withTestDatabase { db in
+            let temp = CaptureTempDirectory()
+            let mac = device()
+            try await db.upsertDevice(mac)
+            let session: Int64 = 1_792_000_000_000
+            func open(_ id: Int64) -> SurgeRequest {
+                CaptureFixtures.request(id: id, host: "h\(id).example", processPath: "/usr/bin/curl", remoteAddress: "93.184.215.\(id)",
+                                        start: base.timeIntervalSince1970 - 600)
+            }
+            func states() async throws -> [Int64: (state: String, completed: Bool)] {
+                var result: [Int64: (state: String, completed: Bool)] = [:]
+                for row in try await db.rows("SELECT surge_id, state, completed_at FROM requests") {
+                    let read = PostgresRowReader(row)
+                    result[try read("surge_id", as: Int64.self)] = (try read("state", as: String.self), try read("completed_at", as: Date?.self) != nil)
+                }
+                return result
+            }
+
+            do {
+                let pipeline = makePipeline(db, device: mac.id, directory: temp.url)
+                await pipeline.setDatabaseOnline(true)
+                await pipeline.beginSession(session)
+                await pipeline.ingest(open(1), now: base)
+                await pipeline.ingest(open(2), now: base)
+                await pipeline.flushAll(now: base.addingTimeInterval(1), final: true)
+            }
+            var rows = try await states()
+            #expect(rows[1]?.state == "active" && rows[1]?.completed == false, "quitting does not end a connection")
+            #expect(rows[2]?.state == "active" && rows[2]?.completed == false)
+
+            // Relaunched within the same Surge session: 1 is still open, 2 ended while Tidemark was not running.
+            let relaunched = makePipeline(db, device: mac.id, directory: temp.url)
+            await relaunched.setDatabaseOnline(true)
+            let epoch = await relaunched.beginSession(session)
+            await relaunched.ingestBackfill([open(1)], epoch: epoch, now: base.addingTimeInterval(60))
+            await relaunched.closeVanished([1], fetchedAt: base.addingTimeInterval(60), epoch: epoch)
+            await relaunched.tick(now: base.addingTimeInterval(62))
+            rows = try await states()
+            #expect(rows[1]?.state == "active" && rows[1]?.completed == false, "still open: still active")
+            #expect(rows[2]?.state == "completed" && rows[2]?.completed == true, "ended meanwhile: closed")
+        }
+    }
+
     // MARK: Harness
 
     private func withTestDatabase(_ body: (CaptureLivePostgres) async throws -> Void) async throws {

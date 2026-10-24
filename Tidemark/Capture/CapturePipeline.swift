@@ -397,13 +397,17 @@ actor CapturePipeline {
     }
 
     /// Writes what the current entries still owe before they are dropped: first contacts still in their
-    /// grace period are evaluated, sources are recorded, active requests are closed (they will never be
-    /// updated again; at `boundary`, else when last seen) and changed rows are queued.
-    func retireEntries(closingAt boundary: Date?, now: Date) {
+    /// grace period are evaluated, sources are recorded and changed rows are queued. With `closingActive`,
+    /// active requests are closed too (they will never be updated again; at `boundary`, else when last seen).
+    ///
+    /// Quitting keeps them active instead: the connection usually outlives Tidemark, and a row stored as
+    /// completed can never become active again. The next launch closes the ones that ended meanwhile
+    /// (`closeVanished` for the same Surge session, `closeActiveRequests` for earlier ones).
+    func retireEntries(closingAt boundary: Date?, closingActive: Bool = true, now: Date) {
         processContacts(now: now.addingTimeInterval(contactGrace), only: nil)
         for id in Array(entries.keys) {
             guard var entry = entries[id] else { continue }
-            if entry.record.state == .active {
+            if closingActive, entry.record.state == .active {
                 entry.record.state = .completed
                 entry.record.completedAt = max(entry.record.startedAt, min(boundary ?? entry.lastSeen, now))
                 entry.finishedAt = now
@@ -866,12 +870,13 @@ actor CapturePipeline {
     }
 
     /// Writes (or spools) everything queued. Waits briefly for a flush in progress; when that flush is stuck
-    /// its rows and the queue go to the spool instead. `final` (quitting) also closes active requests,
-    /// keeps unwritten first-contact work on disk and saves the shared state snapshot.
+    /// its rows and the queue go to the spool instead. `final` (quitting) also writes what every request
+    /// still owes (active ones stay active, see `retireEntries`), keeps unwritten first-contact work on disk
+    /// (the stuck flush's included) and saves the shared state snapshot.
     func flushAll(now: Date = .now, final: Bool = false) async {
         for _ in 0..<(final ? 20 : 100) where isFlushing { try? await Task.sleep(for: .milliseconds(50)) }
         if final {
-            retireEntries(closingAt: nil, now: now)
+            retireEntries(closingAt: nil, closingActive: false, now: now)
         } else {
             processContacts(now: now.addingTimeInterval(contactGrace), only: nil)
             for id in Array(entries.keys) {
