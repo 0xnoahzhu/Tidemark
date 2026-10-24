@@ -7,7 +7,7 @@ struct TidemarkCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .newItem) {
             CommandsWindowButton(title: tr("New Site Probe", "Commands"), key: "n", modifiers: [.command, .shift]) {
-                model.nav.open(.probe)
+                Self.newSiteProbe(model)
             }
             CommandsWindowButton(title: tr("Monitor an App…", "Commands"), key: "m", modifiers: [.command, .shift]) {
                 model.nav.openAddApp()
@@ -30,6 +30,17 @@ struct TidemarkCommands: Commands {
             }
             Button(tr("Reconnect to Surge", "Commands")) { model.capture.reconnect() }
         }
+    }
+
+    /// Like the page's New Probe button: an empty URL bar and no saved session selected. A running probe
+    /// is left alone; the page then shows it.
+    @MainActor
+    static func newSiteProbe(_ model: AppModel, web: ProbeWebSession = .shared) {
+        if !model.probe.isRunning, !web.isStarting {
+            model.probe.selectedID = nil
+            web.urlDraft = ""
+        }
+        model.nav.open(.probe)
     }
 }
 
