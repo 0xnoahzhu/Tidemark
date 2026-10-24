@@ -193,8 +193,10 @@ extension PostgresDatabase {
     /// newly attributed.
     ///
     /// Requests are attributed in windows of row IDs, each its own short transaction, so a large history
-    /// never sits in one long transaction; the processes, host sources and inventory follow in one
-    /// transaction. Running it again picks up where an interrupted run stopped.
+    /// never sits in one long transaction. Processes and host sources follow, each in one statement of its
+    /// own; then the inventory is read (no locks) and merged in chunks, each its own transaction. Capture
+    /// writes the same process, source and inventory rows, so no step holds their locks for longer than
+    /// its own statement. Running it again picks up where an interrupted run stopped.
     func backfill(appID: AppID, bundlePath: String) async throws -> Int64 {
         let match = Self.bundleMatch(bundlePath)
         let classifier = siteClassifier
@@ -228,9 +230,15 @@ extension PostgresDatabase {
             }
         }
 
-        try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
-            // The slow reads come first and take no row locks; the writes at the end lock the rows the
-            // capture writer also touches only briefly (it waits at most its 5 s lock timeout).
+        try await execute("""
+            UPDATE processes SET app_id = \(appID) WHERE app_id IS NULL AND path LIKE \(match.pattern)
+            """, statementTimeout: Self.maintenanceTimeout)
+        try await execute("""
+            UPDATE host_sources SET app_id = \(appID)
+            WHERE app_id IS NULL AND (bundle_path = ANY(\(match.paths)) OR source_path LIKE \(match.pattern))
+            """, statementTimeout: Self.maintenanceTimeout)
+
+        let hosts = try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
             var hosts: [AppHost] = []
             for row in try await connection.query(Self.backfillDomains(appID), logger: Self.logger).collect() {
                 let read = PostgresRowReader(row)
@@ -251,31 +259,28 @@ extension PostgresDatabase {
                     isDirect: try read("is_direct"), hosts: try read("hosts"), firstDeviceID: try read("first_device_id")
                 ))
             }
+            return hosts
+        }
 
-            try await connection.query("""
-                UPDATE processes SET app_id = \(appID) WHERE app_id IS NULL AND path LIKE \(match.pattern)
-                """, logger: Self.logger)
-            try await connection.query("""
-                UPDATE host_sources SET app_id = \(appID)
-                WHERE app_id IS NULL AND (bundle_path = ANY(\(match.paths)) OR source_path LIKE \(match.pattern))
-                """, logger: Self.logger)
-            for chunk in Self.chunks(hosts, bindsPerItem: Self.appHostColumns.count + 1) {
-                let statement = try Self.appHostInsert(chunk, conflict: """
-                    ON CONFLICT (app_id, kind, value) DO UPDATE SET
-                        site = COALESCE(h.site, excluded.site),
-                        first_seen = LEAST(h.first_seen, excluded.first_seen),
-                        first_device_id = CASE WHEN excluded.first_seen <= h.first_seen THEN COALESCE(excluded.first_device_id, h.first_device_id)
-                                               ELSE h.first_device_id END,
-                        last_seen = GREATEST(h.last_seen, excluded.last_seen),
-                        request_count = GREATEST(h.request_count, excluded.request_count),
-                        process_name = COALESCE(h.process_name, excluded.process_name),
-                        policy = CASE WHEN excluded.last_seen >= h.last_seen THEN COALESCE(excluded.policy, h.policy) ELSE COALESCE(h.policy, excluded.policy) END,
-                        geo = CASE WHEN excluded.last_seen >= h.last_seen THEN COALESCE(excluded.geo, h.geo) ELSE COALESCE(h.geo, excluded.geo) END,
-                        is_direct = h.is_direct OR excluded.is_direct,
-                        hosts = ARRAY(SELECT DISTINCT x FROM unnest(h.hosts || excluded.hosts) AS x ORDER BY x)
-                    """)
-                try await connection.query(statement, logger: Self.logger)
-            }
+        // Sorted like capture's inventory writes, so a chunk and a concurrent flush lock rows in one order.
+        let sorted = hosts.sorted { AppHostKey($0) < AppHostKey($1) }
+        for chunk in Self.chunks(sorted, bindsPerItem: Self.appHostColumns.count + 1, maxItems: 500) {
+            try Task.checkCancellation()
+            let statement = try Self.appHostInsert(chunk, conflict: """
+                ON CONFLICT (app_id, kind, value) DO UPDATE SET
+                    site = COALESCE(h.site, excluded.site),
+                    first_seen = LEAST(h.first_seen, excluded.first_seen),
+                    first_device_id = CASE WHEN excluded.first_seen <= h.first_seen THEN COALESCE(excluded.first_device_id, h.first_device_id)
+                                           ELSE h.first_device_id END,
+                    last_seen = GREATEST(h.last_seen, excluded.last_seen),
+                    request_count = GREATEST(h.request_count, excluded.request_count),
+                    process_name = COALESCE(h.process_name, excluded.process_name),
+                    policy = CASE WHEN excluded.last_seen >= h.last_seen THEN COALESCE(excluded.policy, h.policy) ELSE COALESCE(h.policy, excluded.policy) END,
+                    geo = CASE WHEN excluded.last_seen >= h.last_seen THEN COALESCE(excluded.geo, h.geo) ELSE COALESCE(h.geo, excluded.geo) END,
+                    is_direct = h.is_direct OR excluded.is_direct,
+                    hosts = ARRAY(SELECT DISTINCT x FROM unnest(h.hosts || excluded.hosts) AS x ORDER BY x)
+                """)
+            try await execute(statement, statementTimeout: Self.maintenanceTimeout)
         }
         return updated
     }
