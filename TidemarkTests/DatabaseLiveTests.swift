@@ -1264,12 +1264,23 @@ struct DatabaseLiveTests {
             #expect(second.ids[RequestKey(deviceID: mac.id, session: old, surgeID: 1)] == first.ids[RequestKey(deviceID: mac.id, session: old, surgeID: 1)])
             #expect(try await db.devices().first { $0.id == mac.id }?.rowCount == 4)
 
-            let cursor = try #require(try await db.requestsWritten(after: .distantPast, excluding: nil, limit: 10).compactMap(\.writtenAt).max())
+            let written = try await db.requestsWritten(after: .distantPast, excluding: nil, limit: 10)
+            let cursor = try #require(written.compactMap(\.writtenAt).max())
+            func lastWrite(_ device: DeviceID, _ session: Int64, _ id: Int64) throws -> Date {
+                try #require(written.first { $0.key == RequestKey(deviceID: device, session: session, surgeID: id) }?.writtenAt)
+            }
             try await Task.sleep(for: .milliseconds(20))
-            // Surge restarted: the old session's active rows will never be updated again.
-            let restart = Fixture.now.addingTimeInterval(30)
+            // Surge restarted (Tidemark noticed only later): the old session's active rows will never be updated
+            // again. They ended after their last write, which is the closest known end.
+            let restart = Date.now.addingTimeInterval(3_600)
             #expect(try await db.closeActiveRequests(deviceID: mac.id, before: new, at: restart) == 2)
             #expect(try await db.closeActiveRequests(deviceID: mac.id, before: new, at: restart) == 0)
+            // A restart right after a row's last write bounds its end; a row cannot end before it started.
+            var lateStart = request(mini.id, old, 2)
+            lateStart.startedAt = Fixture.now.addingTimeInterval(5)
+            try await db.upsertRequests([lateStart])
+            let quickRestart = Fixture.now.addingTimeInterval(-0.5)
+            #expect(try await db.closeActiveRequests(deviceID: mini.id, before: new, at: quickRestart) == 2)
 
             let rows = try await db.queryRequests(RequestQuery(range: .all)).rows
             func row(_ device: DeviceID, _ session: Int64, _ id: Int64) -> RequestRecord? {
@@ -1278,13 +1289,14 @@ struct DatabaseLiveTests {
             for id: Int64 in [1, 2] {
                 let closed = try #require(row(mac.id, old, id))
                 #expect(closed.state == .completed)
-                #expect(Fixture.close(try #require(closed.completedAt), restart))
+                #expect(Fixture.close(try #require(closed.completedAt), try lastWrite(mac.id, old, id)))
             }
             #expect(Fixture.close(try #require(row(mac.id, old, 3)?.completedAt), try #require(completed.completedAt)))
             #expect(row(mac.id, new, 1)?.state == .active)
-            #expect(row(mini.id, old, 1)?.state == .active)
+            #expect(Fixture.close(try #require(row(mini.id, old, 1)?.completedAt), quickRestart))
+            #expect(Fixture.close(try #require(row(mini.id, old, 2)?.completedAt), lateStart.startedAt))
             // Other Macs pick the change up through their updated_at poll.
-            let polled = try await db.requestsWritten(after: cursor, excluding: nil, limit: 10)
+            let polled = try await db.requestsWritten(after: cursor, excluding: mini.id, limit: 10)
             #expect(Set(polled.map(\.key)) == [RequestKey(deviceID: mac.id, session: old, surgeID: 1), RequestKey(deviceID: mac.id, session: old, surgeID: 2)])
         }
     }
@@ -1295,20 +1307,27 @@ struct DatabaseLiveTests {
         try await withTestDatabase { db in
             let mac = Fixture.device("MacBook Pro")
             try await db.upsertDevice(mac)
+            // Tidemark relaunches an hour later and lists Surge's active connections.
+            let listedAt = Date.now.addingTimeInterval(3_600)
             var late = Fixture.request(device: mac.id, id: 4)
-            late.startedAt = Fixture.now.addingTimeInterval(10)
+            late.startedAt = listedAt.addingTimeInterval(10)
             var otherSession = Fixture.request(device: mac.id, id: 5)
             otherSession.key.session = Fixture.session - 60_000
             try await db.upsertRequests([
                 Fixture.request(device: mac.id, id: 1), Fixture.request(device: mac.id, id: 2),
                 Fixture.request(device: mac.id, id: 3), late, otherSession,
             ])
+            let lastWrite = try #require(try await db.requestsWritten(after: .distantPast, excluding: nil, limit: 10).compactMap(\.writtenAt).max())
             // Surge still lists 1; 4 started after the listing; 5 belongs to another session.
-            let listedAt = Fixture.now
             #expect(try await db.closeVanishedRequests(deviceID: mac.id, session: Fixture.session, keeping: [1],
                                                        startedBefore: listedAt, at: listedAt) == 2)
-            let states = Dictionary(uniqueKeysWithValues: try await db.queryRequests(RequestQuery(range: .all)).rows.map { ($0.key.surgeID, $0.state) })
+            let rows = try await db.queryRequests(RequestQuery(range: .all)).rows
+            let states = Dictionary(uniqueKeysWithValues: rows.map { ($0.key.surgeID, $0.state) })
             #expect(states == [1: .active, 2: .completed, 3: .completed, 4: .active, 5: .active])
+            // They ended while Tidemark was away, after its last write: not at the relaunch.
+            for row in rows where row.state == .completed {
+                #expect(Fixture.close(try #require(row.completedAt), lastWrite), "\(row.key.surgeID)")
+            }
         }
     }
 

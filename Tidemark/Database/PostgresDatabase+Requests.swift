@@ -102,15 +102,21 @@ extension PostgresDatabase {
         }
     }
 
-    /// Marks `deviceID`'s rows that are still `active` from Surge sessions before `session` as completed at
-    /// `date` (keeping a completion time already stored); bumps `updated_at` so other Macs see the change.
-    /// Rare (once per Surge restart), so it scans the device's rows on the main pool with a generous
-    /// statement timeout instead of indexing `state`, which changes on almost every rewrite.
+    /// Marks `deviceID`'s rows that are still `active` from Surge sessions before `session` completed, and
+    /// bumps `updated_at` so other Macs see the change. Runs whenever capture starts a session (every launch
+    /// and every Surge restart).
+    ///
+    /// A completion time already stored is kept. Otherwise the request ended some time after Tidemark last
+    /// wrote it (`updated_at`, its last observed change; in an `UPDATE` it still holds the previous write)
+    /// and no later than `date` (the new session's start), so the earlier of the two is stored, never a time
+    /// before the request started. `requests_active_idx` (v3) keeps the statement to the few rows still
+    /// active; its time limit stays below capture's per-write bound.
     func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64 {
-        try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
+        try await withTransaction(statementTimeout: Self.sessionCloseTimeout) { connection in
             try await connection.query("""
                 WITH closed AS (
-                    UPDATE requests SET state = 'completed', completed_at = COALESCE(completed_at, \(date)), updated_at = now()
+                    UPDATE requests SET state = 'completed', updated_at = now(),
+                        completed_at = COALESCE(completed_at, GREATEST(started_at, LEAST(updated_at, \(date)::timestamptz)))
                     WHERE device_id = \(deviceID) AND state = 'active' AND surge_session < \(session)
                     RETURNING 1
                 )
@@ -119,11 +125,16 @@ extension PostgresDatabase {
         }
     }
 
+    /// Marks `deviceID`'s rows of `session` that are still `active` but that Surge no longer lists completed,
+    /// with the same completion estimate as `closeActiveRequests` (the last write, at most `date`). Rows that
+    /// started at or after `startedBefore` are left alone. Reads only the session's active rows
+    /// (`requests_active_idx`).
     func closeVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date, at date: Date) async throws -> Int64 {
-        try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
+        try await withTransaction(statementTimeout: Self.sessionCloseTimeout) { connection in
             try await connection.query("""
                 WITH closed AS (
-                    UPDATE requests SET state = 'completed', completed_at = COALESCE(completed_at, \(date)), updated_at = now()
+                    UPDATE requests SET state = 'completed', updated_at = now(),
+                        completed_at = COALESCE(completed_at, GREATEST(started_at, LEAST(updated_at, \(date)::timestamptz)))
                     WHERE device_id = \(deviceID) AND surge_session = \(session) AND state = 'active'
                       AND started_at < \(startedBefore) AND NOT (surge_id = ANY(\(surgeIDs)))
                     RETURNING 1
