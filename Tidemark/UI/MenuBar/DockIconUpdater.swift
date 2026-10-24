@@ -1,8 +1,9 @@
 import AppKit
 import Observation
 
-/// Keeps the Dock tile in step with Tidemark's state: the light or dark BrandIcon for the effective
-/// appearance, and a badge with the number of unread first-contact alerts.
+/// Keeps the Dock tile in step with Tidemark's state: the light or dark BrandIcon for the system's
+/// appearance (the Dock follows System Settings, not Settings › Appearance inside Tidemark), and a badge
+/// with the number of unread first-contact alerts.
 @MainActor
 final class DockIconUpdater {
     private static var shared: DockIconUpdater?
@@ -17,20 +18,28 @@ final class DockIconUpdater {
 
     static func stop() {
         shared?.appearanceObservation?.invalidate()
+        if let observer = shared?.themeObserver { DistributedNotificationCenter.default().removeObserver(observer) }
         shared = nil
     }
 
+    /// Posted by the system when Light / Dark changes in System Settings.
+    static let systemThemeChanged = Notification.Name("AppleInterfaceThemeChangedNotification")
+
     private var appearanceObservation: NSKeyValueObservation?
+    private var themeObserver: (any NSObjectProtocol)?
     private var stateObservation: ObservationTracking.Token?
     private var isDark: Bool?
     private var showIn: Preferences.ShowIn?
     private var darkIcon: NSImage?
 
     private func start(_ model: AppModel) {
-        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { [weak self] app, _ in
-            MainActor.assumeIsolated {
-                self?.applyIcon(dark: Self.isDark(app.effectiveAppearance))
-            }
+        // The app's effective appearance tracks the system while Settings › Appearance is System; the theme
+        // notification covers system changes while the app forces Light or Dark.
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.applySystemAppearance() }
+        }
+        themeObserver = DistributedNotificationCenter.default().addObserver(forName: Self.systemThemeChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applySystemAppearance() }
         }
         stateObservation = withContinuousObservation(options: [.didSet]) { [weak self] _ in
             self?.apply(unread: model.alerts.unreadCount, showIn: model.preferences.showIn)
@@ -39,6 +48,23 @@ final class DockIconUpdater {
 
     static func isDark(_ appearance: NSAppearance) -> Bool {
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
+    /// Whether the system (and so the Dock) is dark. While the app follows the system its effective
+    /// appearance is the answer; when the app forces Light or Dark, the global `AppleInterfaceStyle`
+    /// default (`Dark`, or absent for Light) still tells the system's choice.
+    static func systemIsDark(appOverride: NSAppearance?, effective: NSAppearance, interfaceStyle: String?) -> Bool {
+        guard appOverride != nil else { return isDark(effective) }
+        return interfaceStyle?.caseInsensitiveCompare("Dark") == .orderedSame
+    }
+
+    private func applySystemAppearance() {
+        let dark = Self.systemIsDark(
+            appOverride: NSApp.appearance,
+            effective: NSApp.effectiveAppearance,
+            interfaceStyle: UserDefaults.standard.string(forKey: "AppleInterfaceStyle")
+        )
+        applyIcon(dark: dark)
     }
 
     /// The Dock badge text for an unread count: nil when nothing is unread, `999+` past three digits.
