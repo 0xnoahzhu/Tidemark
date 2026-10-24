@@ -115,9 +115,11 @@ enum CaptureRecordMapper {
     /// else the host itself when it is an IP literal. Proxied hostnames are resolved later.
     static func remoteIP(remoteAddress: String?, host: String) -> String? {
         if let address = nonEmpty(remoteAddress)?.trimmingCharacters(in: .whitespaces), !address.hasSuffix("(Proxy)") {
+            if HostName.isIPv4(address) { return address }
+            // `1.2.3.4:443` / `[2001:db8::1]:443` (checked before bare IPv6, which also contains colons).
+            let (ip, port) = HostName.splitHostPort(address)
+            if port != nil, HostName.isIPAddress(ip) { return stripBrackets(ip) }
             if HostName.isIPAddress(address) { return stripBrackets(address) }
-            let (ip, _) = HostName.splitHostPort(address)
-            if HostName.isIPAddress(ip) { return stripBrackets(ip) }
         }
         return HostName.isIPAddress(host) ? stripBrackets(host) : nil
     }
