@@ -24,15 +24,8 @@ struct TidemarkApp: App {
         .defaultSize(width: 1280, height: 860)
         .windowResizability(.contentSize)
 
-        MenuBarExtra {
-            MenuBarPanel()
-                .environment(model)
-                .environment(Localizer.shared)
-        } label: {
-            MenuBarLabel()
-                .environment(model)
-        }
-        .menuBarExtraStyle(.window)
+        // The menu bar item is AppKit-owned (`StatusItemController`) to use the macOS 27 status item
+        // expanded-interface session; the composition root installs it.
 
         Settings {
             SettingsView()
