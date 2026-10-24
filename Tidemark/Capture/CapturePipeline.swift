@@ -54,6 +54,8 @@ actor CapturePipeline {
         var appsVersion: Int
         var lastQueued: Date
         var dirty = false
+        /// Changed in a way worth writing soon (attribution, remote IP, GeoIP, NEW, probe), not only bytes.
+        var urgent = false
         var finishedAt: Date?
         var probeMatched = false
         /// First seen in `dump recent`: a previous run may already have counted it in the inventory.
@@ -66,6 +68,8 @@ actor CapturePipeline {
     let contactGrace: TimeInterval
     /// Active requests are rewritten at most this often while they change.
     let activeRewriteInterval: TimeInterval = 10
+    /// Rows with attribution, IP, GeoIP or NEW changes are rewritten after this short pause (to coalesce them).
+    let urgentRewriteDelay: TimeInterval = 2
     let maxConcurrentLookups = 4
 
     // Dependencies
@@ -187,6 +191,7 @@ actor CapturePipeline {
             refreshAttribution(&entry, id: id, now: now)
             if entry.record != before {
                 entry.dirty = true
+                entry.urgent = true
                 markChanged(entry.record, fresh: false)
             }
             entries[id] = entry
@@ -369,6 +374,10 @@ actor CapturePipeline {
             enqueue(&entry, now: now)
         } else if entry.record != before {
             entry.dirty = true
+            if entry.record.remoteIP != before.remoteIP || entry.record.appID != before.appID
+                || entry.record.probeSessionID != before.probeSessionID || entry.record.geo != before.geo {
+                entry.urgent = true
+            }
         } else {
             return
         }
@@ -518,6 +527,7 @@ actor CapturePipeline {
             entry.record.remoteIP = ip
             entry.record.geo = geoCache[ip]
             entry.dirty = true
+            entry.urgent = true
             if entry.probeMatched, let port = entry.sourcePort { probes.addIP(ip, sourcePort: port) }
             resolveAddress(&entry, id: id, now: now)
             entries[id] = entry
@@ -560,6 +570,7 @@ actor CapturePipeline {
                 guard var entry = entries[id], entry.record.remoteIP == ip, entry.record.geo == nil else { continue }
                 entry.record.geo = geo
                 entry.dirty = true
+                entry.urgent = true
                 entries[id] = entry
                 markChanged(entry.record, fresh: false)
             }
@@ -645,11 +656,13 @@ actor CapturePipeline {
         buffer.add(request: entry.record)
         entry.lastQueued = now
         entry.dirty = false
+        entry.urgent = false
     }
 
     private func scanForRewrites(now: Date) {
         for (id, entry) in entries where entry.dirty {
-            let due = entry.record.state != .active || now.timeIntervalSince(entry.lastQueued) >= activeRewriteInterval
+            let quiet = now.timeIntervalSince(entry.lastQueued)
+            let due = entry.record.state != .active || quiet >= activeRewriteInterval || (entry.urgent && quiet >= urgentRewriteDelay)
             guard due else { continue }
             var updated = entry
             enqueue(&updated, now: now)
@@ -786,6 +799,7 @@ actor CapturePipeline {
                   var entry = entries[origin.surgeID], !entry.record.isNew else { continue }
             entry.record.isNew = true
             entry.dirty = true
+            entry.urgent = true
             entries[origin.surgeID] = entry
             markChanged(entry.record, fresh: false)
         }
