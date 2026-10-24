@@ -8,22 +8,32 @@ extension PostgresDatabase {
     static let appHostColumns: [(name: String, cast: String)] = [
         ("app_id", "uuid"), ("kind", "text"), ("value", "text"), ("site", "text"), ("first_seen", "timestamptz"),
         ("last_seen", "timestamptz"), ("request_count", "int8"), ("process_name", "text"), ("policy", "text"),
-        ("geo", "jsonb"), ("is_direct", "bool"), ("hosts", "text[]"),
+        ("geo", "jsonb"), ("is_direct", "bool"), ("hosts", "text[]"), ("first_device_id", "uuid"),
     ]
 
-    /// `INSERT INTO app_hosts AS h … VALUES … <conflict> RETURNING app_id, kind, value`.
+    /// `INSERT INTO app_hosts AS h … <conflict> RETURNING app_id, kind, value`, one bind more per host than
+    /// `appHostColumns` (its position). Hosts of apps that no longer exist are skipped (instead of failing
+    /// the batch on the foreign key) and an unknown first Mac is stored as NULL. Rows are inserted in the
+    /// given order, so concurrent inserts that were sorted the same way lock rows in the same order.
     static func appHostInsert(_ hosts: ArraySlice<AppHost>, conflict: String) throws -> PostgresQuery {
-        var sql = SQL("INSERT INTO app_hosts AS h (\(appHostColumns.map(\.name).joined(separator: ", "))) VALUES ")
+        let names = appHostColumns.map(\.name)
+        var sql = SQL("INSERT INTO app_hosts AS h (\(names.joined(separator: ", "))) SELECT ")
+        sql.append(names.map { $0 == "first_device_id" ? "d.id" : "v.\($0)" }.joined(separator: ", "))
+        sql.append(" FROM (VALUES ")
         for (index, host) in hosts.enumerated() {
             if index > 0 { sql.append(", ") }
             let placeholders = [
                 sql.bind(host.appID), sql.bind(host.kind.rawValue), sql.bind(host.value), sql.bind(host.site),
                 sql.bind(host.firstSeen), sql.bind(host.lastSeen), sql.bind(host.requestCount), sql.bind(host.processName),
                 sql.bind(host.policy), sql.bind(try host.geo.map { try jsonText($0) }), sql.bind(host.isDirect), sql.bind(host.hosts),
+                sql.bind(host.firstDeviceID),
             ]
-            sql.append("(" + zip(placeholders, appHostColumns).map { "\($0)::\($1.cast)" }.joined(separator: ", ") + ")")
+            let row = zip(placeholders, appHostColumns).map { "\($0)::\($1.cast)" } + ["\(sql.bind(Int32(clamping: index)))::int4"]
+            sql.append("(" + row.joined(separator: ", ") + ")")
         }
-        sql.append(" \(conflict) RETURNING h.app_id, h.kind, h.value")
+        sql.append(") AS v(\(names.joined(separator: ", ")), position) JOIN apps a ON a.id = v.app_id ")
+        sql.append("LEFT JOIN devices d ON d.id = v.first_device_id ORDER BY v.position ")
+        sql.append("\(conflict) RETURNING h.app_id, h.kind, h.value")
         return sql.query
     }
 
@@ -39,17 +49,18 @@ extension PostgresDatabase {
     }
 
     /// `INSERT … ON CONFLICT DO NOTHING RETURNING`: only rows this call created come back, so when two
-    /// Macs see the same first contact at once exactly one of them alerts.
+    /// Macs see the same first contact at once exactly one of them alerts. Hosts of deleted apps are
+    /// skipped (never returned). `firstDeviceID` records the Mac that made first contact.
     func insertAppHosts(_ hosts: [AppHost]) async throws -> [AppHost] {
         guard !hosts.isEmpty else { return [] }
         // Unique and sorted by key, so concurrent inserts from several Macs lock rows in the same order.
         var unique: [AppHostKey: AppHost] = [:]
         for host in hosts where unique[AppHostKey(host)] == nil { unique[AppHostKey(host)] = host }
         let batch = unique.values.sorted { AppHostKey($0) < AppHostKey($1) }
-        let statements = try Self.chunks(batch, bindsPerItem: Self.appHostColumns.count).map {
+        let statements = try Self.chunks(batch, bindsPerItem: Self.appHostColumns.count + 1).map {
             try Self.appHostInsert($0, conflict: "ON CONFLICT (app_id, kind, value) DO NOTHING")
         }
-        let created = try await withTransaction { [statements] connection in
+        let created = try await withTransaction(on: .writer) { [statements] connection in
             var keys = Set<AppHostKey>()
             for statement in statements {
                 for row in try await connection.query(statement, logger: Self.logger).collect() {
@@ -106,7 +117,7 @@ extension PostgresDatabase {
             sql.append(") AS v(app_id, kind, value, last_seen, delta, policy, geo, is_direct, hosts) WHERE h.app_id = v.app_id AND h.kind = v.kind AND h.value = v.value")
             statements.append(sql.query)
         }
-        try await withTransaction { [statements] connection in
+        try await withTransaction(on: .writer) { [statements] connection in
             for statement in statements { try await connection.query(statement, logger: Self.logger) }
         }
     }
@@ -117,7 +128,7 @@ extension PostgresDatabase {
     func appHosts(_ appID: AppID, scope: DeviceScope) async throws -> [AppHost] {
         var sql = SQL("""
             SELECT h.app_id, h.kind, h.value, h.site, h.first_seen, h.last_seen, h.request_count, h.process_name,
-                   h.policy, h.geo, h.is_direct, h.hosts
+                   h.policy, h.geo, h.is_direct, h.hosts, h.first_device_id
             FROM app_hosts h WHERE h.app_id =
             """)
         sql.append(" " + sql.bind(appID))
@@ -137,7 +148,8 @@ extension PostgresDatabase {
                 policy: try read("policy"),
                 geo: try read.json("geo", as: GeoInfo.self),
                 isDirect: try read("is_direct"),
-                hosts: try read("hosts")
+                hosts: try read("hosts"),
+                firstDeviceID: try read("first_device_id")
             )
         }
     }
@@ -145,7 +157,8 @@ extension PostgresDatabase {
     // MARK: - Global inventory
 
     /// Upserts `(kind, value, device, source path)` observations: `request_count += requestDelta`,
-    /// first/last seen widened, title / app / bundle / geo refreshed when given.
+    /// first/last seen widened, title / app / bundle / geo refreshed when given. The app of a source whose
+    /// app was deleted is stored as NULL.
     func touchHostSources(_ sources: [HostSourceTouch]) async throws {
         guard !sources.isEmpty else { return }
         struct Key: Hashable { var kind: HostKind; var value: String; var device: DeviceID; var path: String }
@@ -170,7 +183,9 @@ extension PostgresDatabase {
         var statements: [PostgresQuery] = []
         for chunk in Self.chunks(batch, bindsPerItem: 11) {
             var sql = SQL("""
-                INSERT INTO host_sources AS s (kind, value, device_id, source_path, source_title, app_id, bundle_path, first_seen, last_seen, request_count, geo) VALUES
+                INSERT INTO host_sources AS s (kind, value, device_id, source_path, source_title, app_id, bundle_path, first_seen, last_seen, request_count, geo)
+                SELECT v.kind, v.value, v.device_id, v.source_path, v.source_title, a.id, v.bundle_path, v.first_seen, v.last_seen, v.request_count, v.geo
+                FROM (VALUES
                 """)
             for (index, entry) in chunk.enumerated() {
                 if index > 0 { sql.append(",") }
@@ -184,7 +199,9 @@ extension PostgresDatabase {
                 sql.append(" (" + values.joined(separator: ", ") + ")")
             }
             sql.append("""
-                 ON CONFLICT (kind, value, device_id, source_path) DO UPDATE SET
+                ) AS v(kind, value, device_id, source_path, source_title, app_id, bundle_path, first_seen, last_seen, request_count, geo)
+                LEFT JOIN apps a ON a.id = v.app_id
+                ON CONFLICT (kind, value, device_id, source_path) DO UPDATE SET
                     source_title = excluded.source_title,
                     app_id = COALESCE(excluded.app_id, s.app_id),
                     bundle_path = COALESCE(excluded.bundle_path, s.bundle_path),
@@ -195,7 +212,7 @@ extension PostgresDatabase {
                 """)
             statements.append(sql.query)
         }
-        try await withTransaction { [statements] connection in
+        try await withTransaction(on: .writer) { [statements] connection in
             for statement in statements { try await connection.query(statement, logger: Self.logger) }
         }
     }

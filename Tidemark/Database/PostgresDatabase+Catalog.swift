@@ -83,13 +83,37 @@ extension PostgresDatabase {
 
     /// Deleting the row cascades to `app_installs`, `app_hosts` and `alerts`; requests, processes and
     /// host sources keep their rows and lose `app_id` (`ON DELETE SET NULL`).
+    ///
+    /// The app's requests are detached first, in batches that each commit on their own, so an app with
+    /// millions of requests is never rewritten by one statement holding their row locks (and the flush of
+    /// its still-active requests) for minutes. Writes that still carry the app's ID afterwards store NULL.
     func deleteApp(_ id: AppID) async throws {
-        try await execute("DELETE FROM apps WHERE id = \(id)")
+        let batchSize = 10_000
+        while true {
+            try Task.checkCancellation()
+            let detached = try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
+                try await connection.query("""
+                    WITH batch AS (
+                        SELECT id FROM requests WHERE app_id = \(id) LIMIT \(batchSize)
+                    ), detached AS (
+                        UPDATE requests r SET app_id = NULL FROM batch WHERE r.id = batch.id RETURNING 1
+                    )
+                    SELECT count(*) AS n FROM detached
+                    """, logger: Self.logger).collect().first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
+            }
+            if detached < Int64(batchSize) { break }
+            try await Task.sleep(for: Self.maintenancePause)
+        }
+        try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
+            _ = try await connection.query("DELETE FROM apps WHERE id = \(id)", logger: Self.logger).collect()
+        }
     }
 
+    /// Records whether the app's bundle exists on the Mac; nothing happens when the app was deleted.
     func setInstalled(appID: AppID, deviceID: DeviceID, installed: Bool) async throws {
         try await execute("""
-            INSERT INTO app_installs (app_id, device_id, installed, checked_at) VALUES (\(appID), \(deviceID), \(installed), now())
+            INSERT INTO app_installs (app_id, device_id, installed, checked_at)
+            SELECT a.id, \(deviceID), \(installed), now() FROM apps a WHERE a.id = \(appID)
             ON CONFLICT (app_id, device_id) DO UPDATE SET installed = excluded.installed, checked_at = now()
             """)
     }
@@ -162,23 +186,71 @@ extension PostgresDatabase {
             """).first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
     }
 
-    /// In one transaction: attributes unattributed requests, processes and host sources inside
-    /// `bundlePath` to the app, then rebuilds its inventory from every request attributed to it
-    /// (domains from hostnames, IPs from destination addresses or IP-literal hosts; `is_direct` when
-    /// the host itself was an IP). Existing inventory rows keep their earliest first-seen time.
-    /// Returns the number of requests newly attributed.
+    /// Attributes unattributed requests, processes and host sources inside `bundlePath` to the app, then
+    /// rebuilds its inventory from every request attributed to it (domains from hostnames, IPs from
+    /// destination addresses or IP-literal hosts; `is_direct` when the host itself was an IP). Existing
+    /// inventory rows keep their earliest first-seen time and first Mac. Returns the number of requests
+    /// newly attributed.
+    ///
+    /// Requests are attributed in windows of row IDs, each its own short transaction, so a large history
+    /// never sits in one long transaction; the processes, host sources and inventory follow in one
+    /// transaction. Running it again picks up where an interrupted run stopped.
     func backfill(appID: AppID, bundlePath: String) async throws -> Int64 {
         let match = Self.bundleMatch(bundlePath)
         let classifier = siteClassifier
-        return try await withTransaction { connection in
-            let updated = try await connection.query("""
-                WITH updated AS (
-                    UPDATE requests r SET app_id = \(appID)
-                    WHERE r.app_id IS NULL AND (r.bundle_path = ANY(\(match.paths)) OR r.process_path LIKE \(match.pattern))
-                    RETURNING 1
-                )
-                SELECT count(*) AS n FROM updated
-                """, logger: Self.logger).collect().first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
+
+        let bounds = try await rows("""
+            SELECT min(r.id) AS low, max(r.id) AS high FROM requests r
+            WHERE r.app_id IS NULL AND (r.bundle_path = ANY(\(match.paths)) OR r.process_path LIKE \(match.pattern))
+            """).first.map { row in
+            let read = PostgresRowReader(row)
+            return (low: try read("low", as: Int64?.self), high: try read("high", as: Int64?.self))
+        }
+        var updated: Int64 = 0
+        if let low = bounds?.low, let high = bounds?.high {
+            let window: Int64 = 50_000
+            var start = low
+            while start <= high {
+                try Task.checkCancellation()
+                let (from, end) = (start, start + window)
+                updated += try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
+                    try await connection.query("""
+                        WITH updated AS (
+                            UPDATE requests r SET app_id = \(appID)
+                            WHERE r.id >= \(from) AND r.id < \(end) AND r.app_id IS NULL
+                              AND (r.bundle_path = ANY(\(match.paths)) OR r.process_path LIKE \(match.pattern))
+                            RETURNING 1
+                        )
+                        SELECT count(*) AS n FROM updated
+                        """, logger: Self.logger).collect().first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
+                }
+                start = end
+            }
+        }
+
+        try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
+            // The slow reads come first and take no row locks; the writes at the end lock the rows the
+            // capture writer also touches only briefly (it waits at most its 5 s lock timeout).
+            var hosts: [AppHost] = []
+            for row in try await connection.query(Self.backfillDomains(appID), logger: Self.logger).collect() {
+                let read = PostgresRowReader(row)
+                let value = try read("value", as: String.self)
+                hosts.append(AppHost(
+                    appID: appID, kind: .domain, value: value, site: classifier.site(for: value),
+                    firstSeen: try read("first_seen"), lastSeen: try read("last_seen"), requestCount: try read("n"),
+                    processName: try read("process_name"), policy: try read("policy"), geo: try read.json("geo", as: GeoInfo.self),
+                    isDirect: false, hosts: [], firstDeviceID: try read("first_device_id")
+                ))
+            }
+            for row in try await connection.query(Self.backfillIPs(appID), logger: Self.logger).collect() {
+                let read = PostgresRowReader(row)
+                hosts.append(AppHost(
+                    appID: appID, kind: .ip, value: try read("value"), site: nil,
+                    firstSeen: try read("first_seen"), lastSeen: try read("last_seen"), requestCount: try read("n"),
+                    processName: try read("process_name"), policy: try read("policy"), geo: try read.json("geo", as: GeoInfo.self),
+                    isDirect: try read("is_direct"), hosts: try read("hosts"), firstDeviceID: try read("first_device_id")
+                ))
+            }
 
             try await connection.query("""
                 UPDATE processes SET app_id = \(appID) WHERE app_id IS NULL AND path LIKE \(match.pattern)
@@ -187,54 +259,13 @@ extension PostgresDatabase {
                 UPDATE host_sources SET app_id = \(appID)
                 WHERE app_id IS NULL AND (bundle_path = ANY(\(match.paths)) OR source_path LIKE \(match.pattern))
                 """, logger: Self.logger)
-
-            var hosts: [AppHost] = []
-            let domains = try await connection.query("""
-                SELECT r.host AS value, min(r.started_at) AS first_seen, max(r.started_at) AS last_seen, count(*) AS n,
-                       (array_agg(r.process_name ORDER BY r.started_at) FILTER (WHERE r.process_name IS NOT NULL))[1] AS process_name,
-                       (array_agg(array_to_string(r.policy_path, ' › ') ORDER BY r.started_at DESC) FILTER (WHERE cardinality(r.policy_path) > 0))[1] AS policy,
-                       (array_agg(r.geo ORDER BY r.started_at DESC) FILTER (WHERE r.geo IS NOT NULL))[1] AS geo
-                FROM requests r WHERE r.app_id = \(appID) AND NOT r.is_ip_literal
-                GROUP BY r.host
-                """, logger: Self.logger).collect()
-            for row in domains {
-                let read = PostgresRowReader(row)
-                let value = try read("value", as: String.self)
-                hosts.append(AppHost(
-                    appID: appID, kind: .domain, value: value, site: classifier.site(for: value),
-                    firstSeen: try read("first_seen"), lastSeen: try read("last_seen"), requestCount: try read("n"),
-                    processName: try read("process_name"), policy: try read("policy"), geo: try read.json("geo", as: GeoInfo.self),
-                    isDirect: false, hosts: []
-                ))
-            }
-
-            let ips = try await connection.query("""
-                SELECT v.value, min(r.started_at) AS first_seen, max(r.started_at) AS last_seen, count(*) AS n,
-                       bool_or(r.is_ip_literal) AS is_direct,
-                       COALESCE(array_agg(DISTINCT r.host) FILTER (WHERE NOT r.is_ip_literal), '{}') AS hosts,
-                       (array_agg(r.process_name ORDER BY r.started_at) FILTER (WHERE r.process_name IS NOT NULL))[1] AS process_name,
-                       (array_agg(array_to_string(r.policy_path, ' › ') ORDER BY r.started_at DESC) FILTER (WHERE cardinality(r.policy_path) > 0))[1] AS policy,
-                       (array_agg(r.geo ORDER BY r.started_at DESC) FILTER (WHERE r.geo IS NOT NULL))[1] AS geo
-                FROM requests r
-                CROSS JOIN LATERAL (SELECT COALESCE(host(r.remote_ip), CASE WHEN r.is_ip_literal THEN r.host END) AS value) v
-                WHERE r.app_id = \(appID) AND v.value IS NOT NULL
-                GROUP BY v.value
-                """, logger: Self.logger).collect()
-            for row in ips {
-                let read = PostgresRowReader(row)
-                hosts.append(AppHost(
-                    appID: appID, kind: .ip, value: try read("value"), site: nil,
-                    firstSeen: try read("first_seen"), lastSeen: try read("last_seen"), requestCount: try read("n"),
-                    processName: try read("process_name"), policy: try read("policy"), geo: try read.json("geo", as: GeoInfo.self),
-                    isDirect: try read("is_direct"), hosts: try read("hosts")
-                ))
-            }
-
-            for chunk in Self.chunks(hosts, bindsPerItem: Self.appHostColumns.count) {
+            for chunk in Self.chunks(hosts, bindsPerItem: Self.appHostColumns.count + 1) {
                 let statement = try Self.appHostInsert(chunk, conflict: """
                     ON CONFLICT (app_id, kind, value) DO UPDATE SET
                         site = COALESCE(h.site, excluded.site),
                         first_seen = LEAST(h.first_seen, excluded.first_seen),
+                        first_device_id = CASE WHEN excluded.first_seen <= h.first_seen THEN COALESCE(excluded.first_device_id, h.first_device_id)
+                                               ELSE h.first_device_id END,
                         last_seen = GREATEST(h.last_seen, excluded.last_seen),
                         request_count = GREATEST(h.request_count, excluded.request_count),
                         process_name = COALESCE(h.process_name, excluded.process_name),
@@ -245,22 +276,81 @@ extension PostgresDatabase {
                     """)
                 try await connection.query(statement, logger: Self.logger)
             }
-            return updated
         }
+        return updated
+    }
+
+    /// Per hostname of the app's requests: first/last seen, count, the Mac and process of the first
+    /// request, the latest policy and GeoIP. `DISTINCT ON` picks each first/latest value with one sort
+    /// instead of building an array of every request per host.
+    private static func backfillDomains(_ appID: AppID) -> PostgresQuery {
+        """
+        WITH base AS MATERIALIZED (
+            SELECT r.host AS value, r.started_at, r.device_id, r.process_name, r.policy_path, r.geo
+            FROM requests r WHERE r.app_id = \(appID) AND NOT r.is_ip_literal
+        ), totals AS (
+            SELECT value, min(started_at) AS first_seen, max(started_at) AS last_seen, count(*) AS n FROM base GROUP BY value
+        ), first_request AS (
+            SELECT DISTINCT ON (value) value, device_id FROM base ORDER BY value, started_at
+        ), first_process AS (
+            SELECT DISTINCT ON (value) value, process_name FROM base WHERE process_name IS NOT NULL ORDER BY value, started_at
+        ), latest_policy AS (
+            SELECT DISTINCT ON (value) value, array_to_string(policy_path, ' › ') AS policy FROM base
+            WHERE cardinality(policy_path) > 0 ORDER BY value, started_at DESC
+        ), latest_geo AS (
+            SELECT DISTINCT ON (value) value, geo FROM base WHERE geo IS NOT NULL ORDER BY value, started_at DESC
+        )
+        SELECT t.value, t.first_seen, t.last_seen, t.n, f.device_id AS first_device_id, p.process_name, l.policy, g.geo
+        FROM totals t
+        LEFT JOIN first_request f USING (value) LEFT JOIN first_process p USING (value)
+        LEFT JOIN latest_policy l USING (value) LEFT JOIN latest_geo g USING (value)
+        """
+    }
+
+    /// Per destination IP (the resolved address, or the host itself when it was an IP) of the app's
+    /// requests, like `backfillDomains`, plus whether it was reached directly and the hostnames behind it.
+    private static func backfillIPs(_ appID: AppID) -> PostgresQuery {
+        """
+        WITH base AS MATERIALIZED (
+            SELECT COALESCE(host(r.remote_ip), CASE WHEN r.is_ip_literal THEN r.host END) AS value,
+                   r.host, r.is_ip_literal, r.started_at, r.device_id, r.process_name, r.policy_path, r.geo
+            FROM requests r WHERE r.app_id = \(appID) AND (r.remote_ip IS NOT NULL OR r.is_ip_literal)
+        ), totals AS (
+            SELECT value, min(started_at) AS first_seen, max(started_at) AS last_seen, count(*) AS n,
+                   bool_or(is_ip_literal) AS is_direct,
+                   COALESCE(array_agg(DISTINCT host) FILTER (WHERE NOT is_ip_literal), '{}') AS hosts
+            FROM base GROUP BY value
+        ), first_request AS (
+            SELECT DISTINCT ON (value) value, device_id FROM base ORDER BY value, started_at
+        ), first_process AS (
+            SELECT DISTINCT ON (value) value, process_name FROM base WHERE process_name IS NOT NULL ORDER BY value, started_at
+        ), latest_policy AS (
+            SELECT DISTINCT ON (value) value, array_to_string(policy_path, ' › ') AS policy FROM base
+            WHERE cardinality(policy_path) > 0 ORDER BY value, started_at DESC
+        ), latest_geo AS (
+            SELECT DISTINCT ON (value) value, geo FROM base WHERE geo IS NOT NULL ORDER BY value, started_at DESC
+        )
+        SELECT t.value, t.first_seen, t.last_seen, t.n, t.is_direct, t.hosts, f.device_id AS first_device_id,
+               p.process_name, l.policy, g.geo
+        FROM totals t
+        LEFT JOIN first_request f USING (value) LEFT JOIN first_process p USING (value)
+        LEFT JOIN latest_policy l USING (value) LEFT JOIN latest_geo g USING (value)
+        """
     }
 
     // MARK: - Processes
 
     /// Upserts each link that has a start time (root → leaf) by `(device_id, pid, start_time)`, links
     /// every row to the previous stored link as its parent, bumps `last_seen` and, when `appID` is
-    /// given, attributes the whole chain to that app. Returns the leaf's row ID.
+    /// given, attributes the whole chain to that app (NULL when the app was deleted meanwhile). Returns the
+    /// leaf's row ID.
     @discardableResult
     func upsertProcessChain(deviceID: DeviceID, chain: [ProcessLink], appID: AppID?) async throws -> Int64? {
         var seen = Set<Int32>()
         let links = chain.filter { $0.startTime != nil && seen.insert($0.pid).inserted }
         guard !links.isEmpty else { return nil }
 
-        var insert = SQL("INSERT INTO processes AS p (device_id, pid, start_time, name, path, app_id) VALUES ")
+        var insert = SQL("INSERT INTO processes AS p (device_id, pid, start_time, name, path, app_id) SELECT v.device_id, v.pid, v.start_time, v.name, v.path, a.id FROM (VALUES ")
         for (index, link) in links.enumerated() {
             if index > 0 { insert.append(", ") }
             let values = [
@@ -270,14 +360,15 @@ extension PostgresDatabase {
             insert.append("(" + values.joined(separator: ", ") + ")")
         }
         insert.append("""
-             ON CONFLICT (device_id, pid, start_time) DO UPDATE SET
+            ) AS v(device_id, pid, start_time, name, path, app_id) LEFT JOIN apps a ON a.id = v.app_id
+            ON CONFLICT (device_id, pid, start_time) DO UPDATE SET
                 name = excluded.name, path = COALESCE(excluded.path, p.path),
                 app_id = COALESCE(excluded.app_id, p.app_id), last_seen = now()
             RETURNING p.id, p.pid
             """)
         let insertQuery = insert.query
 
-        return try await withTransaction { connection in
+        return try await withTransaction(on: .writer) { connection in
             var ids: [Int32: Int64] = [:]
             for row in try await connection.query(insertQuery, logger: Self.logger).collect() {
                 let read = PostgresRowReader(row)
@@ -298,11 +389,11 @@ extension PostgresDatabase {
     }
 
     /// The app's processes aggregated by executable lineage (root path → … → path), in depth-first
-    /// order with siblings in launch order. Each node shows its latest PID, the distinct domains and
-    /// requests of all its processes, and `isRunning` when one of them was seen in the last 5 minutes
-    /// (the UI refines this for processes of this Mac).
+    /// order with siblings in launch order. Each node shows its latest PID and that PID's Mac, the distinct
+    /// domains and requests of all its processes, and `isRunning` when one of them was seen in the last
+    /// 5 minutes (the UI refines this for processes of this Mac).
     func processTree(appID: AppID, scope: DeviceScope) async throws -> [ProcessNode] {
-        var sql = SQL("WITH RECURSIVE app_procs AS (SELECT id, parent_id, pid, start_time, name, path, first_seen, last_seen FROM processes WHERE app_id = ")
+        var sql = SQL("WITH RECURSIVE app_procs AS (SELECT id, parent_id, device_id, pid, start_time, name, path, first_seen, last_seen FROM processes WHERE app_id = ")
         sql.append(sql.bind(appID))
         if let device = scope.deviceID { sql.append(" AND device_id = \(sql.bind(device))") }
         sql.append("""
@@ -319,6 +410,7 @@ extension PostgresDatabase {
                        array_agg(p.id) AS ids,
                        (array_agg(p.name ORDER BY p.start_time DESC))[1] AS name,
                        (array_agg(p.pid ORDER BY p.start_time DESC))[1] AS pid,
+                       (array_agg(p.device_id ORDER BY p.start_time DESC))[1] AS device_id,
                        max(p.start_time) AS start_time,
                        (array_agg(p.path ORDER BY p.start_time DESC))[1] AS path,
                        min(p.first_seen) AS first_seen,
@@ -326,7 +418,7 @@ extension PostgresDatabase {
                 FROM walk w JOIN app_procs p ON p.id = w.id
                 GROUP BY w.lineage
             )
-            SELECT g.lineage, g.name, g.pid, g.start_time, g.path, g.first_seen, g.running,
+            SELECT g.lineage, g.name, g.pid, g.device_id, g.start_time, g.path, g.first_seen, g.running,
                    COALESCE(s.domains, 0) AS domains, COALESCE(s.requests, 0) AS requests
             FROM grouped g
             LEFT JOIN LATERAL (
@@ -355,7 +447,8 @@ extension PostgresDatabase {
                     depth: lineage.count - 1,
                     domainCount: try read("domains", as: Int.self),
                     requestCount: try read("requests", as: Int64.self),
-                    isRunning: try read("running")
+                    isRunning: try read("running"),
+                    deviceID: try read("device_id")
                 ),
                 firstSeen: try read("first_seen")
             ))
