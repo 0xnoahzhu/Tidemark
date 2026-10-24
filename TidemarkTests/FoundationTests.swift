@@ -27,6 +27,7 @@ struct FoundationTests {
     @Test func formatsGeo() {
         let geo = GeoInfo(countryCode: "us", asn: 13335, organization: "Cloudflare, Inc.")
         #expect(geo.display == "US · AS13335 Cloudflare")
+        #expect(GeoInfo.shortOrganization("Amazon.com, Inc.") == "Amazon")
     }
 
     @Test func parsesSurgeNotes() throws {

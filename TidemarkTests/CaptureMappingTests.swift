@@ -114,6 +114,8 @@ struct CaptureMappingTests {
         let helper = [ProcessLink(name: "Helper", pid: 1, path: "/Applications/Slack.app/Contents/Frameworks/Slack Helper.app/Contents/MacOS/Slack Helper", startTime: nil)]
         #expect(CaptureRecordMapper.bundlePath(chain: helper, pathForStatistics: nil) == "/Applications/Slack.app")
         #expect(CaptureRecordMapper.bundlePath(chain: [], pathForStatistics: "/Applications/Grok Bot.app/") == "/Applications/Grok Bot.app")
+        // System daemons are reported as `SYSTEM`, which is not a bundle.
+        #expect(CaptureRecordMapper.bundlePath(chain: [], pathForStatistics: "SYSTEM") == nil)
         #expect(CaptureRecordMapper.bundlePath(chain: [], pathForStatistics: nil) == nil)
     }
 

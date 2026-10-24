@@ -11,6 +11,10 @@ final class EgressState {
     var lastChecked: Date?
     var isChecking = false
     var network: ThisMacNetwork?
+    /// Surge outbound mode: 0 direct, 1 global proxy, 2 rule (from `environment`).
+    var proxyMode: Int?
+    /// Rule that routes the current egress, e.g. `FINAL` (rule mode) or `Global · AI`.
+    var currentRule: String?
 
     var current: EgressSample? { samples.first(where: \.isCurrent) }
 }

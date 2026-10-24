@@ -36,7 +36,7 @@ struct DatabaseLiveTests {
         try await withTestDatabase { db in
             let ping = try await db.ping()
             print("DatabaseLiveTests: \(ping.serverVersion), round trip \(ping.roundTrip)")
-            #expect(ping.serverVersion.hasPrefix("PostgreSQL "))
+            #expect(ping.serverVersion.first?.isNumber == true)
             #expect(ping.serverVersion.split(separator: " ").count == 2)
             #expect(ping.roundTrip < .seconds(2))
         }

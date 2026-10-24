@@ -94,7 +94,7 @@ protocol TidemarkDatabase: Sendable {
     func connect() async throws
     /// Applies pending migrations; returns the schema version afterwards.
     @discardableResult func migrate() async throws -> Int
-    /// Round trip of `SELECT 1`, plus the server version string.
+    /// Round trip of `SELECT 1`, plus the bare server version (`18.3`).
     func ping() async throws -> (roundTrip: Duration, serverVersion: String)
     func schemaVersion() async throws -> Int
     func tableNames() async throws -> [String]
@@ -252,6 +252,8 @@ protocol ProbeActions: AnyObject {
     func startProbe(url: String, mode: ProbeDeviceMode, tail: Bool) async throws -> UInt16
     /// Adds a step (page load, click, device switch) to the running probe.
     func recordStep(label: String, url: String?)
+    /// Called by the web view when the probe's first page load finishes (switches the phase to recording).
+    func pageDidFinishLoading()
     /// Stops recording, saves the session and returns it.
     @discardableResult func stopProbe() async -> ProbeSession?
     func deleteProbe(_ id: UUID) async
@@ -270,6 +272,10 @@ protocol HostInsightProviding: AnyObject {
     func cachedInsight(for host: String) async -> HostInsight?
     /// Warms the model up (call when the inspector opens and no cached insight exists).
     func prewarm()
+}
+
+extension ProbeActions {
+    func pageDidFinishLoading() {}
 }
 
 /// Egress IP checks and IP lookups.

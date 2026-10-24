@@ -115,7 +115,7 @@ struct InventoryView: View {
             .width(58)
 
             TableColumn(tr("Seen by · process path", "Inventory")) { entry in
-                InventorySourcesList(sources: entry.sources)
+                InventorySourcesList(model: model, sources: entry.sources)
             }
             .width(min: 240, ideal: 440)
 
@@ -188,7 +188,7 @@ struct InventoryView: View {
             TableColumn(tr("Seen by", "Inventory")) { group in
                 HStack(spacing: -4) {
                     ForEach(Array(group.sources.prefix(5).enumerated()), id: \.offset) { _, source in
-                        InventorySourceTile(source: source, size: 18)
+                        InventorySourceTile(model: model, source: source, size: 18)
                             .padding(1.5)
                             .background(Theme.bg, in: RoundedRectangle(cornerRadius: 6.5, style: .continuous))
                             .help(InventorySourcesList.displayTitle(source))
@@ -247,14 +247,17 @@ struct InventoryKindChip: View {
 }
 
 /// Up to six "seen by" rows: a tile (app icon, letter, or the purple probe tile) and the process path.
+/// Rendered inside `Table` cells, which do not receive custom environment objects on macOS 27, so the
+/// model is passed explicitly.
 struct InventorySourcesList: View {
+    let model: AppModel
     var sources: [InventorySource]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             ForEach(Array(sources.prefix(6).enumerated()), id: \.offset) { _, source in
                 HStack(alignment: .top, spacing: 6) {
-                    InventorySourceTile(source: source, size: 14)
+                    InventorySourceTile(model: model, source: source, size: 14)
                         .padding(.top, 1)
                     Text(Self.wrappable(Self.displayPath(source)))
                         .font(Theme.mono(10.5))
@@ -305,7 +308,7 @@ struct InventorySourcesList: View {
 
 /// Tile of an inventory source: the monitored app's tile, the bundle's icon, or the purple `P` of a probe.
 struct InventorySourceTile: View {
-    @Environment(AppModel.self) private var model
+    let model: AppModel
     var source: InventorySource
     var size: CGFloat
 

@@ -119,9 +119,9 @@ final class PostgresDatabase: TidemarkDatabase {
             let roundTrip = start.duration(to: clock.now)
             let rows = try await connection.query("SHOW server_version", logger: Self.logger).collect()
             let raw = try rows.first.map { try $0.makeRandomAccess()[0].decode(String.self) } ?? ""
-            // "18.3 (Debian 18.3-1.pgdg13+1)" → "PostgreSQL 18.3"
+            // "18.3 (Debian 18.3-1.pgdg13+1)" → "18.3"
             let version = raw.split(separator: " ").first.map(String.init) ?? raw
-            return (roundTrip, "PostgreSQL \(version)")
+            return (roundTrip, version)
         }
     }
 

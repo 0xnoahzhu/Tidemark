@@ -14,6 +14,10 @@ struct EgressSample: Identifiable, Hashable, Codable, Sendable {
     var isCurrent: Bool
     var checkedAt: Date
     var error: String?
+    /// `hosting`, `residential`, `mobile`… from the IP info service.
+    var networkType: String? = nil
+    /// Whether the policy has a working IPv6 egress (nil when unknown).
+    var hasIPv6: Bool? = nil
 
     var id: String { policyPath.joined(separator: "›") }
     var policyDisplay: String { policyPath.joined(separator: " › ") }

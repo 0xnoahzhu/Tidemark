@@ -31,6 +31,8 @@ enum StatusFilter: String, CaseIterable, Sendable, Hashable {
 struct RequestQuery: Hashable, Sendable {
     var scope: DeviceScope = .all
     var range: HistoryRange = .last24Hours
+    /// Explicit time window (dragged on the History chart); overrides `range` when set.
+    var interval: DateInterval? = nil
     var appID: AppID?
     /// Final policy name (`policy` column), nil = all.
     var policy: String?

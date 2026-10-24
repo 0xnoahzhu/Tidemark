@@ -156,7 +156,7 @@ struct MenuBarPanel: View {
                 }
                 Button(tr("Quit", "MenuBar")) {
                     onDismiss()
-                    NSApp.terminate(nil)
+                    AppDelegate.requestQuit()
                 }
                 .foregroundStyle(Theme.ink2)
             }

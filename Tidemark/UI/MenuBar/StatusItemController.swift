@@ -25,6 +25,13 @@ final class StatusItemController: NSObject {
         shared = nil
     }
 
+    #if DEBUG
+    /// Opens the panel without a click (used by `DebugTour`).
+    static func debugShowPanel() { shared?.showPanel() }
+    static func debugClosePanel() { shared?.dismiss() }
+    static var debugPanelWindow: NSWindow? { shared?.panel }
+    #endif
+
     private let model: AppModel
     private let statusItem: NSStatusItem
     private var panel: MenuBarPanelWindow?

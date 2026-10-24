@@ -113,6 +113,8 @@ struct SurgePolicyOption: Decodable, Sendable, Hashable {
 /// A policy group and its current selection.
 struct SurgePolicyGroup: Sendable, Hashable {
     var name: String
+    /// `Manual Selection Group`, `URL Test Group`, … (tells an auto-test pick from a manual switch).
+    var type: String? = nil
     var options: [SurgePolicyOption]
     /// Currently selected option, if known (from `environment` → `ProxyGroupSelection`).
     var selected: String?

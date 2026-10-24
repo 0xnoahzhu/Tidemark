@@ -44,6 +44,8 @@ struct GeoInfo: Codable, Hashable, Sendable {
         for suffix in [", Inc.", ", Inc", " Inc.", " Inc", ", LLC", " LLC", " Ltd.", " Ltd", ", Ltd.", " Co., Ltd.", " Corporation", " Corp.", " GmbH", " S.A.", " SRL", " B.V."] where s.hasSuffix(suffix) {
             s = String(s.dropLast(suffix.count))
         }
+        // `Amazon.com, Inc.` → `Amazon`
+        if s.lowercased().hasSuffix(".com"), !s.contains(" ") { s = String(s.dropLast(4)) }
         return s.trimmingCharacters(in: .whitespaces)
     }
 }

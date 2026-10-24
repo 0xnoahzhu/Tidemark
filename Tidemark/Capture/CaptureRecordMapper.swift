@@ -141,7 +141,8 @@ enum CaptureRecordMapper {
         for link in chain {
             if let path = link.path, let bundle = outermostBundle(in: path) { return bundle }
         }
-        guard var path = nonEmpty(pathForStatistics) else { return nil }
+        // Surge reports system daemons as the literal `SYSTEM`; only real paths are bundles.
+        guard var path = nonEmpty(pathForStatistics), path.hasPrefix("/") else { return nil }
         while path.count > 1, path.hasSuffix("/") { path.removeLast() }
         return path
     }

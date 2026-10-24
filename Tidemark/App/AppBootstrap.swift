@@ -46,6 +46,9 @@ enum AppBootstrap {
 
         engine.start()
         egress.start()
+        #if DEBUG
+        DebugTour.runIfRequested(model)
+        #endif
     }
 
     /// Stops a running probe and the egress checks, then flushes buffered rows to PostgreSQL (or the

@@ -58,7 +58,7 @@ Features that would only add decoration are left out, and section 7 explains why
 ## 2. Ground rules and SDK facts that shape the plan
 
 - **Availability spelling.** The 27 SDK writes availability as `@available(anyAppleOS 27.0, *)` in Swift and `API_AVAILABLE(anyappleos(27.0))` in C. Grepping only for `macOS 27` misses most of the new Swift API, including all of Observation's 27 additions and about 93 SwiftUI declarations. Foundation's overlay writes `@available(macOS 27, ...)` with no `.0`.
-- **No Swift Subprocess module ships in the SDK.** `surge-cli` keeps using `Foundation.Process` + `Pipe` + `FileHandle.bytes.lines`.
+- **No Swift Subprocess module ships in the SDK.** `surge-cli` keeps using `Foundation.Process` + `Pipe`, but reads the pipes through `readabilityHandler`-bridged `AsyncStream`s rather than `FileHandle.bytes.lines`: every `FileHandle.AsyncBytes` read is serialized through one shared I/O actor, so a long-running `watch` stalls every other reader, and byte-wise iteration measured about 700× slower (3.5 s against 5 ms for a 290 KB `dump recent`). Do not copy the `SurgeWatcher` example below as written.
 - **WebKit 27 adds no API for observing subresource loads.** The Site Probe proxy is still the only way to get a complete host list. The macOS 27 additions in WebKit's SwiftUI overlay are visionOS-only, so `WebView` and `WebPage` remain macOS 26 APIs.
 - **SwiftUI `MenuBarExtra` and `MenuBarExtraStyle` are unchanged in 27.** There is still no programmatic dismissal and no expanded-interface hook.
 - **Liquid Glass has no continuous parameter.** `Glass` offers only `.regular`, `.clear`, `.identity`, `.tint(_:)` and `.interactive(_:)`.

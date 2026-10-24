@@ -27,8 +27,8 @@ domain or IP it has never used before.
 | `Localization/` | `Localizer`, `tr()` / `trf()` / `trn()` | — |
 | `Surge/` | `SurgeCLIClient`: runs surge-cli, parses events, reconnects | Services |
 | `Process/` | `LibProcInspector` (libproc), `PublicSuffixClassifier` (bundled PSL) | Services |
-| `Database/` | `Schema` migrations, `PostgresDatabase` (PostgresNIO), `WriteBuffer` + disk spool | Services |
-| `Capture/` | `CaptureEngine`: attribution, first-contact detection, alerts, notifications, stats, retention | all protocols, State |
+| `Database/` | `Schema` migrations, `PostgresDatabase` (PostgresNIO) | Services |
+| `Capture/` | `CaptureEngine` + `CapturePipeline`: attribution, first-contact detection, alerts, notifications, write buffer, disk spool, stats, retention | all protocols, State |
 | `Probe/` | Per-session CONNECT proxy and the probe controller | Services, State |
 | `Egress/` | Egress monitor (per-policy external IP, latency, change log, IP lookup) | Services, State |
 | `UI/` | SwiftUI views; `Theme/` tokens and `Components/` shared views | State |
@@ -123,7 +123,7 @@ session):
 
 Every row carries `device_id`. Each Mac records and alerts on its own requests. The sidebar's Mac menu
 scopes every page to one Mac or all. The live table merges this Mac's stream with rows other Macs wrote
-(polled by `written_at`). Apps are shared by bundle path; each Mac reports in `app_installs` whether the
+(polled by `updated_at` through `requestsWritten(after:)`). Apps are shared by bundle path; each Mac reports in `app_installs` whether the
 path exists locally ("Installed on MacBook Pro · Mac mini (Office) · Path not found").
 
 ## Site Probe

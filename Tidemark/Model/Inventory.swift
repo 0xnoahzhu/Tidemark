@@ -19,6 +19,8 @@ struct AppHost: Identifiable, Hashable, Codable, Sendable {
     var isDirect: Bool
     /// For IPs: domains that resolved to it.
     var hosts: [String]
+    /// Mac that made first contact (`app_hosts.first_device_id`).
+    var firstDeviceID: DeviceID? = nil
 
     var id: String { "\(kind.rawValue):\(value)" }
 
@@ -62,4 +64,6 @@ struct ProcessNode: Identifiable, Hashable, Sendable {
     var domainCount: Int
     var requestCount: Int64
     var isRunning: Bool
+    /// Mac of the latest PID, so the UI can re-check Running/Exited for this Mac's processes.
+    var deviceID: DeviceID? = nil
 }
