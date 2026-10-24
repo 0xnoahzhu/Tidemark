@@ -1,7 +1,14 @@
 import Foundation
 
-/// Versioned schema migrations. Each migration runs once, inside a transaction, and is recorded in
-/// `schema_migrations`. Never edit a migration that has shipped; append a new one instead.
+/// Versioned schema migrations. Each migration runs once and is recorded in `schema_migrations`.
+/// Never edit a migration that has shipped; append a new one instead.
+///
+/// Migrations run on a live database that several Macs write to at the same time, so from v2 on:
+/// * every statement is idempotent (`IF NOT EXISTS`, `IF EXISTS`), because a migration interrupted between
+///   its transaction and its index steps runs again from the start;
+/// * DDL runs with a short `lock_timeout` (and is retried), so it never queues every Mac's writes behind it;
+/// * nothing rewrites a large table; indexes on large tables are built and dropped `CONCURRENTLY`, outside
+///   the transaction (`ConcurrentStep`).
 ///
 /// Statements are written without a schema prefix: `PostgresDatabase` runs them with
 /// `search_path = <schema>, public`, so the same migrations build the production schema and the
@@ -11,7 +18,24 @@ enum Schema {
     struct Migration: Sendable {
         var version: Int
         var name: String
+        /// Statements run in one transaction.
         var sql: String
+        /// Index builds and drops run after `sql`, each on its own outside any transaction, so they never
+        /// block writes. The migration is recorded once they all succeeded.
+        var concurrentSteps: [ConcurrentStep] = []
+        /// The oldest schema version whose Tidemark can still write correctly once this migration is applied
+        /// (`schema_migrations.requires_version`, from v2 on). An older Tidemark that finds a newer migration
+        /// requiring more than it knows stops writing instead of failing on every statement.
+        var requiresVersion: Int? = nil
+    }
+
+    /// A schema change PostgreSQL cannot run inside a transaction block.
+    enum ConcurrentStep: Sendable, Equatable {
+        /// `CREATE INDEX CONCURRENTLY IF NOT EXISTS <name> ON <table> <definition>`. An invalid index left
+        /// behind by an interrupted build is dropped and built again.
+        case createIndex(name: String, table: String, definition: String)
+        /// `DROP INDEX CONCURRENTLY IF EXISTS <name>`.
+        case dropIndex(name: String)
     }
 
     static var latestVersion: Int { migrations.last?.version ?? 0 }
@@ -26,6 +50,52 @@ enum Schema {
 
     static let migrations: [Migration] = [
         Migration(version: 1, name: "initial", sql: v1),
+        Migration(version: 2, name: "write path and egress details", sql: v2, concurrentSteps: v2Indexes, requiresVersion: 1),
+    ]
+
+    /// The text every request search matches (`requests_search_trgm_idx`, v2): host, process name, remote IP
+    /// and bundle path, separated by newlines so a search term without a newline can only match inside one
+    /// of them. `PostgresDatabase` must search exactly this expression for the index to apply. It is part of
+    /// migration v2: never change it (a different search needs a new constant and a new index).
+    static let requestSearchText = #"(host || E'\n' || COALESCE(process_name, '') || E'\n' || COALESCE(host(remote_ip), '') || E'\n' || COALESCE(bundle_path, ''))"#
+
+    /// v2 — tuning for a request log whose rows are rewritten several times each, and egress IP details.
+    ///
+    /// * `egress_checks.network_type`, `has_ipv6`: the `EgressSample` fields of the same name. Nullable
+    ///   columns without a default are a catalog-only change.
+    /// * `requests` fillfactor 80: room on every page for a request's progress rewrites (bytes, state,
+    ///   completion) to stay on its page as HOT updates, which touch no index at all. It only applies to
+    ///   pages filled from now on; nothing is rewritten.
+    /// * `schema_migrations.requires_version`: lets older builds tell whether they may still write
+    ///   (`Migration.requiresVersion`). v2 keeps v1 builds working: they only miss the new columns.
+    private static let v2 = """
+    ALTER TABLE egress_checks ADD COLUMN IF NOT EXISTS network_type text;
+    ALTER TABLE egress_checks ADD COLUMN IF NOT EXISTS has_ipv6 boolean;
+    ALTER TABLE requests SET (fillfactor = 80);
+    ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS requires_version integer;
+    """
+
+    /// v2 index changes, built and dropped concurrently.
+    ///
+    /// * `requests.updated_at`: the btree becomes a BRIN index. Every write sets `updated_at`, so with a
+    ///   btree no rewrite of a request could be a HOT update: each one added entries to all of the table's
+    ///   indexes. PostgreSQL 16+ keeps an update HOT when only summarizing (BRIN) indexes cover the changed
+    ///   columns, and on any version the BRIN is a tiny fraction of the btree. Rows are appended in time
+    ///   order, so `requestsWritten(after:)` reads only the recent block ranges (plus the pages of
+    ///   long-running requests rewritten in place).
+    /// * Search: one trigram index over `Schema.requestSearchText` replaces the host-only trigram index,
+    ///   which the multi-column search could never use, so History searches over long ranges no longer scan
+    ///   every row.
+    /// * `requests_host_idx`, `requests_remote_ip_idx` and `host_sources_last_seen_idx` serve no query;
+    ///   the last one also made every inventory touch a non-HOT update.
+    private static let v2Indexes: [ConcurrentStep] = [
+        .createIndex(name: "requests_updated_brin_idx", table: "requests", definition: "USING brin (updated_at) WITH (pages_per_range = 16)"),
+        .dropIndex(name: "requests_updated_idx"),
+        .createIndex(name: "requests_search_trgm_idx", table: "requests", definition: "USING gin (\(requestSearchText) gin_trgm_ops)"),
+        .dropIndex(name: "requests_host_trgm_idx"),
+        .dropIndex(name: "requests_host_idx"),
+        .dropIndex(name: "requests_remote_ip_idx"),
+        .dropIndex(name: "host_sources_last_seen_idx"),
     ]
 
     private static let v1 = """
