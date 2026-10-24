@@ -59,6 +59,68 @@ struct CaptureSessionTests {
         #expect(sessions.last?.at == Date(timeIntervalSince1970: restart))
     }
 
+    func activeRow(_ id: Int64, session: Int64 = 1_000) -> RequestRecord {
+        RequestRecord(
+            key: RequestKey(deviceID: device, session: session, surgeID: id), rowID: nil, startedAt: Date(timeIntervalSince1970: requestStart),
+            setupCompletedAt: nil, completedAt: nil, method: "HTTPS", host: "h\(id).example", port: 443, url: nil, remoteIP: nil,
+            remoteAddress: nil, geo: nil, policyPath: ["DIRECT"], rule: nil, state: .active, inBytes: 0, outBytes: 0, pid: nil,
+            processPath: "/usr/bin/curl", bundlePath: nil, chain: [], appID: nil, localAddress: nil, interface: nil, notes: [],
+            isNew: false, writtenAt: nil, probeSessionID: nil
+        )
+    }
+
+    @Test func closingEndedSessionsNeverTakesCaptureOffline() async {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        await database.setFailingMaintenance(true)
+        let pipeline = makePipeline(database: database, directory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.beginSession(1_000)
+        await pipeline.ingest(curl(1, start: requestStart, completed: true), now: base)
+        await pipeline.tick(now: base.addingTimeInterval(1))
+        #expect(await pipeline.isOnline, "a slow or failed maintenance statement is not an outage")
+        #expect(await database.closedSessions.count == 1)
+        #expect(await database.writes.count == 1, "rows keep flowing")
+
+        // Not retried on every round…
+        await pipeline.tick(now: base.addingTimeInterval(2))
+        #expect(await database.closedSessions.count == 1)
+        // …but after the next reconnect.
+        await database.setFailingMaintenance(false)
+        await pipeline.setDatabaseOnline(false)
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.tick(now: base.addingTimeInterval(3))
+        #expect(await database.closedSessions.count == 2)
+        await pipeline.tick(now: base.addingTimeInterval(4))
+        #expect(await database.closedSessions.count == 2, "done once it succeeded")
+    }
+
+    @Test func requestsThatEndedWhileTidemarkWasNotRunningAreClosedOnceOnline() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        // An earlier run left 5, 6 and 7 active: 5 ended meanwhile, 6 is still open, and 7 is open and already
+        // reported again by the stream although the listing missed it.
+        for id in [5, 6, 7] as [Int64] { await database.preinsertRow(activeRow(id)) }
+        let pipeline = makePipeline(database: database, directory: temp.url)
+        let epoch = await pipeline.beginSession(1_000)
+        await pipeline.ingest(curl(7, start: requestStart), now: base)
+        // PostgreSQL is not reachable yet when the stream's backfill lists the active requests.
+        await pipeline.closeVanished([6], fetchedAt: base, epoch: epoch)
+        await pipeline.tick(now: base.addingTimeInterval(1))
+        #expect(await database.vanishedCloses.isEmpty)
+
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.tick(now: base.addingTimeInterval(2))
+        let close = try #require(await database.vanishedCloses.first)
+        #expect(close.keeping == [6, 7], "requests this run still holds as active are kept too")
+        #expect(await database.rows[activeRow(5).key]?.state == .completed)
+        #expect(await database.rows[activeRow(6).key]?.state == .active)
+        #expect(await database.rows[activeRow(7).key]?.state == .active)
+
+        await pipeline.tick(now: base.addingTimeInterval(3))
+        #expect(await database.vanishedCloses.count == 1, "closed once")
+    }
+
     @Test func pendingFirstContactsAreEvaluatedBeforeASessionEnds() async throws {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()

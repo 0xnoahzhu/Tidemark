@@ -21,7 +21,8 @@ struct CaptureServerRejection: Error, LocalizedError {
 /// and only what the server still refuses is set aside — so one bad item never blocks the queue.
 extension CapturePipeline {
     /// One round of writes: the due batch, the oldest spool segment, then (with the spool drained) the
-    /// first-contact work saved by an earlier run and the closing of old sessions' active rows.
+    /// first-contact work saved by an earlier run. Closing rows of ended sessions runs beside it
+    /// (`startMaintenanceIfDue`).
     func writeCycle(now: Date) async {
         defer {
             isFlushing = false
@@ -31,7 +32,6 @@ extension CapturePipeline {
         if online, !spool.isEmpty { await replayOldestSegment(now: now) }
         guard online, spool.isEmpty else { return }
         restoreAuxiliaryIfNeeded()
-        await closeEndedSessions()
         if shouldSaveSnapshot(now: now) { saveSnapshot(now: now) }
     }
 
@@ -352,31 +352,6 @@ extension CapturePipeline {
         pending.databaseFailure = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         pending.databaseError = error
         Self.log.error("PostgreSQL write failed: \(error.localizedDescription, privacy: .public)")
-    }
-
-    // MARK: Old sessions
-
-    /// Closes rows of ended Surge sessions that PostgreSQL still lists as active, once nothing queued for
-    /// those sessions remains (a later write of such a row would otherwise insert it active again).
-    private func closeEndedSessions() async {
-        guard !sessionCloses.isEmpty else { return }
-        let database = self.database
-        for (device, close) in sessionCloses {
-            let queued = (buffer.queuedRequests + (inFlightBatch?.requests ?? [])).contains { $0.key.deviceID == device && $0.key.session < close.before }
-            guard !queued else { continue }
-            do {
-                let closed = try await write(until: .now.advanced(by: writeTimeout)) {
-                    try await database.closeActiveRequests(deviceID: device, before: close.before, at: close.at)
-                }
-                if closed > 0 { Self.log.info("Closed \(closed) requests left active by an earlier Surge session") }
-            } catch let rejection as CaptureWriteRejection {
-                Self.log.error("Closing old sessions' requests failed: \(rejection.message, privacy: .public)")
-            } catch {
-                goOffline(error)
-                return
-            }
-            if sessionCloses[device] == close { sessionCloses[device] = nil }
-        }
     }
 
     // MARK: Files beside the spool

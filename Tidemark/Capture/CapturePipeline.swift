@@ -95,6 +95,16 @@ actor CapturePipeline {
         var at: Date
     }
 
+    /// Closing of `deviceID`'s rows of `session` that `dump active` no longer listed at `at` (`keeping` holds
+    /// the listed IDs; rows that started at or after `startedBefore` may be newer than the listing).
+    struct VanishedClose: Equatable, Sendable {
+        var deviceID: DeviceID
+        var session: Int64
+        var keeping: Set<Int64>
+        var startedBefore: Date
+        var at: Date
+    }
+
     static let log = Logger(subsystem: "io.tidemark.Tidemark", category: "capture")
 
     /// Seconds to wait for a remote IP and its GeoIP data before evaluating first contact without them.
@@ -118,6 +128,13 @@ actor CapturePipeline {
     let finalFlushBudget: Duration = .seconds(3)
     /// The local snapshot of the shared state is rewritten at most this often.
     let snapshotInterval: TimeInterval = 600
+    /// Longest wait for one maintenance statement (closing rows of ended sessions). Longer than the server's
+    /// own 10-minute limit for these statements, so a new attempt never overlaps one still running there.
+    let maintenanceBudget: Duration = .seconds(660)
+    /// A failed maintenance statement is tried again after this long, or after the next reconnect.
+    let maintenanceRetryInterval: TimeInterval = 600
+    /// Margin on `dump active`'s time for a remote Surge, whose clock may differ from this Mac's.
+    let remoteClockMargin: TimeInterval = 60
 
     // Dependencies
     var database: any TidemarkDatabase
@@ -142,6 +159,10 @@ actor CapturePipeline {
     var lastSessionCheckSignal: Date?
     var lastEventAt: Date?
     var sessionCloses: [DeviceID: SessionClose] = [:]
+    var vanishedCloses: [VanishedClose] = []
+    /// The maintenance round in progress (one at a time).
+    var maintenanceTask: Task<Void, Never>?
+    var maintenanceRetryAt = Date.distantPast
 
     // Attribution and inventory
     var attributor: CaptureAttributor
@@ -411,7 +432,11 @@ actor CapturePipeline {
     var isOnline: Bool { online }
 
     /// Marks PostgreSQL reachable (writes go out and the spool is replayed) or unreachable (rows are spooled).
-    func setDatabaseOnline(_ on: Bool) { online = on }
+    /// Maintenance that failed or waited while offline is tried again once the connection is back.
+    func setDatabaseOnline(_ on: Bool) {
+        if on, !online { maintenanceRetryAt = .distantPast }
+        online = on
+    }
 
     // MARK: Events
 
@@ -463,13 +488,17 @@ actor CapturePipeline {
         }
     }
 
-    /// Closes this session's rows the database still holds as active although Surge no longer lists them
-    /// (connections that ended while Tidemark was not running). Best effort: a failure leaves them for the
-    /// next reconnect.
-    func closeVanished(_ active: Set<Int64>, fetchedAt: Date, epoch expected: Int) async {
-        guard expected == epoch, online, session != 0 else { return }
-        _ = try? await database.closeVanishedRequests(deviceID: settings.deviceID, session: session,
-                                                      keeping: Array(active), startedBefore: fetchedAt, at: fetchedAt)
+    /// Schedules closing this session's rows the database still holds as active although `dump active` no
+    /// longer lists them (connections that ended while Tidemark was not running). It runs as maintenance
+    /// once PostgreSQL is reachable and the spool is replayed (spooled rows of a crashed run would otherwise
+    /// come back active), and a newer listing of the same session replaces an older one.
+    func closeVanished(_ active: Set<Int64>, fetchedAt: Date, epoch expected: Int) {
+        guard expected == epoch, session != 0 else { return }
+        let margin = settings.isRemote ? remoteClockMargin : 0
+        let close = VanishedClose(deviceID: settings.deviceID, session: session, keeping: active,
+                                  startedBefore: fetchedAt.addingTimeInterval(-margin), at: fetchedAt)
+        vanishedCloses.removeAll { $0.deviceID == close.deviceID && $0.session == close.session }
+        vanishedCloses.append(close)
     }
 
     /// One `request` / `request-update` event.
@@ -803,8 +832,8 @@ actor CapturePipeline {
         }
     }
 
-    /// First-contact deadlines, periodic rewrites of active requests, eviction, flushing, spooling and replay.
-    /// `waitForWrites` returns only after this round's database writes finished (tests).
+    /// First-contact deadlines, periodic rewrites of active requests, eviction, flushing, spooling, replay and
+    /// maintenance. `waitForWrites` returns only after this round's database work finished (tests).
     func tick(now: Date = .now, waitForWrites: Bool = true) async {
         processContacts(now: now, only: nil)
         if now.timeIntervalSince(lastScan) >= 1 {
@@ -822,19 +851,18 @@ actor CapturePipeline {
                 spoolRows(buffer.takeRequests())
                 buffer.markFlushed(now: now)
             }
-            return
-        }
-        if online {
-            guard buffer.shouldFlush(now: now) || !spool.isEmpty || !sessionCloses.isEmpty || !auxiliaryRestored
-                || shouldSaveSnapshot(now: now) else { return }
-            isFlushing = true
-            flushStartedAt = now
-            let cycle = Task { await self.writeCycle(now: now) }
-            if waitForWrites { await cycle.value }
+        } else if online {
+            if buffer.shouldFlush(now: now) || !spool.isEmpty || !auxiliaryRestored || shouldSaveSnapshot(now: now) {
+                isFlushing = true
+                flushStartedAt = now
+                let cycle = Task { await self.writeCycle(now: now) }
+                if waitForWrites { await cycle.value }
+            }
         } else if buffer.requestCount > 0, buffer.shouldFlush(now: now) {
             spoolRows(buffer.takeRequests())
             buffer.markFlushed(now: now)
         }
+        if let maintenance = startMaintenanceIfDue(now: now), waitForWrites { await maintenance.value }
     }
 
     /// Writes (or spools) everything queued. Waits briefly for a flush in progress; when that flush is stuck

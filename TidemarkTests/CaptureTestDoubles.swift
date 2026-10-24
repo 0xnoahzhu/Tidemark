@@ -217,7 +217,10 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var refusedHosts: Set<String> = []
     /// Request writes hang until cancelled (a black-holed connection).
     var stallingRequests = false
+    /// Closing rows of ended sessions fails (`DatabaseError.unreachable`) while everything else works.
+    var failingMaintenance = false
     var closedSessions: [(deviceID: DeviceID, before: Int64, at: Date)] = []
+    var vanishedCloses: [(deviceID: DeviceID, session: Int64, keeping: Set<Int64>, startedBefore: Date, at: Date)] = []
     var knownHostsCalls = 0
     /// Returned by `alerts(after:excluding:)` (alerts other Macs wrote).
     var otherMacAlerts: [AlertItem] = []
@@ -244,6 +247,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func setEnforcesForeignKeys(_ on: Bool) { enforcesForeignKeys = on }
     func setRefusedHosts(_ hosts: Set<String>) { refusedHosts = hosts }
     func setStallingRequests(_ on: Bool) { stallingRequests = on }
+    func setFailingMaintenance(_ on: Bool) { failingMaintenance = on }
     func setApps(_ apps: [MonitoredApp]) { appList = apps }
     func setMutes(_ patterns: [String]) { mutesList = patterns }
     func setOtherMacAlerts(_ alerts: [AlertItem]) { otherMacAlerts = alerts }
@@ -319,8 +323,25 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64 {
         try check()
         closedSessions.append((deviceID, session, date))
+        if failingMaintenance { throw DatabaseError.unreachable("canceling statement due to statement timeout") }
         var closed: Int64 = 0
         for (key, row) in rows where key.deviceID == deviceID && key.session < session && row.state == .active {
+            var done = row
+            done.state = .completed
+            done.completedAt = done.completedAt ?? date
+            rows[key] = done
+            closed += 1
+        }
+        return closed
+    }
+    func closeVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date, at date: Date) async throws -> Int64 {
+        try check()
+        let keeping = Set(surgeIDs)
+        vanishedCloses.append((deviceID, session, keeping, startedBefore, date))
+        if failingMaintenance { throw DatabaseError.unreachable("canceling statement due to statement timeout") }
+        var closed: Int64 = 0
+        for (key, row) in rows where key.deviceID == deviceID && key.session == session && row.state == .active
+            && !keeping.contains(key.surgeID) && row.startedAt < startedBefore {
             var done = row
             done.state = .completed
             done.completedAt = done.completedAt ?? date
