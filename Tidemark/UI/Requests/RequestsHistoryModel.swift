@@ -17,7 +17,7 @@ final class RequestsHistoryModel {
     private(set) var isLoading = false
     private(set) var isLoadingMore = false
     private(set) var errorMessage: String?
-    /// The query the rows belong to (offset 0).
+    /// The query the rows belong to (offset 0). Its `interval` is set while the chart is zoomed.
     private(set) var query = RequestQuery()
 
     var canLoadMore: Bool { Int64(rows.count) < totalCount && !isLoadingMore && errorMessage == nil }
@@ -81,6 +81,7 @@ final class RequestsHistoryModel {
     }
 
     private func sameFilter(_ a: RequestQuery, _ b: RequestQuery) -> Bool {
-        a.scope == b.scope && a.range == b.range && a.appID == b.appID && a.policy == b.policy && a.status == b.status && a.search == b.search
+        a.scope == b.scope && a.range == b.range && a.interval == b.interval && a.appID == b.appID && a.policy == b.policy
+            && a.status == b.status && a.search == b.search
     }
 }

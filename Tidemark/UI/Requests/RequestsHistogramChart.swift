@@ -1,20 +1,35 @@
 import Charts
 import SwiftUI
 
-/// Requests over time for the History query: 48 bars, the newest in the accent color.
-/// Hovering a bar shows its time window and count.
+/// Requests over time for the History query: 48 bars, the current one in the accent color.
+/// Hovering a bar shows its time window and count; dragging across the chart zooms the History query into
+/// the dragged window.
 struct RequestsHistogramChart: View {
     var histogram: Histogram
+    /// Called with the window dragged across the chart when the drag ends.
+    var zoom: (DateInterval) -> Void
 
     @State private var hovered: Date?
+    /// Range selection while the mouse is down. Charts clears it on mouse-up, which commits the zoom.
+    @State private var dragged: ClosedRange<Date>?
+    @State private var pendingZoom: ClosedRange<Date>?
 
     var body: some View {
         let bins = RequestsHistogramBin.bins(of: histogram)
-        let selected = hovered.flatMap { date in bins.first { $0.contains(date) } }
+        let selected = dragged == nil ? hovered.flatMap { date in bins.first { $0.contains(date) } } : nil
         let ticks = RequestsHistogramBin.axisTicks(of: histogram, now: .now, locale: Localizer.shared.locale, nowLabel: tr("Now", "Requests"))
+        // The newest bar is the current one only when the chart reaches now (not in a zoomed past window).
+        let endsNow = abs(histogram.end.timeIntervalSinceNow) < 120
         Chart {
             ForEach(bins) { bin in
-                bar(bin, highlighted: bin.isLast || bin.id == selected?.id)
+                bar(bin, highlighted: (bin.isLast && endsNow) || bin.id == selected?.id)
+            }
+            if let dragged {
+                RectangleMark(xStart: .value("From", dragged.lowerBound), xEnd: .value("To", dragged.upperBound))
+                    .foregroundStyle(Theme.accent.opacity(0.16))
+                    .annotation(position: .top, spacing: 2, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+                        RequestsHistogramCallout(text: RequestsHistogramBin.windowLabel(dragged.lowerBound, dragged.upperBound, locale: Localizer.shared.locale))
+                    }
             }
             if let selected {
                 RuleMark(x: .value("Hovered", selected.middle))
@@ -38,8 +53,18 @@ struct RequestsHistogramChart: View {
             }
         }
         .chartXSelection(value: $hovered)
+        .chartXSelection(range: $dragged)
+        .onChange(of: dragged) { _, range in
+            if let range {
+                pendingZoom = range
+            } else if let pending = pendingZoom {
+                pendingZoom = nil
+                if let window = RequestsHistogramBin.zoomWindow(for: pending, in: histogram) { zoom(window) }
+            }
+        }
         .chartPlotStyle { plot in plot.frame(height: 64) }
         .accessibilityLabel(tr("Requests over time", "Requests"))
+        .accessibilityHint(tr("Drag across the chart to zoom into that time.", "Requests"))
     }
 
     /// A bar spanning its time bucket; `RectangleMark` because `BarMark` has no ranged-x, ranged-y form.
@@ -65,7 +90,7 @@ struct RequestsHistogramChart: View {
     }
 }
 
-/// Hover callout: `14:00–14:30 · 1,204`.
+/// Hover callout: `14:00–14:30 · 1,204`, or the window being dragged.
 private struct RequestsHistogramCallout: View {
     var text: String
 
@@ -111,6 +136,21 @@ struct RequestsHistogramBin: Identifiable, Equatable {
         func time(_ date: Date) -> String { seconds ? Fmt.hms(date) : Fmt.hm(date) }
         if calendar.isDate(start, inSameDayAs: end) { return time(start) + "–" + time(end) }
         return Fmt.monthDay(start, locale: locale) + " " + time(start) + "–" + Fmt.monthDay(end, locale: locale) + " " + time(end)
+    }
+
+    // MARK: Zoom
+
+    /// Shortest window the chart zooms into.
+    static let minimumZoom: TimeInterval = 60
+
+    /// The dragged range clamped to the chart, or nil when it is too short to be a deliberate drag (less
+    /// than a minute or half a bar).
+    static func zoomWindow(for range: ClosedRange<Date>, in histogram: Histogram) -> DateInterval? {
+        let start = max(range.lowerBound, histogram.start)
+        let end = min(range.upperBound, histogram.end)
+        let bucket = histogram.end.timeIntervalSince(histogram.start) / Double(max(histogram.counts.count, 1))
+        guard end.timeIntervalSince(start) >= max(minimumZoom, bucket / 2) else { return nil }
+        return DateInterval(start: start, end: end)
     }
 
     // MARK: Axis

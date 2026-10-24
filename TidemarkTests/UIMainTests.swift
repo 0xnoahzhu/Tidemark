@@ -400,6 +400,26 @@ struct RequestsHistoryModelTests {
         #expect(history.rows.isEmpty)
     }
 
+    @Test func zoomsIntoAnInterval() async {
+        let now = Date.now
+        let rows = (0..<600).map { F.record(id: Int64($0), startedAt: now.addingTimeInterval(-Double($0) * 10)) }
+        let database = ShellDemoDatabase(rows: rows)
+        let history = RequestsHistoryModel()
+        var query = RequestQuery()
+        query.range = .last24Hours
+        let window = DateInterval(start: now.addingTimeInterval(-3_000), end: now.addingTimeInterval(-1_000))
+        query.interval = window
+
+        await history.load(query, database: database)
+        #expect(history.query.interval == window)
+        #expect(!history.rows.isEmpty)
+        #expect(history.rows.allSatisfy { window.start <= $0.startedAt && $0.startedAt < window.end })
+        #expect(history.totalCount == 200)
+        #expect(history.histogram?.start == window.start)
+        #expect(history.histogram?.end == window.end)
+        #expect(history.histogram?.counts.reduce(0, +) == 200)
+    }
+
     @Test func labelsQueryTime() {
         #expect(RequestsHistoryLabels.milliseconds(.milliseconds(38)) == "38 ms")
         #expect(RequestsHistoryLabels.milliseconds(.seconds(1.5)) == "1500 ms")
@@ -521,6 +541,18 @@ struct RequestsHistogramTests {
         #expect(labels(from: date(23, 22, 10), to: date(24, 1, 40), now: date(24, 14, 0)) == ["23:00", "Oct 24 00:00", "01:00", "01:40"])
         // Seconds appear once the ticks are less than a minute apart.
         #expect(labels(from: date(24, 10, 0, 5), to: date(24, 10, 1, 35), now: date(24, 14, 0)) == ["10:00:30", "10:01:00", "10:01:35"])
+    }
+
+    @Test func zoomsOnlyIntoDeliberateDrags() {
+        let start = Date(timeIntervalSince1970: 0)
+        let histogram = Histogram(start: start, end: start.addingTimeInterval(86400), counts: Array(repeating: 0, count: 48))
+        let window = RequestsHistogramBin.zoomWindow(for: start.addingTimeInterval(3600)...start.addingTimeInterval(7200), in: histogram)
+        #expect(window == DateInterval(start: start.addingTimeInterval(3600), end: start.addingTimeInterval(7200)))
+        // Clamped to the chart.
+        let clamped = RequestsHistogramBin.zoomWindow(for: start.addingTimeInterval(-600)...start.addingTimeInterval(3600), in: histogram)
+        #expect(clamped?.start == start)
+        // Shorter than half a 30-minute bar: a click, not a drag.
+        #expect(RequestsHistogramBin.zoomWindow(for: start.addingTimeInterval(3600)...start.addingTimeInterval(4000), in: histogram) == nil)
     }
 
     @Test func labelsWindows() {

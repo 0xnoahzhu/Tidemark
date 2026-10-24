@@ -21,11 +21,12 @@ struct ShellDemoDatabase: TidemarkDatabase {
 
     /// Rows matching every filter of `query` except its paging (`offset`, `limit`, `before`).
     func matching(_ query: RequestQuery, now: Date = .now) -> [RequestRecord] {
-        let lower = query.range.lowerBound(now: now)
+        let window = Self.window(of: query, now: now)
         let needle = query.search.trimmingCharacters(in: .whitespaces).lowercased()
         return rows.filter { r in
             guard query.scope.includes(r.deviceID) else { return false }
-            if let lower, r.startedAt < lower { return false }
+            if let lower = window.lower, r.startedAt < lower { return false }
+            if let upper = window.upper, r.startedAt >= upper { return false }
             if let app = query.appID, r.appID != app { return false }
             if let policy = query.policy, r.finalPolicy != policy { return false }
             switch query.status {
@@ -40,6 +41,12 @@ struct ShellDemoDatabase: TidemarkDatabase {
             }
             return true
         }
+    }
+
+    /// The time window of a query: the explicit interval (zoomed History chart) or the range up to now.
+    private static func window(of query: RequestQuery, now: Date) -> (lower: Date?, upper: Date?) {
+        if let interval = query.interval { return (interval.start, interval.end) }
+        return (query.range.lowerBound(now: now), nil)
     }
 
     // Requests
@@ -58,14 +65,16 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram {
         let now = Date.now
         let all = matching(query, now: now)
-        let start = query.range.lowerBound(now: now) ?? all.last?.startedAt ?? now.addingTimeInterval(-3600)
-        let width = max(now.timeIntervalSince(start), 1) / Double(max(buckets, 1))
+        let window = Self.window(of: query, now: now)
+        let start = window.lower ?? all.last?.startedAt ?? now.addingTimeInterval(-3600)
+        let end = window.upper ?? now
+        let width = max(end.timeIntervalSince(start), 1) / Double(max(buckets, 1))
         var counts = Array(repeating: Int64(0), count: buckets)
         for r in all {
             let index = Int(r.startedAt.timeIntervalSince(start) / width)
             if index >= 0, index < buckets { counts[index] += 1 }
         }
-        return Histogram(start: start, end: now, counts: counts)
+        return Histogram(start: start, end: end, counts: counts)
     }
 
     func distinctPolicies(since: Date?) async throws -> [String] {

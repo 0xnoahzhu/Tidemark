@@ -18,6 +18,7 @@ struct RequestsHistoryView: View {
         let key = RequestsHistoryKey(
             scope: model.devices.scope,
             range: nav.history.range,
+            interval: nav.history.interval,
             appID: nav.history.appID,
             policy: nav.history.policy,
             status: nav.history.status,
@@ -30,9 +31,17 @@ struct RequestsHistoryView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 4)
 
+            if let window = nav.history.interval {
+                RequestsZoomBar(window: window) { nav.history.interval = nil }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 4)
+            }
+
             Group {
-                if let histogram = history.histogram, histogram.counts.contains(where: { $0 > 0 }) {
-                    RequestsHistogramChart(histogram: histogram)
+                if let histogram = history.histogram, histogram.counts.contains(where: { $0 > 0 }) || nav.history.interval != nil {
+                    RequestsHistogramChart(histogram: histogram) { window in
+                        nav.history.interval = window
+                    }
                 } else {
                     Color.clear
                 }
@@ -61,6 +70,8 @@ struct RequestsHistoryView: View {
         .task(id: nav.history.range) {
             await history.loadPolicies(since: nav.history.range.lowerBound(), database: model.database)
         }
+        // A zoomed window belongs to the range it was dragged in.
+        .onChange(of: nav.history.range) { nav.history.interval = nil }
         .fileExporter(
             isPresented: $isExporting,
             document: exportDocument,
@@ -99,6 +110,7 @@ struct RequestsHistoryView: View {
 private struct RequestsHistoryKey: Hashable {
     var scope: DeviceScope
     var range: HistoryRange
+    var interval: DateInterval?
     var appID: AppID?
     var policy: String?
     var status: StatusFilter
@@ -106,7 +118,7 @@ private struct RequestsHistoryKey: Hashable {
     var reload: Int
 
     var query: RequestQuery {
-        RequestQuery(scope: scope, range: range, appID: appID, policy: policy, status: status, search: search)
+        RequestQuery(scope: scope, range: range, interval: interval, appID: appID, policy: policy, status: status, search: search)
     }
 }
 
@@ -197,6 +209,30 @@ private struct RequestsFilterMenu<Value: Hashable, Options: View>: View {
         .help(title)
         .accessibilityLabel(title)
         .accessibilityValue(label)
+    }
+}
+
+/// `⌕ Zoomed to 14:05–16:30  Reset Zoom`, shown while the chart is zoomed: the dragged window and the way
+/// back to the whole range.
+private struct RequestsZoomBar: View {
+    var window: DateInterval
+    var reset: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "plus.magnifyingglass")
+                .foregroundStyle(Theme.accent)
+                .accessibilityHidden(true)
+            Text(trf("Zoomed to %@", "Requests", RequestsHistogramBin.windowLabel(window.start, window.end, locale: Localizer.shared.locale)))
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.ink2)
+                .lineLimit(1)
+            Button(tr("Reset Zoom", "Requests"), action: reset)
+                .controlSize(.small)
+                .help(tr("Show the whole time range again", "Requests"))
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 
