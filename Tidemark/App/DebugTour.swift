@@ -118,7 +118,9 @@ enum DebugTour {
 
     private static func probe(_ model: AppModel, url: String, into directory: URL) async {
         let session = ProbeWebSession.shared
+        let ownWindow = model.preferences.probeOwnWindow
         model.preferences.probeOwnWindow = false
+        defer { model.preferences.probeOwnWindow = ownWindow }
         model.nav.open(.probe)
         session.urlDraft = url
         do {
