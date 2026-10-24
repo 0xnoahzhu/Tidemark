@@ -122,8 +122,7 @@ extension CaptureEngine: CaptureActions {
             guard let url = running.bundleURL else { continue }
             let path = Self.normalizedBundlePath(url.path(percentEncoded: false))
             guard path != own, !monitored.contains(path), seen.insert(path).inserted else { continue }
-            let name = running.localizedName ?? url.deletingPathExtension().lastPathComponent
-            found.append((name, path, running.bundleIdentifier))
+            found.append((AppNaming.displayName(forBundlePath: path), path, running.bundleIdentifier))
         }
         let database = self.database
         let paths = found.map(\.path)
@@ -269,14 +268,10 @@ extension CaptureEngine: CaptureActions {
         return result
     }
 
-    /// Display name (`CFBundleDisplayName`, else `CFBundleName`, else the file name), bundle ID and tile letter.
+    /// Display name (`AppNaming`: Finder's name of the bundle), bundle ID and tile letter.
     static func bundleIdentity(at path: String) -> (name: String, bundleID: String?, letter: String) {
         let bundle = Bundle(path: path)
-        let info = bundle?.localizedInfoDictionary ?? [:]
-        let base = bundle?.infoDictionary ?? [:]
-        let fileName = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
-        let candidates = [info["CFBundleDisplayName"], base["CFBundleDisplayName"], info["CFBundleName"], base["CFBundleName"]]
-        let name = candidates.lazy.compactMap { $0 as? String }.first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? fileName
+        let name = AppNaming.displayName(forBundlePath: path)
         let letter = name.first(where: \.isLetter).map { String($0).uppercased() } ?? String(name.prefix(1)).uppercased()
         return (name, bundle?.bundleIdentifier, letter.isEmpty ? "A" : letter)
     }
