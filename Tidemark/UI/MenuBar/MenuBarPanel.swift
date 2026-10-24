@@ -15,7 +15,7 @@ struct MenuBarPanel: View {
     /// Closes the panel (ends the status item's expanded-interface session).
     var onDismiss: @MainActor () -> Void = {}
 
-    static let width: CGFloat = 300
+    static let width: CGFloat = 320
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -94,9 +94,12 @@ struct MenuBarPanel: View {
             Text(tr("Egress", "MenuBar"))
                 .foregroundStyle(Theme.ink2)
             if let current = model.egress.current {
+                // The IP is the row's value: it keeps its full width and the policy chip gives way.
                 Text(current.ip ?? "—")
                     .font(Theme.mono(12, weight: .semibold))
                     .lineLimit(1)
+                    .fixedSize()
+                    .layoutPriority(1)
                     .textSelection(.enabled)
                 Spacer(minLength: 6)
                 MenuBarPolicyChip(policyPath: current.policyPath)
@@ -182,6 +185,8 @@ struct MenuBarPanel: View {
             let id = alert.id
             Task { await model.capture.markAlertsRead([id]) }
         }
+        // Highlight the new host in the app's Domains & IPs tab, like a notification card's View.
+        model.nav.appSelectedHost = alert.kind == .domain ? alert.value : nil
         model.nav.open(.app(alert.appID), tab: .inventory)
         showMainWindow()
     }
