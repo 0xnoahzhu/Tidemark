@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 import System
 import Testing
 @testable import Tidemark
@@ -92,6 +93,24 @@ struct UIChromeTests {
 
     @Test func menuBarPanelMatchesTheDesignWidth() {
         #expect(MenuBarPanel.width == 320)
+    }
+
+    /// The egress IP and its policy chip stay inside the room the 320 pt panel leaves next to the "Egress"
+    /// label, even for a full-length IPv6 address and a long policy name: IPv4 and short IPv6 addresses share
+    /// one line with the chip, a full-length IPv6 address moves the chip to a second line.
+    @Test func egressValueNeverRunsPastThePanel() {
+        let available = CGSize(width: 230, height: 200)
+        let policy = ["AI", "AT&T-RackNerd-Hysteria2"]
+        func size(_ ip: String) -> CGSize {
+            NSHostingController(rootView: MenuBarEgressValue(ip: ip, policyPath: policy)).sizeThatFits(in: available)
+        }
+        for ip in ["2001:0db8:85a3:0000:0000:8a2e:0370:7334", "2a01:4f8:c17:1234::1", "255.255.255.255", "—"] {
+            #expect(size(ip).width <= available.width, "\(ip)")
+        }
+        let oneLine = size("255.255.255.255").height
+        #expect(oneLine < 24)
+        #expect(size("2a01:4f8:c17:1234::1").height == oneLine)
+        #expect(size("2001:0db8:85a3:0000:0000:8a2e:0370:7334").height > oneLine + 10)
     }
 
     // MARK: Settings chrome

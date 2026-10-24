@@ -93,16 +93,10 @@ struct MenuBarPanel: View {
         HStack(spacing: 8) {
             Text(tr("Egress", "MenuBar"))
                 .foregroundStyle(Theme.ink2)
+                .fixedSize()
             if let current = model.egress.current {
-                // The IP is the row's value: it keeps its full width and the policy chip gives way.
-                Text(current.ip ?? "—")
-                    .font(Theme.mono(12, weight: .semibold))
-                    .lineLimit(1)
-                    .fixedSize()
+                MenuBarEgressValue(ip: current.ip ?? "—", policyPath: current.policyPath)
                     .layoutPriority(1)
-                    .textSelection(.enabled)
-                Spacer(minLength: 6)
-                MenuBarPolicyChip(policyPath: current.policyPath)
             } else {
                 Text(model.egress.isChecking ? tr("Checking…", "MenuBar") : "—")
                     .foregroundStyle(Theme.ink3)
@@ -111,7 +105,9 @@ struct MenuBarPanel: View {
         }
         .font(.system(size: 12))
         .padding(.horizontal, 10)
-        .frame(height: 32)
+        .padding(.vertical, 6)
+        // One line normally; a long IPv6 address puts the policy chip on a second line.
+        .frame(minHeight: 32)
         .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
@@ -217,7 +213,47 @@ private struct MenuBarStatTile: View {
     }
 }
 
-/// The leaf policy of the current egress (`HK-01`), tinted like its policy group.
+/// The current egress IP and its policy, inside the egress row.
+///
+/// The IP is the row's value. When it fits at full size next to a readable chip (every IPv4 address and most
+/// IPv6 ones do), both share one line and the chip shortens first. A longer IPv6 address takes the whole line,
+/// scaling down a little and then shortening in the middle, and the chip moves below it, so the row never runs
+/// past the panel.
+struct MenuBarEgressValue: View {
+    var ip: String
+    var policyPath: [String]
+
+    /// Room the chip asks for when deciding whether the IP and the chip share a line.
+    static let chipRoom: CGFloat = 56
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                ipText.fixedSize()
+                MenuBarPolicyChip(policyPath: policyPath)
+                    .frame(minWidth: 0, idealWidth: Self.chipRoom, maxWidth: .infinity, alignment: .trailing)
+            }
+            VStack(alignment: .trailing, spacing: 4) {
+                ipText
+                    .minimumScaleFactor(0.75)
+                    .truncationMode(.middle)
+                MenuBarPolicyChip(policyPath: policyPath)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    private var ipText: some View {
+        Text(ip)
+            .font(Theme.mono(12, weight: .semibold))
+            .lineLimit(1)
+            .textSelection(.enabled)
+            .help(ip)
+    }
+}
+
+/// The leaf policy of the current egress (`HK-01`), tinted like its policy group. Like every policy chip, a
+/// shortened name keeps its end (`…RackNerd-Hysteria2`).
 private struct MenuBarPolicyChip: View {
     var policyPath: [String]
 
@@ -226,7 +262,7 @@ private struct MenuBarPolicyChip: View {
         Text(policyPath.last ?? "—")
             .font(.system(size: 11, weight: .medium))
             .lineLimit(1)
-            .truncationMode(.middle)
+            .truncationMode(.head)
             .padding(.horizontal, 7)
             .padding(.vertical, 1)
             .background(tint.background, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
