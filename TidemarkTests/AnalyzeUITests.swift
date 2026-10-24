@@ -482,6 +482,45 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(EgressFormat.detail(sample).hasSuffix(tr("hosting network", "Egress")))
     }
 
+    /// Stored check errors are English (surge-cli's and the timeout's descriptions); the page shows them short
+    /// and in the UI language.
+    @Test func shortensAndTranslatesCheckErrors() {
+        let timeout = CaptureTimeoutError(seconds: 20).errorDescription ?? ""
+        #expect(EgressFormat.error(timeout, languageCode: "en") == trf("Timed out after %lld s", "Egress", 20))
+        let failed = SurgeError.commandFailed(command: "test-policy-external-ip POLICY::abc", message: "HTTP request timeout").errorDescription ?? ""
+        #expect(EgressFormat.error(failed, languageCode: "en") == tr("Timed out", "Egress"))
+        let unknownPolicy = SurgeError.commandFailed(command: "test-policy-external-ip X", message: "Policy does not exist.").errorDescription ?? ""
+        #expect(EgressFormat.error(unknownPolicy, languageCode: "en") == tr("Policy not found", "Egress"))
+        let other = SurgeError.commandFailed(command: "test-policy-external-ip X", message: "TLS handshake failed").errorDescription ?? ""
+        #expect(EgressFormat.error(other, languageCode: "en") == "TLS handshake failed", "Surge's own reason, without the command")
+        #expect(EgressFormat.error(other, languageCode: "zh-Hans") == tr("Surge couldn't check this policy", "Egress"))
+        #expect(EgressFormat.error(SurgeError.timedOut(command: "test-policy X").errorDescription ?? "", languageCode: "en")
+                == tr("surge-cli did not answer in time", "Egress"))
+        #expect(EgressFormat.error(SurgeError.cliNotFound(path: "/x").errorDescription ?? "", languageCode: "en") == tr("surge-cli not found", "Egress"))
+        #expect(EgressFormat.error("Something odd", languageCode: "en") == "Something odd")
+        #expect(EgressFormat.error("Something odd", languageCode: "zh-Hans") == tr("The check failed", "Egress"))
+    }
+
+    @Test func translatesSurgeModesAlsoWithoutTheOutboundMode() {
+        #expect(EgressFormat.surgeMode("Enhanced mode · rule-based") == tr("Enhanced mode · rule-based", "SurgeCLI"))
+        #expect(EgressFormat.surgeMode("Enhanced mode") == tr("Enhanced mode", "Egress"))
+        #expect(EgressFormat.surgeMode("System proxy") == tr("System proxy", "Egress"))
+        #expect(EgressFormat.surgeMode("Rule-based") == tr("Rule-based", "SurgeCLI"))
+        #expect(EgressFormat.surgeMode("Something new") == "Something new")
+
+        let lproj = Bundle.main.path(forResource: "zh-Hans", ofType: "lproj").map { URL(fileURLWithPath: $0) }
+        let chinese = lproj.flatMap { NSDictionary(contentsOf: $0.appendingPathComponent("Egress.strings")) as? [String: String] }
+        #expect(chinese?["Enhanced mode"] != nil && chinese?["System proxy"] != nil)
+    }
+
+    /// The lookup card names the IP info service and where to turn it off, and says where reverse DNS comes from.
+    @Test func namesTheIPInfoServiceAndWhereToTurnItOff() {
+        let on = EgressFormat.sourcesNote(service: .proxycheck)
+        #expect(on.contains("proxycheck.io"))
+        let off = EgressFormat.sourcesNote(service: .off)
+        #expect(off.contains("proxycheck.io") && off != on)
+    }
+
     @Test func translatesEveryReasonTheMonitorWrites() throws {
         #expect(EgressView.localizedReason("Profile reloaded") == tr("Profile reloaded", "Egress"))
         #expect(EgressView.localizedReason("Egress changed") == tr("Egress changed", "Egress"))

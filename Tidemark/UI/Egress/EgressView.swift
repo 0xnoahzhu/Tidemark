@@ -132,7 +132,11 @@ private struct EgressCurrentCard: View {
                         }
                         if let latency = sample.latencyMs { AnalyzePill(text: "\(latency) ms", style: .neutral) }
                         if let error = sample.error {
-                            Text(error).font(.system(size: 11.5)).foregroundStyle(Theme.failed).lineLimit(1)
+                            Text(EgressFormat.error(error))
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Theme.failed)
+                                .lineLimit(1)
+                                .help(error)
                         }
                     }
                     .padding(.top, 2)
@@ -215,7 +219,7 @@ private struct EgressPolicyCard: View {
             Text(EgressFormat.location(sample.location) ?? "—").foregroundStyle(Theme.ink2).lineLimit(1)
             Group {
                 if let error = sample.error {
-                    Text(error).foregroundStyle(Theme.failed)
+                    Text(EgressFormat.error(error)).foregroundStyle(Theme.failed)
                 } else {
                     Text(sample.network ?? "—").foregroundStyle(Theme.ink2)
                 }
@@ -277,6 +281,7 @@ private struct EgressChangesCard: View {
 
 private struct EgressLookupCard: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
     /// The current egress: its IP is the field's placeholder and is looked up when nothing was typed.
     var current: EgressSample?
 
@@ -312,11 +317,20 @@ private struct EgressLookupCard: View {
                     KeyValueRow(tr("Reverse DNS", "Egress"), result?.reverseDNS ?? "—", mono: true, labelWidth: 84)
                 }
                 .redacted(reason: isLookingUp ? .placeholder : [])
-                Text(tr("Country and ASN come from Surge's own GeoIP database. Type and reverse DNS come from the IP info service set in Settings.", "Egress"))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(EgressFormat.sourcesNote(service: model.preferences.ipInfoService))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.ink2)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(tr("Open Settings…", "Egress")) {
+                        model.nav.settingsTab = .general
+                        openSettings()
+                    }
+                    .buttonStyle(.link)
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.ink3)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .help(tr("The IP info service is in Settings › General", "Egress"))
+                }
             }
         }
         // Until something is typed, the card describes the current egress IP: what the last check knows
@@ -388,10 +402,9 @@ private struct EgressThisMacCard: View {
         return servers.joined(separator: " · ")
     }
 
-    /// `Enhanced mode · global proxy` and the other modes surge-cli reports are translated in the `SurgeCLI` table.
     private var surgeMode: String {
         guard let mode = network?.surgeMode, !mode.isEmpty else { return "—" }
-        return tr(mode, "SurgeCLI")
+        return EgressFormat.surgeMode(mode)
     }
 }
 
@@ -475,6 +488,51 @@ enum EgressFormat {
         return interfaceKind(detail)
     }
 
+    /// A check's stored error (English, as surge-cli and the timeout describe it) as a short text in the UI
+    /// language; the full text is the help tag. Surge's own reason is kept in English when it is not a known one.
+    static func error(_ raw: String, languageCode: String = Localizer.shared.languageCode) -> String {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let english = languageCode == "en"
+        if let match = text.wholeMatch(of: /Timed out after (\d+) s\.?/), let seconds = Int(match.1) {
+            return trf("Timed out after %lld s", "Egress", seconds)
+        }
+        if text.hasPrefix("surge-cli was not found") { return tr("surge-cli not found", "Egress") }
+        if text.hasPrefix("Could not read the output of surge-cli") { return tr("Unreadable answer from surge-cli", "Egress") }
+        if text.hasPrefix("surge-cli "), text.hasSuffix(" timed out.") { return tr("surge-cli did not answer in time", "Egress") }
+        if text.hasPrefix("surge-cli "), let failed = text.range(of: " failed: ") {
+            let message = text[failed.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+            let known = message.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+            if let key = surgeFailureKeys[known] { return tr(key, "Egress") }
+            return english && !message.isEmpty ? message : tr("Surge couldn't check this policy", "Egress")
+        }
+        return english ? text : tr("The check failed", "Egress")
+    }
+
+    /// Surge's outbound-mode description: the combinations are translated in the `SurgeCLI` table; a part on
+    /// its own (`Enhanced mode` when Surge reports no outbound mode) piece by piece.
+    static func surgeMode(_ mode: String) -> String {
+        let whole = tr(mode, "SurgeCLI")
+        guard whole == mode else { return whole }
+        return mode.components(separatedBy: " · ").map { part in
+            let surge = tr(part, "SurgeCLI")
+            if surge != part { return surge }
+            return surgeModeKeys[part.lowercased()].map { tr($0, "Egress") } ?? part
+        }
+        .joined(separator: " · ")
+    }
+
+    /// Where the lookup's facts come from, naming the IP info service (on by default) and where to turn it off.
+    static func sourcesNote(service: Preferences.IPInfoService) -> String {
+        switch service {
+        case .proxycheck:
+            trf("Country and ASN come from Surge's own GeoIP database, reverse DNS from this Mac's resolver. Type comes from %@: Tidemark sends it its own egress IPs and the IPs you look up. You can turn it off in Settings › General.",
+                "Egress", EgressIPInfo.serviceName)
+        case .off:
+            trf("Country and ASN come from Surge's own GeoIP database, reverse DNS from this Mac's resolver. Type needs an IP info service, which is off: choose %@ in Settings › General.",
+                "Egress", EgressIPInfo.serviceName)
+        }
+    }
+
     /// What the lookup card can show for the current egress before (or without) a lookup.
     static func lookupSeed(from sample: EgressSample) -> IPLookupResult? {
         guard let ip = sample.ip else { return nil }
@@ -536,6 +594,15 @@ enum EgressFormat {
         "wireless": "mobile network", "mobile": "mobile network", "education": "education network",
         "government": "government network",
     ]
+
+    /// Reasons surge-cli gives for a failed check, lowercased without the final period.
+    private static let surgeFailureKeys: [String: String] = [
+        "http request timeout": "Timed out", "policy does not exist": "Policy not found",
+        "no outgoing interface": "No outgoing interface",
+    ]
+
+    /// Parts of Surge's mode description that the `SurgeCLI` table only has in combination.
+    private static let surgeModeKeys: [String: String] = ["enhanced mode": "Enhanced mode", "system proxy": "System proxy"]
 
     /// Interface kinds from `NWPathMonitor` that the `SurgeCLI` table does not have.
     private static let interfaceKeys: [String: String] = [

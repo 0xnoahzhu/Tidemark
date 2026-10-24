@@ -101,12 +101,22 @@
         }
       }
     },
-    "Country and ASN come from Surge's own GeoIP database. Type and reverse DNS come from the IP info service set in Settings." : {
+    "Country and ASN come from Surge's own GeoIP database, reverse DNS from this Mac's resolver. Type comes from %@: Tidemark sends it its own egress IPs and the IPs you look up. You can turn it off in Settings › General." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "国家和 ASN 来自 Surge 自带的 GeoIP 数据库，类型和反向解析来自设置里配置的 IP 信息服务。"
+            "value" : "国家和 ASN 来自 Surge 自带的 GeoIP 数据库，反向解析来自本机的解析器。类型来自 %@：Tidemark 会把自己的出口 IP 和你查询的 IP 发给它。可以在设置 › 通用中关闭。"
+          }
+        }
+      }
+    },
+    "Country and ASN come from Surge's own GeoIP database, reverse DNS from this Mac's resolver. Type needs an IP info service, which is off: choose %@ in Settings › General." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "国家和 ASN 来自 Surge 自带的 GeoIP 数据库，反向解析来自本机的解析器。类型需要 IP 信息服务，目前已关闭：可以在设置 › 通用中选择 %@。"
           }
         }
       }
@@ -147,6 +157,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "出口已变化"
+          }
+        }
+      }
+    },
+    "Enhanced mode" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "增强模式"
           }
         }
       }
@@ -351,6 +371,16 @@
         }
       }
     },
+    "No outgoing interface" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有可用的出站接口"
+          }
+        }
+      }
+    },
     "No policies checked yet." : {
       "localizations" : {
         "zh-Hans" : {
@@ -367,6 +397,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "尚未检测"
+          }
+        }
+      }
+    },
+    "Open Settings…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开设置…"
           }
         }
       }
@@ -397,6 +437,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "手动切换了策略组"
+          }
+        }
+      }
+    },
+    "Policy not found" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到这个策略"
           }
         }
       }
@@ -461,12 +511,52 @@
         }
       }
     },
+    "Surge couldn't check this policy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 无法检测这个策略"
+          }
+        }
+      }
+    },
     "Surge restarted" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Surge 重启"
+          }
+        }
+      }
+    },
+    "System proxy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统代理"
+          }
+        }
+      }
+    },
+    "The IP info service is in Settings › General" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IP 信息服务在设置 › 通用中"
+          }
+        }
+      }
+    },
+    "The check failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检测失败"
           }
         }
       }
@@ -491,12 +581,42 @@
         }
       }
     },
+    "Timed out" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "超时"
+          }
+        }
+      }
+    },
+    "Timed out after %lld s" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 秒后超时"
+          }
+        }
+      }
+    },
     "Type" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "类型"
+          }
+        }
+      }
+    },
+    "Unreadable answer from surge-cli" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取 surge-cli 的输出"
           }
         }
       }
@@ -617,6 +737,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "住宅网络"
+          }
+        }
+      }
+    },
+    "surge-cli did not answer in time" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "surge-cli 没有及时响应"
+          }
+        }
+      }
+    },
+    "surge-cli not found" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到 surge-cli"
           }
         }
       }
