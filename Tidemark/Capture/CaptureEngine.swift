@@ -45,7 +45,7 @@ final class CaptureEngine {
     /// Nothing from the watch stream for this long (Surge sends a speed event every second) restarts it.
     let streamSilenceLimit: TimeInterval = 15
     /// Explaining a host may delay its notification by at most this much.
-    let explanationTimeout: Duration = .milliseconds(1500)
+    var explanationTimeout: Duration = .milliseconds(1500)
     /// Longest wait for connecting to PostgreSQL or a ping (migrations may take longer and are not bounded).
     let connectTimeout: Duration = .seconds(20)
     /// After this many failed reconnects in a row the client is rebuilt: its pooled connections may be dead.
@@ -83,6 +83,9 @@ final class CaptureEngine {
     private var lastAlertID: Int64 = 0
     private var notifiedAlerts: Set<Int64> = []
     private var liveCursor = Date.now.addingTimeInterval(-60)
+    /// The explanation a notification is waiting for. One at a time: while it runs, later notifications use
+    /// the cache only, so a burst never queues one generation after another.
+    private var notificationInsight: Task<HostInsight?, Never>?
     /// The app list was loaded from PostgreSQL at least once (apps that appear later were added elsewhere).
     private var catalogLoaded = false
     /// Bumped by every local change of the app list: a database read of the apps that started before it is
@@ -785,7 +788,9 @@ final class CaptureEngine {
     }
 
     /// With Settings › Notifications › Explain hosts on: a line from the on-device model about the alert's host,
-    /// from the cache when possible, never waiting longer than `explanationTimeout`.
+    /// from the cache when possible, never waiting longer than `explanationTimeout`. The model explains one host
+    /// for notifications at a time; it keeps going after the deadline (its answer is cached for the host), and
+    /// notifications posted meanwhile only use the cache.
     func explanation(for alert: AlertItem, appName: String) -> (@MainActor () async -> String?)? {
         guard model.preferences.notifyExplainHosts else { return nil }
         let host: String
@@ -799,11 +804,16 @@ final class CaptureEngine {
                                   ips: alert.ip.map { [$0] } ?? [], geo: alert.geo, policy: nil, firstSeen: alert.createdAt, requestCount: nil)
         let model = self.model
         let timeout = explanationTimeout
-        return {
+        return { [weak self] in
             let insight = await CaptureTimeout.value(within: timeout) { @MainActor () async -> HostInsight? in
                 if let cached = await model.insights.cachedInsight(for: host) { return cached }
-                guard model.insights.isAvailable else { return nil }
-                return try? await model.insights.insight(for: context)
+                guard model.insights.isAvailable, let self, self.notificationInsight == nil else { return nil }
+                let generation = Task { @MainActor [weak self] () -> HostInsight? in
+                    defer { self?.notificationInsight = nil }
+                    return try? await model.insights.insight(for: context)
+                }
+                self.notificationInsight = generation
+                return await generation.value
             }
             return insight.flatMap(CaptureAlertText.insightLine)
         }

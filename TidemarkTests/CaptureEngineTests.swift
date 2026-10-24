@@ -338,16 +338,19 @@ struct CaptureEngineTests {
         #expect(await engine.explanation(for: alert, appName: "WeChat")?() == "Tencent — Reports usage statistics.")
 
         // Not cached: the model may answer, but never later than the timeout.
+        engine.explanationTimeout = .milliseconds(200)
         insights.cached = nil
         insights.generated = insight
-        insights.delay = .seconds(5)
+        insights.delay = .milliseconds(800)
         let clock = ContinuousClock()
         let started = clock.now
         #expect(await engine.explanation(for: alert, appName: "WeChat")?() == nil)
-        #expect(started.duration(to: clock.now) < .seconds(3))
+        #expect(started.duration(to: clock.now) < .milliseconds(600))
 
+        // The model keeps explaining that host; notifications posted meanwhile only use the cache.
         insights.delay = .zero
-        #expect(await engine.explanation(for: alert, appName: "WeChat")?() == "Tencent — Reports usage statistics.")
+        #expect(await engine.explanation(for: alert, appName: "WeChat")?() == nil, "one explanation at a time")
+        #expect(await eventually { await engine.explanation(for: alert, appName: "WeChat")?() == "Tencent — Reports usage statistics." })
         insights.available = false
         #expect(await engine.explanation(for: alert, appName: "WeChat")?() == nil)
 
