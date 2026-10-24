@@ -167,7 +167,7 @@ struct SurgeCLIClient: SurgeClient {
     static func execute(_ invocation: SurgeInvocation, killGrace: Duration) async throws -> SurgeCommandOutput {
         try Task.checkCancellation()
         let child = try SurgeChildProcess(invocation)
-        let watchdog = Task(name: "surge-cli timeout") {
+        let watchdog = Task(name: "surge-cli-timeout") {
             try await Task.sleep(for: invocation.timeout)
             return child.terminate(grace: killGrace)
         }

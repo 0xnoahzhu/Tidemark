@@ -10,7 +10,7 @@ import Foundation
 enum SurgeEventStream {
     static func make(_ invocation: SurgeInvocation, killGrace: Duration = .seconds(2)) -> AsyncThrowingStream<SurgeEvent, any Error> {
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: SurgeEvent.self, throwing: (any Error).self)
-        let task = Task(name: "Surge watch") {
+        let task = Task(name: "surge-watch") {
             do {
                 try await pump(invocation, killGrace: killGrace, into: continuation)
                 continuation.finish()

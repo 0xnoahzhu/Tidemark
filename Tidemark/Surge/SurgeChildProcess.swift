@@ -77,7 +77,7 @@ final class SurgeChildProcess: Sendable {
             throw .commandFailed(command: invocation.label, message: error.localizedDescription)
         }
         self.process = process
-        exit = Task(name: "surge-cli exit status") {
+        exit = Task(name: "surge-cli-exit") {
             for await status in statusStream { return status }
             return -1
         }
@@ -95,7 +95,7 @@ final class SurgeChildProcess: Sendable {
         guard process.isRunning else { return false }
         process.terminate()
         let process = self.process
-        Task(name: "surge-cli kill") {
+        Task(name: "surge-cli-kill") {
             try? await Task.sleep(for: grace)
             if process.isRunning { kill(process.processIdentifier, SIGKILL) }
         }
