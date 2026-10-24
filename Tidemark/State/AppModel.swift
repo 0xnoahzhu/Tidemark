@@ -18,6 +18,8 @@ final class AppModel {
     @ObservationIgnored var database: any TidemarkDatabase
     @ObservationIgnored var surge: any SurgeClient
     @ObservationIgnored var classifier: any SiteClassifying
+    /// Live process table of this Mac (Running / Exited in process trees).
+    @ObservationIgnored var processes: any ProcessInspecting
     @ObservationIgnored var capture: any CaptureActions
     @ObservationIgnored var probeActions: any ProbeActions
     @ObservationIgnored var egressActions: any EgressActions
@@ -35,6 +37,7 @@ final class AppModel {
         database = OfflineDatabase()
         surge = UnavailableSurgeClient(endpoint: preferences.surgeEndpoint)
         classifier = NaiveSiteClassifier()
+        processes = NoProcessInspector()
         capture = NoopCaptureActions()
         probeActions = NoopProbeActions()
         egressActions = NoopEgressActions()

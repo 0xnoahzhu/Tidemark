@@ -96,6 +96,12 @@ struct UnavailableSurgeClient: SurgeClient {
     func httpProxyPort() async throws -> Int { 6152 }
 }
 
+struct NoProcessInspector: ProcessInspecting {
+    func process(pid: Int32) -> LiveProcess? { nil }
+    func chain(pid: Int32, notAfter: Date?) -> [ProcessLink] { [] }
+    func isRunning(pid: Int32, startTime: Date) -> Bool { false }
+}
+
 /// Last-two-labels fallback until the Public Suffix List classifier is wired in.
 struct NaiveSiteClassifier: SiteClassifying {
     func site(for host: String) -> String {
