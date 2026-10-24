@@ -2,7 +2,8 @@ import Foundation
 
 /// View-independent logic of the Notifications page: filtering, day grouping and card wording.
 enum NotificationsPresentation {
-    /// Alerts matching the All / Unread / Domains / IPs switch, newest first.
+    /// Alerts matching a filter, newest first. The page offers the design's All / Unread switch; the kind
+    /// filters (`.domain`, `.ip`) stay available to code.
     static func filter(_ items: [AlertItem], by filter: AlertFilter) -> [AlertItem] {
         let matching: [AlertItem] = switch filter {
         case .all: items

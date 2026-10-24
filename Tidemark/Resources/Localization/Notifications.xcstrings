@@ -78,17 +78,6 @@
         }
       }
     },
-    "Domains" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "域名"
-          }
-        }
-      }
-    },
     "Earlier" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -118,17 +107,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "首个主机 %@"
-          }
-        }
-      }
-    },
-    "IPs" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "IP"
           }
         }
       }

@@ -49,7 +49,7 @@ struct NotificationsView: View {
     }
 }
 
-/// All / Unread / Domains / IPs and "Mark All as Read".
+/// The design's All / Unread switch and "Mark All as Read".
 private struct NotificationsToolbar: ToolbarContent {
     /// Passed in rather than read from the environment, as toolbar items can be re-hosted in the overflow menu.
     var model: AppModel
@@ -60,8 +60,6 @@ private struct NotificationsToolbar: ToolbarContent {
             Picker(tr("Show", "Notifications"), selection: $nav.alertFilter) {
                 Text(tr("All", "Notifications")).tag(AlertFilter.all)
                 Text(tr("Unread", "Notifications")).tag(AlertFilter.unread)
-                Text(tr("Domains", "Notifications")).tag(AlertFilter.domain)
-                Text(tr("IPs", "Notifications")).tag(AlertFilter.ip)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
