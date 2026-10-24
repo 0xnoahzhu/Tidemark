@@ -57,11 +57,17 @@ extension PostgresDatabase {
     /// statements below the bind limit, then adds the number of new rows to each device's `row_count`.
     ///
     /// `process_id` is resolved from the chain's leaf `(pid, startTime)` when `upsertProcessChain`
-    /// already stored that process. Duplicate keys inside one batch are merged first (PostgreSQL
-    /// refuses to update the same row twice in one statement).
+    /// already stored that process. An `appID` whose app was deleted (possibly by another Mac) is written
+    /// as NULL instead of failing the batch on the foreign key. Duplicate keys inside one batch are merged
+    /// first (PostgreSQL refuses to update the same row twice in one statement).
     @discardableResult
     func upsertRequests(_ rows: [RequestRecord]) async throws -> [RequestKey: Int64] {
-        guard !rows.isEmpty else { return [:] }
+        try await upsertRequestsCountingInserts(rows).ids
+    }
+
+    /// `upsertRequests`, also reporting how many rows were new (PostgreSQL's `xmax = 0` on the returned row).
+    func upsertRequestsCountingInserts(_ rows: [RequestRecord]) async throws -> RequestUpsertResult {
+        guard !rows.isEmpty else { return RequestUpsertResult(ids: [:], inserted: 0) }
         let batch = Self.coalesced(rows)
         var statements: [PostgresQuery] = []
         for chunk in Self.chunks(batch, bindsPerItem: Self.requestValueColumns.count) {
@@ -69,7 +75,7 @@ extension PostgresDatabase {
         }
         let devices = Set(batch.map(\.key.deviceID))
 
-        return try await withTransaction { [statements] connection in
+        return try await withTransaction(on: .writer) { [statements] connection in
             var ids: [RequestKey: Int64] = [:]
             ids.reserveCapacity(batch.count)
             var inserted: [DeviceID: Int64] = [:]
@@ -92,15 +98,36 @@ extension PostgresDatabase {
             }
             bump.append(") AS v(id, n) WHERE d.id = v.id")
             try await connection.query(bump.query, logger: Self.logger)
-            return ids
+            return RequestUpsertResult(ids: ids, inserted: Int(inserted.values.reduce(0, +)))
         }
     }
+
+    /// Marks `deviceID`'s rows that are still `active` from Surge sessions before `session` as completed at
+    /// `date` (keeping a completion time already stored); bumps `updated_at` so other Macs see the change.
+    /// Rare (once per Surge restart), so it scans the device's rows on the main pool with a generous
+    /// statement timeout instead of indexing `state`, which changes on almost every rewrite.
+    func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64 {
+        try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
+            try await connection.query("""
+                WITH closed AS (
+                    UPDATE requests SET state = 'completed', completed_at = COALESCE(completed_at, \(date)), updated_at = now()
+                    WHERE device_id = \(deviceID) AND state = 'active' AND surge_session < \(session)
+                    RETURNING 1
+                )
+                SELECT count(*) AS n FROM closed
+                """, logger: Self.logger).collect().first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
+        }
+    }
+
+    /// Statement timeout of maintenance transactions on large tables (retention, backfill, deleting an app).
+    static let maintenanceTimeout = "10min"
 
     private static func requestUpsertStatement(_ chunk: ArraySlice<RequestRecord>) throws -> PostgresQuery {
         let names = requestValueColumns.map(\.name)
         let insertColumns = names.filter { $0 != "leaf_pid" && $0 != "leaf_start" }
         var sql = SQL("INSERT INTO requests AS r (\(insertColumns.joined(separator: ", ")), process_id) SELECT ")
-        sql.append(insertColumns.map { "v.\($0)" }.joined(separator: ", "))
+        // A deleted app's ID becomes NULL (the LEFT JOIN finds no app) instead of violating the foreign key.
+        sql.append(insertColumns.map { $0 == "app_id" ? "a.id" : "v.\($0)" }.joined(separator: ", "))
         sql.append(", p.id FROM (VALUES ")
         for (index, record) in chunk.enumerated() {
             if index > 0 { sql.append(", ") }
@@ -147,6 +174,7 @@ extension PostgresDatabase {
         }
         sql.append(") AS v(\(names.joined(separator: ", "))) ")
         sql.append("LEFT JOIN processes p ON p.device_id = v.device_id AND p.pid = v.leaf_pid AND p.start_time = v.leaf_start ")
+        sql.append("LEFT JOIN apps a ON a.id = v.app_id ")
         sql.append("ON CONFLICT (device_id, surge_session, surge_id) DO UPDATE SET \(requestMergeSQL) ")
         sql.append("RETURNING r.id, r.device_id, r.surge_session, r.surge_id, (r.xmax = 0) AS inserted")
         return sql.query
@@ -228,11 +256,51 @@ extension PostgresDatabase {
         )
     }
 
-    /// Appends ` WHERE …` for a request query (`r` aliases `requests`).
-    private static func appendFilters(_ query: RequestQuery, lowerBound: Date?, to sql: inout SQL) {
+    /// The time window a query covers: its explicit `interval` (inclusive at both ends, like
+    /// `DateInterval.contains`), otherwise its `range` up to now.
+    struct TimeWindow: Sendable, Equatable {
+        var lower: Date?
+        var upper: Date?
+
+        init(lower: Date?, upper: Date?) {
+            self.lower = lower
+            self.upper = upper
+        }
+
+        init(_ query: RequestQuery, now: Date = .now) {
+            if let interval = query.interval {
+                lower = interval.start
+                upper = interval.end
+            } else {
+                lower = query.range.lowerBound(now: now)
+                upper = nil
+            }
+        }
+    }
+
+    /// Apps whose name contains the query's search term (`searchApps` of `appendFilters`); no round trip
+    /// without a search.
+    private func searchApps(for query: RequestQuery) async throws -> [AppID] {
+        let search = query.search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !search.isEmpty else { return [] }
+        return try await rows("SELECT id FROM apps WHERE name ILIKE \(Self.containsPattern(search)) ORDER BY id")
+            .map { try PostgresRowReader($0)("id", as: UUID.self) }
+    }
+
+    /// Appends ` WHERE …` for a request query (`r` aliases `requests`). A search matches the host, process
+    /// name, remote IP or bundle path, or attributes the request to one of `searchApps` (the apps whose name
+    /// matches, resolved beforehand: a bound list lets the planner combine the trigram index and the app
+    /// index, where a subquery made it scan the whole range). The keyset cursor (`before`) is left out when
+    /// `includeCursor` is false (totals count every match of the filters).
+    static func appendFilters(_ query: RequestQuery, window: TimeWindow, searchApps: [AppID] = [], includeCursor: Bool = true, to sql: inout SQL) {
         var conditions: [String] = []
         if let device = query.scope.deviceID { conditions.append("r.device_id = \(sql.bind(device))") }
-        if let lowerBound { conditions.append("r.started_at >= \(sql.bind(lowerBound))") }
+        if let lower = window.lower { conditions.append("r.started_at >= \(sql.bind(lower))") }
+        if let upper = window.upper { conditions.append("r.started_at <= \(sql.bind(upper))") }
+        if includeCursor, let cursor = query.before {
+            // Newest-first keyset: rows strictly after the cursor in `ORDER BY started_at DESC, id DESC`.
+            conditions.append("(r.started_at, r.id) < (\(sql.bindInstant(cursor.startedAt)), \(sql.bind(cursor.rowID))::int8)")
+        }
         if let app = query.appID { conditions.append("r.app_id = \(sql.bind(app))") }
         if let policy = query.policy { conditions.append("r.policy = \(sql.bind(policy))") }
         switch query.status {
@@ -244,28 +312,32 @@ extension PostgresDatabase {
         let search = query.search.trimmingCharacters(in: .whitespacesAndNewlines)
         if !search.isEmpty {
             let p = sql.bind(containsPattern(search))
-            conditions.append("""
-                (r.host ILIKE \(p) OR r.process_name ILIKE \(p) OR host(r.remote_ip) ILIKE \(p) OR r.bundle_path ILIKE \(p) \
-                OR r.app_id IN (SELECT a.id FROM apps a WHERE a.name ILIKE \(p)))
-                """)
+            // The indexed text separates its columns with newlines; a term containing one must match one column.
+            var arms = search.contains("\n")
+                ? ["r.host ILIKE \(p)", "r.process_name ILIKE \(p)", "host(r.remote_ip) ILIKE \(p)", "r.bundle_path ILIKE \(p)"]
+                : ["\(Schema.requestSearchText) ILIKE \(p)"]
+            if !searchApps.isEmpty { arms.append("r.app_id = ANY(\(sql.bind(searchApps))::uuid[])") }
+            conditions.append("(" + arms.joined(separator: " OR ") + ")")
         }
         if !conditions.isEmpty { sql.append(" WHERE " + conditions.joined(separator: " AND ")) }
     }
 
-    /// Rows newest first with a total. The total is exact up to 100,000 matches; beyond that (and for
-    /// the unfiltered "All time" view) it comes from the planner / table statistics.
+    /// Rows newest first with a total. The total counts every row matching the filters (ignoring `offset`
+    /// and the `before` cursor); it is exact up to 100,000 matches, beyond that (and for the unfiltered
+    /// "All time" view) it comes from the planner / table statistics.
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage {
         let clock = ContinuousClock()
         let start = clock.now
-        let lowerBound = query.range.lowerBound()
+        let window = TimeWindow(query)
+        let apps = try await searchApps(for: query)
 
         var select = SQL("SELECT \(Self.requestSelect) FROM requests r")
-        Self.appendFilters(query, lowerBound: lowerBound, to: &select)
+        Self.appendFilters(query, window: window, searchApps: apps, to: &select)
         select.append(" ORDER BY r.started_at DESC, r.id DESC LIMIT \(select.bind(max(0, query.limit))) OFFSET \(select.bind(max(0, query.offset)))")
         let rowsQuery = select.query
 
         async let page = rows(rowsQuery)
-        async let total = totalCount(for: query, lowerBound: lowerBound)
+        async let total = totalCount(for: query, window: window, searchApps: apps)
         let records = try await page.map(Self.decodeRequest)
         let count = try await total
         return RequestPage(rows: records, totalCount: max(count, Int64(query.offset + records.count)), elapsed: start.duration(to: clock.now))
@@ -273,8 +345,8 @@ extension PostgresDatabase {
 
     private static let exactCountCap: Int64 = 100_000
 
-    private func totalCount(for query: RequestQuery, lowerBound: Date?) async throws -> Int64 {
-        let unfiltered = lowerBound == nil && query.appID == nil && query.policy == nil && query.status == .any
+    private func totalCount(for query: RequestQuery, window: TimeWindow, searchApps: [AppID]) async throws -> Int64 {
+        let unfiltered = window.lower == nil && window.upper == nil && query.appID == nil && query.policy == nil && query.status == .any
             && query.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if unfiltered {
             switch query.scope {
@@ -288,13 +360,13 @@ extension PostgresDatabase {
         }
 
         var count = SQL("SELECT count(*) AS n FROM (SELECT 1 FROM requests r")
-        Self.appendFilters(query, lowerBound: lowerBound, to: &count)
+        Self.appendFilters(query, window: window, searchApps: searchApps, includeCursor: false, to: &count)
         count.append(" LIMIT \(Self.exactCountCap + 1)) AS capped")
         let exact = try await rows(count.query).first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
         guard exact > Self.exactCountCap else { return exact }
 
         var explain = SQL("EXPLAIN (FORMAT JSON) SELECT 1 FROM requests r")
-        Self.appendFilters(query, lowerBound: lowerBound, to: &explain)
+        Self.appendFilters(query, window: window, searchApps: searchApps, includeCursor: false, to: &explain)
         let plan = try await rows(explain.query).first.map { try PostgresRowReader($0)("QUERY PLAN", as: String.self) } ?? "[]"
         return max(exact, Self.plannedRows(fromExplainJSON: plan) ?? exact)
     }
@@ -313,19 +385,21 @@ extension PostgresDatabase {
         return Int64(first.plan.rows)
     }
 
-    /// `buckets` equal slices from the range's lower bound (or the oldest matching request for
-    /// "All time") to now.
+    /// `buckets` equal slices of the query's `interval`, or from the range's lower bound (the oldest
+    /// matching request for "All time") to now. The keyset cursor is ignored.
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram {
-        let end = Date.now
+        let now = Date.now
+        var window = TimeWindow(query, now: now)
+        let end = window.upper ?? now
         guard buckets > 0 else { return Histogram(start: end, end: end, counts: []) }
+        let apps = try await searchApps(for: query)
 
-        var lowerBound = query.range.lowerBound(now: end)
-        if lowerBound == nil {
+        if window.lower == nil {
             var oldest = SQL("SELECT min(r.started_at) AS oldest FROM requests r")
-            Self.appendFilters(query, lowerBound: nil, to: &oldest)
-            lowerBound = try await rows(oldest.query).first.flatMap { try PostgresRowReader($0)("oldest", as: Date?.self) }
+            Self.appendFilters(query, window: window, searchApps: apps, includeCursor: false, to: &oldest)
+            window.lower = try await rows(oldest.query).first.flatMap { try PostgresRowReader($0)("oldest", as: Date?.self) }
         }
-        guard let start = lowerBound, start < end else {
+        guard let start = window.lower, start < end else {
             return Histogram(start: end, end: end, counts: Array(repeating: 0, count: buckets))
         }
 
@@ -336,7 +410,7 @@ extension PostgresDatabase {
         let high = sql.bind(end.timeIntervalSince1970)
         let count = sql.bind(buckets)
         sql.append("\(low)::float8, \(high)::float8, \(count)::int4), \(count)::int4), 1) AS bucket, count(*) AS n FROM requests r")
-        Self.appendFilters(query, lowerBound: start, to: &sql)
+        Self.appendFilters(query, window: TimeWindow(lower: start, upper: window.upper), searchApps: apps, includeCursor: false, to: &sql)
         sql.append(" GROUP BY bucket")
 
         var counts = Array(repeating: Int64(0), count: buckets)
@@ -391,27 +465,35 @@ extension PostgresDatabase {
 
     /// Deletes requests that started before `olderThan` (only `deviceID`'s when given) in batches of 10,000
     /// (each its own transaction, so retention never holds long locks) and lowers each device's `row_count`.
+    /// Batches are spaced by `maintenancePause`, so a first run over a large backlog does not saturate the
+    /// server's disk and WAL while every Mac keeps writing.
     func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64 {
         let batchSize = 10_000
         var total: Int64 = 0
         while true {
             try Task.checkCancellation()
-            let deleted = try await rows("""
-                WITH doomed AS (
-                    SELECT id FROM requests
-                    WHERE started_at < \(olderThan) AND (\(deviceID)::uuid IS NULL OR device_id = \(deviceID)::uuid)
-                    ORDER BY started_at LIMIT \(batchSize)
-                ), gone AS (
-                    DELETE FROM requests r USING doomed WHERE r.id = doomed.id RETURNING r.device_id
-                ), counts AS (
-                    SELECT device_id, count(*) AS n FROM gone GROUP BY device_id
-                ), adjusted AS (
-                    UPDATE devices d SET row_count = GREATEST(0, d.row_count - counts.n) FROM counts WHERE d.id = counts.device_id
-                )
-                SELECT COALESCE(sum(n), 0)::int8 AS n FROM counts
-                """).first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
+            let deleted = try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
+                try await connection.query("""
+                    WITH doomed AS (
+                        SELECT id FROM requests
+                        WHERE started_at < \(olderThan) AND (\(deviceID)::uuid IS NULL OR device_id = \(deviceID)::uuid)
+                        ORDER BY started_at LIMIT \(batchSize)
+                    ), gone AS (
+                        DELETE FROM requests r USING doomed WHERE r.id = doomed.id RETURNING r.device_id
+                    ), counts AS (
+                        SELECT device_id, count(*) AS n FROM gone GROUP BY device_id
+                    ), adjusted AS (
+                        UPDATE devices d SET row_count = GREATEST(0, d.row_count - counts.n) FROM counts WHERE d.id = counts.device_id
+                    )
+                    SELECT COALESCE(sum(n), 0)::int8 AS n FROM counts
+                    """, logger: Self.logger).collect().first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
+            }
             total += deleted
             if deleted < Int64(batchSize) { return total }
+            try await Task.sleep(for: Self.maintenancePause)
         }
     }
+
+    /// Pause between two batches of maintenance work on the request log.
+    static let maintenancePause: Duration = .milliseconds(250)
 }
