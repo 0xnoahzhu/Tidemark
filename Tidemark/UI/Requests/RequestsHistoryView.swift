@@ -119,28 +119,32 @@ private struct RequestsHistoryFilterBar: View {
 
     var body: some View {
         @Bindable var nav = model.nav
+        let apps = model.catalog.active + model.catalog.archived
         HStack(spacing: 8) {
-            Picker(tr("Time range", "Requests"), selection: $nav.history.range) {
+            RequestsFilterMenu(title: tr("Time range", "Requests"), label: RequestsHistoryLabels.range(nav.history.range), selection: $nav.history.range) {
                 ForEach(HistoryRange.allCases, id: \.self) { range in
                     Text(RequestsHistoryLabels.range(range)).tag(range)
                 }
             }
-            Picker(tr("App", "Requests"), selection: $nav.history.appID) {
+            RequestsFilterMenu(
+                title: tr("App", "Requests"),
+                label: apps.first { $0.id == nav.history.appID }?.name ?? tr("All apps", "Requests"),
+                selection: $nav.history.appID
+            ) {
                 Text(tr("All apps", "Requests")).tag(AppID?.none)
-                let apps = model.catalog.active + model.catalog.archived
                 if !apps.isEmpty { Divider() }
                 ForEach(apps) { app in
                     Text(app.name).tag(AppID?.some(app.id))
                 }
             }
-            Picker(tr("Policy", "Requests"), selection: $nav.history.policy) {
+            RequestsFilterMenu(title: tr("Policy", "Requests"), label: nav.history.policy ?? tr("All policies", "Requests"), selection: $nav.history.policy) {
                 Text(tr("All policies", "Requests")).tag(String?.none)
                 if !history.policies.isEmpty { Divider() }
                 ForEach(history.policies, id: \.self) { policy in
                     Text(policy).tag(String?.some(policy))
                 }
             }
-            Picker(tr("Status", "Requests"), selection: $nav.history.status) {
+            RequestsFilterMenu(title: tr("Status", "Requests"), label: RequestsHistoryLabels.status(nav.history.status), selection: $nav.history.status) {
                 ForEach(StatusFilter.allCases, id: \.self) { status in
                     Text(RequestsHistoryLabels.status(status)).tag(status)
                 }
@@ -165,10 +169,34 @@ private struct RequestsHistoryFilterBar: View {
                 .disabled(history.totalCount == 0 || history.errorMessage != nil)
                 .help(tr("Save every row matching these filters as CSV", "Requests"))
         }
-        .pickerStyle(.menu)
-        .labelsHidden()
         .fixedSize(horizontal: false, vertical: true)
         .controlSize(.regular)
+    }
+}
+
+/// A filter menu whose button hugs its current choice. (A `.menu` picker sizes itself to its longest
+/// option, so one long policy name would stretch "All policies".)
+private struct RequestsFilterMenu<Value: Hashable, Options: View>: View {
+    var title: String
+    var label: String
+    @Binding var selection: Value
+    @ViewBuilder var options: Options
+
+    var body: some View {
+        Menu {
+            Picker(title, selection: $selection) {
+                options
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Text(label)
+                .lineLimit(1)
+        }
+        .fixedSize()
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityValue(label)
     }
 }
 
