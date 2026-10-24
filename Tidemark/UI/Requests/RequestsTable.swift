@@ -225,7 +225,7 @@ struct RequestsRowMenu: View {
             Divider()
             Button(trf("Filter by %@", "Requests", record.host)) { model.nav.requestSearch = record.host }
             if let appID = identity.appID {
-                Button(trf("Open %@", "Requests", identity.name)) { model.nav.open(.app(appID), tab: .requests) }
+                Button(trf("Open %@", "Requests", identity.name)) { model.nav.open(.app(appID), tab: RequestsPresentation.openAppTab) }
             } else if let bundle = record.bundlePath, !bundle.isEmpty {
                 Button(trf("Monitor %@…", "Requests", identity.name)) { model.nav.openAddApp(preselect: bundle) }
             }

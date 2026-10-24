@@ -5,6 +5,9 @@ enum RequestsPresentation {
     /// Rows younger than this get the "fresh" background in the live table.
     static let freshInterval: TimeInterval = 1.4
 
+    /// "Open <App>" on a request shows the app's Domains & IPs, as in the design and like a notification's View.
+    static let openAppTab: AppTab = .inventory
+
     /// Live rows for the current Mac scope, filter text and Requests view preferences.
     ///
     /// The filter matches host, remote IP, process and app name, case-insensitively.

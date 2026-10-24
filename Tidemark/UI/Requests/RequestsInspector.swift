@@ -62,8 +62,10 @@ private struct RequestsInspectorHeader: View {
                 .help(tr("Close", "Requests"))
                 .accessibilityLabel(tr("Close", "Requests"))
             }
+            // The design's 16 px / 650 host title, slightly tightened.
             Text(record.host)
-                .font(.system(size: 17, weight: .bold))
+                .font(.system(size: 16, weight: .semibold))
+                .tracking(-0.16)
                 .foregroundStyle(Theme.ink)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -281,7 +283,7 @@ private struct RequestsInspectorActions: View {
         HStack(spacing: 8) {
             if let appID = identity.appID {
                 Button(trf("Open %@", "Requests", identity.name)) {
-                    model.nav.open(.app(appID), tab: .requests)
+                    model.nav.open(.app(appID), tab: RequestsPresentation.openAppTab)
                 }
             } else if let bundle = record.bundlePath, !bundle.isEmpty {
                 Button(trf("Monitor %@", "Requests", identity.name)) {
