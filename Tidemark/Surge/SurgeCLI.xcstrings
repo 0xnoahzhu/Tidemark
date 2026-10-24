@@ -50,6 +50,26 @@
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有线" } }
       }
+    },
+    "No file at this path." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此路径下没有文件。" } }
+      }
+    },
+    "This path is a folder, not the surge-cli executable." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此路径是文件夹，不是 surge-cli 可执行文件。" } }
+      }
+    },
+    "This file is not executable." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此文件不可执行。" } }
+      }
+    },
+    "This path cannot be read: %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法读取此路径：%@" } }
+      }
     }
   },
   "version" : "1.0"
