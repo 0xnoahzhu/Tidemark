@@ -42,18 +42,24 @@ extension CapturePipeline {
         var batch = buffer.takeAll(now: now)
         prepareRequests(&batch)
         guard !batch.isEmpty else { return }
-        inFlightRequests = batch.requests
+        // Each step empties its part of `batch` once written; `inFlightBatch` follows, so a quit during a stuck
+        // step keeps exactly what is still unwritten.
+        inFlightBatch = batch
         defer {
-            inFlightRequests = []
+            inFlightBatch = nil
             inFlightHosts = []
         }
         do {
             try await writeChains(&batch, deadline: deadline)
+            inFlightBatch = batch
             try await writeRequests(&batch, now: now, deadline: deadline)
-            inFlightRequests = []
+            inFlightBatch = batch
             try await writeInventory(&batch, now: now, deadline: deadline)
+            inFlightBatch = batch
             try await writeTouches(&batch, deadline: deadline)
+            inFlightBatch = batch
             try await writeSources(&batch, deadline: deadline)
+            inFlightBatch = batch
             try await writeAlerts(&batch, deadline: deadline)
         } catch {
             spoolRows(batch.requests)
@@ -356,7 +362,7 @@ extension CapturePipeline {
         guard !sessionCloses.isEmpty else { return }
         let database = self.database
         for (device, close) in sessionCloses {
-            let queued = (buffer.queuedRequests + inFlightRequests).contains { $0.key.deviceID == device && $0.key.session < close.before }
+            let queued = (buffer.queuedRequests + (inFlightBatch?.requests ?? [])).contains { $0.key.deviceID == device && $0.key.session < close.before }
             guard !queued else { continue }
             do {
                 let closed = try await write(until: .now.advanced(by: writeTimeout)) {

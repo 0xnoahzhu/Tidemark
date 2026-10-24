@@ -198,6 +198,36 @@ struct CaptureResilienceTests {
         await stuck.value
     }
 
+    @Test func quittingDuringAStuckFlushKeepsItsFirstContactWork() async throws {
+        let temp = CaptureTempDirectory()
+        let raycast = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
+        do {
+            let database = CaptureFakeDatabase()
+            await database.setKnown([raycast.id: ["backend.raycast.com"]])
+            await database.setStallingRequests(true)
+            let pipeline = makePipeline(database: database, directory: temp.url, writeTimeout: .seconds(2))
+            await pipeline.setApps([raycast], paused: [])
+            try await pipeline.loadKnownHosts()
+            await pipeline.setDatabaseOnline(true)
+            await pipeline.beginSession(1_000)
+            await pipeline.ingest(nodeRequest(id: 1, host: "api.notion.com"), now: base)
+            let stuck = Task { await pipeline.tick(now: base.addingTimeInterval(2)) }
+            #expect(await eventually { await pipeline.isFlushing })
+            await pipeline.flushAll(now: base.addingTimeInterval(3), final: true)
+            // Let the abandoned write time out before the directory goes away.
+            await stuck.value
+        }
+
+        let database = CaptureFakeDatabase()
+        let pipeline = makePipeline(database: database, directory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.tick(now: base.addingTimeInterval(4))
+        await pipeline.tick(now: base.addingTimeInterval(6))
+        #expect(await database.writes.map(\.key.surgeID).contains(1), "the stuck batch's row was spooled")
+        #expect(Set(await database.appHosts.values.map(\.value)) == ["api.notion.com", "104.18.32.12"], "and its first contact kept")
+        #expect(await database.alertsInserted.map(\.value) == ["api.notion.com"])
+    }
+
     @Test func alertsLinkTheirRequestWhileTheSpoolDrains() async throws {
         let temp = CaptureTempDirectory()
         do {

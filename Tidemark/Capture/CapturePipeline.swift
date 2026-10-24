@@ -179,8 +179,9 @@ actor CapturePipeline {
     var online = false
     var isFlushing = false
     var flushStartedAt: Date?
-    /// Request rows of the flush in progress (spooled at quit if that flush is stuck).
-    var inFlightRequests: [RequestRecord] = []
+    /// What the flush in progress has not written yet. When that flush is stuck at quit, its rows are spooled
+    /// and the rest is kept in `auxiliary.json`.
+    var inFlightBatch: CaptureWriteBuffer.Batch?
     /// Inventory entries being inserted right now (not in the database yet, not in the buffer either).
     var inFlightHosts: [AppHost] = []
     var lastScan = Date.distantPast
@@ -852,7 +853,12 @@ actor CapturePipeline {
             }
         }
         if isFlushing {
-            spoolRows(inFlightRequests + buffer.takeRequests())
+            spoolRows((inFlightBatch?.requests ?? []) + buffer.takeRequests())
+            if final, var stuck = inFlightBatch {
+                // The process exits before the stuck flush can put its first-contact work back.
+                stuck.requests = []
+                sidecar.saveAuxiliary(stuck)
+            }
         } else if online {
             isFlushing = true
             flushStartedAt = now
