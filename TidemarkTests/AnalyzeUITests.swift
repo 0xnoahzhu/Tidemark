@@ -268,6 +268,20 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         let group = InventoryGroup(name: "hdslb.com", kind: .domain, names: ["a", "b", "c", "d", "e", "f"], sources: [], requests: 0)
         #expect(group.preview == "a  ·  b  ·  c  ·  d  ·  +2")
     }
+
+    @Test func filtersByKindAndSortsWithTheTableOrder() {
+        let entries = [
+            entry("api.github.com", requests: 10, source: "Cursor"),
+            entry("104.18.19.125", kind: .ip, requests: 30, source: "Cursor"),
+            entry("github.com", requests: 5, source: "Raycast"),
+        ]
+        let byRequests = [KeyPathComparator(\InventoryEntry.requestCount, order: .reverse)]
+        #expect(InventoryPresentation.visible(entries, kind: nil, sortOrder: byRequests).map(\.value)
+                == ["104.18.19.125", "api.github.com", "github.com"])
+        #expect(InventoryPresentation.visible(entries, kind: .domain, sortOrder: [KeyPathComparator(\InventoryEntry.value)]).map(\.value)
+                == ["api.github.com", "github.com"])
+        #expect(InventoryPresentation.visible(entries, kind: .ip, sortOrder: byRequests).map(\.value) == ["104.18.19.125"])
+    }
 }
 
 @Suite @MainActor struct EgressOrderingTests {

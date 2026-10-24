@@ -10,6 +10,11 @@ struct InventoryView: View {
     @Environment(AppModel.self) private var model
 
     @State private var entries: [InventoryEntry] = []
+    /// `entries` filtered by kind and sorted, and their site / network groups. Recomputed only when the
+    /// entries, the sort order, the kind or the grouping change, not on every selection click.
+    @State private var visible: [InventoryEntry] = []
+    @State private var groups: [InventoryGroup] = []
+    @State private var domainCount = 0
     @State private var loaded = false
     @State private var sortOrder = [KeyPathComparator(\InventoryEntry.firstSeen, order: .reverse)]
     @State private var selection: Set<InventoryEntry.ID> = []
@@ -19,9 +24,8 @@ struct InventoryView: View {
 
     var body: some View {
         @Bindable var nav = model.nav
-        let visible = visibleEntries()
 
-        content(visible)
+        content
             .navigationTitle(tr("Domains & IPs", "Inventory"))
             .navigationSubtitle(subtitle)
             .toolbar {
@@ -65,10 +69,15 @@ struct InventoryView: View {
             .task(id: QueryKey(search: nav.inventorySearch.trimmingCharacters(in: .whitespaces), scope: model.devices.scope)) {
                 await refresh()
             }
+            .onChange(of: PresentationKey(kind: nav.inventoryKind, grouped: nav.inventoryGrouped,
+                                          language: Localizer.shared.languageCode), initial: true) {
+                recompute()
+            }
+            .onChange(of: sortOrder) { recompute() }
     }
 
     @ViewBuilder
-    private func content(_ visible: [InventoryEntry]) -> some View {
+    private var content: some View {
         if loaded && visible.isEmpty {
             if model.nav.inventorySearch.trimmingCharacters(in: .whitespaces).isEmpty {
                 EmptyState(systemImage: "network",
@@ -78,28 +87,37 @@ struct InventoryView: View {
                 ContentUnavailableView.search(text: model.nav.inventorySearch)
             }
         } else if model.nav.inventoryGrouped {
-            groupedTable(visible)
+            groupedTable
         } else {
-            flatTable(visible)
+            flatTable
         }
     }
 
     private var subtitle: String {
-        let domains = entries.filter { $0.kind == .domain }.count
-        return trf("%1$@ · %2$@, deduplicated across every app and probe", "Inventory",
-                   trn("%lld domain", "%lld domains", domains, "Inventory"),
-                   trn("%lld IP", "%lld IPs", entries.count - domains, "Inventory"))
+        trf("%1$@ · %2$@, deduplicated across every app and probe", "Inventory",
+            trn("%lld domain", "%lld domains", domainCount, "Inventory"),
+            trn("%lld IP", "%lld IPs", entries.count - domainCount, "Inventory"))
     }
 
-    private func visibleEntries() -> [InventoryEntry] {
-        let kind = model.nav.inventoryKind
-        return entries.filter { kind == nil || $0.kind == kind }.sorted(using: sortOrder)
+    private struct PresentationKey: Hashable {
+        var kind: HostKind?
+        var grouped: Bool
+        var language: String
+    }
+
+    /// Filters, sorts and groups `entries` for the tables.
+    private func recompute() {
+        visible = InventoryPresentation.visible(entries, kind: model.nav.inventoryKind, sortOrder: sortOrder)
+        groups = model.nav.inventoryGrouped
+            ? InventoryGroup.make(visible, site: { model.classifier.site(for: $0) }, unknownNetwork: tr("Unknown network", "Inventory"))
+            : []
+        domainCount = entries.reduce(0) { $0 + ($1.kind == .domain ? 1 : 0) }
     }
 
     // MARK: Flat table
 
-    private func flatTable(_ rows: [InventoryEntry]) -> some View {
-        Table(rows, selection: $selection, sortOrder: $sortOrder) {
+    private var flatTable: some View {
+        Table(visible, selection: $selection, sortOrder: $sortOrder) {
             TableColumn(tr("Name", "Inventory"), value: \.value) { entry in
                 Text(entry.value)
                     .font(entry.kind == .ip ? Theme.mono(12, weight: .medium) : .system(size: 12, weight: .medium))
@@ -114,27 +132,29 @@ struct InventoryView: View {
             }
             .width(58)
 
+            // The path column takes the spare width (2fr in the design); the date and count columns are capped
+            // so the table's uniform column resizing cannot widen them instead.
             TableColumn(tr("Seen by · process path", "Inventory")) { entry in
                 InventorySourcesList(model: model, sources: entry.sources)
             }
-            .width(min: 240, ideal: 440)
+            .width(min: 240, ideal: 520)
 
             TableColumn(tr("First seen", "Inventory"), value: \.firstSeen) { entry in
                 Text(AnalyzeFormat.seen(entry.firstSeen)).foregroundStyle(Theme.ink2)
             }
-            .width(min: 84, ideal: 96)
+            .width(min: 84, ideal: 96, max: 112)
 
             TableColumn(tr("Last seen", "Inventory"), value: \.lastSeen) { entry in
                 Text(AnalyzeFormat.seen(entry.lastSeen, timeOnlyToday: true)).foregroundStyle(Theme.ink2)
             }
-            .width(min: 70, ideal: 84)
+            .width(min: 70, ideal: 84, max: 100)
 
             TableColumn(tr("Requests", "Inventory"), value: \.requestCount) { entry in
                 Text(Fmt.count(entry.requestCount))
                     .font(Theme.mono(11))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .width(min: 60, ideal: 74)
+            .width(min: 60, ideal: 70, max: 84)
+            .alignment(.trailing)
         }
         .font(.system(size: 12))
         .contextMenu(forSelectionType: InventoryEntry.ID.self) { ids in
@@ -162,10 +182,8 @@ struct InventoryView: View {
 
     // MARK: Grouped table
 
-    private func groupedTable(_ rows: [InventoryEntry]) -> some View {
-        let groups = InventoryGroup.make(rows, site: { model.classifier.site(for: $0) },
-                                         unknownNetwork: tr("Unknown network", "Inventory"))
-        return Table(groups) {
+    private var groupedTable: some View {
+        Table(groups) {
             TableColumn(tr("Site or network", "Inventory")) { group in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -195,14 +213,14 @@ struct InventoryView: View {
                     }
                 }
             }
-            .width(min: 110, ideal: 140)
+            .width(min: 110, ideal: 140, max: 180)
 
             TableColumn(tr("Requests", "Inventory")) { group in
                 Text(Fmt.count(group.requests))
                     .font(Theme.mono(11))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .width(min: 70, ideal: 84)
+            .width(min: 60, ideal: 70, max: 90)
+            .alignment(.trailing)
         }
         .font(.system(size: 12))
     }
@@ -221,12 +239,21 @@ struct InventoryView: View {
         }
         while !Task.isCancelled {
             let search = model.nav.inventorySearch.trimmingCharacters(in: .whitespaces)
-            if let fresh = try? await model.database.inventory(kind: nil, search: search, scope: model.devices.scope), !Task.isCancelled {
+            if let fresh = try? await model.database.inventory(kind: nil, search: search, scope: model.devices.scope),
+               !Task.isCancelled, fresh != entries {
                 entries = fresh
+                recompute()
             }
             loaded = true
             try? await Task.sleep(for: .seconds(30))
         }
+    }
+}
+
+/// Filtering and sorting behind the Domains & IPs table (pure, so it can be tested).
+enum InventoryPresentation {
+    static func visible(_ entries: [InventoryEntry], kind: HostKind?, sortOrder: [KeyPathComparator<InventoryEntry>]) -> [InventoryEntry] {
+        entries.filter { kind == nil || $0.kind == kind }.sorted(using: sortOrder)
     }
 }
 
@@ -346,6 +373,7 @@ struct InventoryGroup: Identifiable, Hashable {
     /// Groups domains by registrable domain and IPs by network (`AS13335 Cloudflare`), busiest first.
     static func make(_ entries: [InventoryEntry], site: (String) -> String, unknownNetwork: String) -> [InventoryGroup] {
         var groups: [String: InventoryGroup] = [:]
+        var sourceTitles: [String: Set<String>] = [:]
         var order: [String] = []
         for entry in entries {
             let name = entry.kind == .ip ? network(entry.geo) ?? unknownNetwork : site(entry.value)
@@ -356,7 +384,7 @@ struct InventoryGroup: Identifiable, Hashable {
             }
             groups[key]?.names.append(entry.value)
             groups[key]?.requests += entry.requestCount
-            for source in entry.sources where !(groups[key]?.sources.contains { $0.title == source.title } ?? true) {
+            for source in entry.sources where sourceTitles[key, default: []].insert(source.title).inserted {
                 groups[key]?.sources.append(source)
             }
         }
