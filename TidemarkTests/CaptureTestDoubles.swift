@@ -217,6 +217,8 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var refusedHosts: Set<String> = []
     /// Request writes hang until cancelled (a black-holed connection).
     var stallingRequests = false
+    /// Probe saves hang until cancelled.
+    var stallingProbeSaves = false
     /// Closing rows of ended sessions fails (`DatabaseError.unreachable`) while everything else works.
     var failingMaintenance = false
     /// `apps()` answers with the list as it was when called, this much later.
@@ -251,6 +253,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func setEnforcesForeignKeys(_ on: Bool) { enforcesForeignKeys = on }
     func setRefusedHosts(_ hosts: Set<String>) { refusedHosts = hosts }
     func setStallingRequests(_ on: Bool) { stallingRequests = on }
+    func setStallingProbeSaves(_ on: Bool) { stallingProbeSaves = on }
     func setFailingMaintenance(_ on: Bool) { failingMaintenance = on }
     func setAppsDelay(_ delay: Duration) { appsDelay = delay }
     func setApps(_ apps: [MonitoredApp]) { appList = apps }
@@ -433,7 +436,14 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func addMute(_ pattern: String) async throws { mutesList.append(pattern) }
     func removeMute(_ pattern: String) async throws { mutesList.removeAll { $0 == pattern } }
 
-    func saveProbeSession(_ session: ProbeSession) async throws { try check(); probeSessionsSaved.append(session) }
+    func saveProbeSession(_ session: ProbeSession) async throws {
+        try check()
+        if stallingProbeSaves {
+            try await Task.sleep(for: .seconds(3600))
+            throw CancellationError()
+        }
+        probeSessionsSaved.append(session)
+    }
     func probeSessions(limit: Int) async throws -> [ProbeSession] { probeSessionsSaved }
     func deleteProbeSession(_ id: UUID) async throws { probeSessionsSaved.removeAll { $0.id == id } }
 

@@ -387,6 +387,51 @@ struct ProbeControllerTests {
         #expect(quick < .milliseconds(300), "no tail when it is off")
     }
 
+    @Test func quittingSavesTheProbeWithoutWaitingForTheTail() async throws {
+        let database = CaptureFakeDatabase()
+        let model = makeModel(surge: EgressFakeSurge(), database: database)
+        let controller = ProbeController(model: model, registry: ProbeRegistry(), tailWindow: .seconds(5), stopGrace: .seconds(1))
+        _ = try await controller.startProbe(url: "example.com", mode: .desktop, tail: true)
+        controller.pageDidFinishLoading()
+        let clock = ContinuousClock()
+        let elapsed = await clock.measure { await controller.stopProbe(quitting: true) }
+        #expect(elapsed < .milliseconds(500), "no tail and no grace while quitting")
+        #expect(await database.probeSessionsSaved.count == 1)
+        #expect(model.probe.running == nil)
+    }
+
+    @Test func quittingWaitsForAStopAlreadyUnderWay() async throws {
+        let database = CaptureFakeDatabase()
+        let model = makeModel(surge: EgressFakeSurge(), database: database)
+        let controller = ProbeController(model: model, registry: ProbeRegistry(), tailWindow: .seconds(5), stopGrace: .seconds(5))
+        _ = try await controller.startProbe(url: "example.com", mode: .desktop, tail: true)
+        controller.pageDidFinishLoading()
+        // Stop, then Quit while the stop still waits for the tail.
+        let pressed = Task { await controller.stopProbe() }
+        try await Task.sleep(for: .milliseconds(100))
+        let clock = ContinuousClock()
+        var quit: ProbeSession?
+        let elapsed = await clock.measure { quit = await controller.stopProbe(quitting: true) }
+        #expect(elapsed < .milliseconds(500), "the stop under way skips the rest of its tail and grace")
+        let session = try #require(quit, "the quit waits for that stop's save instead of finding nothing to stop")
+        #expect(await pressed.value?.id == session.id)
+        #expect(await database.probeSessionsSaved.map(\.id) == [session.id], "saved once")
+    }
+
+    @Test func shutdownReturnsAtItsDeadline() async throws {
+        let database = CaptureFakeDatabase()
+        await database.setStallingProbeSaves(true)
+        let model = makeModel(surge: EgressFakeSurge(), database: database)
+        let controller = ProbeController(model: model, registry: ProbeRegistry(), tailWindow: .seconds(5), stopGrace: .seconds(1))
+        _ = try await controller.startProbe(url: "example.com", mode: .desktop, tail: true)
+        controller.pageDidFinishLoading()
+        let clock = ContinuousClock()
+        let elapsed = await clock.measure {
+            await AppBootstrap.shutDown(probe: controller, egress: nil, engine: nil, timeout: .milliseconds(300))
+        }
+        #expect(elapsed < .seconds(1), "a save that never answers does not hold the quit")
+    }
+
     @Test func countsThePageAsLoadedWhenTheWebViewNeverSaysSo() async throws {
         let model = makeModel(surge: EgressFakeSurge())
         let controller = ProbeController(model: model, registry: ProbeRegistry(), loadingTimeout: .milliseconds(100), stopGrace: .milliseconds(10))

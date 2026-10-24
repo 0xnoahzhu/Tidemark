@@ -38,6 +38,8 @@ final class ProbeController: ProbeActions {
     let tailWindow: Duration
     /// Surge records of the last connections can trail the stop by a moment.
     let stopGrace: Duration
+    /// Longest wait for each database write of a probe stopped because Tidemark quits.
+    let quitSaveTimeout: Duration = .seconds(2)
 
     private static let log = Logger(subsystem: "io.tidemark.Tidemark", category: "probe")
     private static let table = "ProbeEngine"
@@ -48,6 +50,12 @@ final class ProbeController: ProbeActions {
     private var tailTask: Task<Void, Never>?
     private var tailEnabled = false
     private var publishedVersion = 0
+    /// The stop in progress (closing, the grace for late records, the save). Every caller awaits the same one;
+    /// it clears itself when done.
+    private var stopping: (id: UUID, task: Task<ProbeSession?, Never>)?
+    private var graceTask: Task<Void, Never>?
+    /// Tidemark is quitting: no tail, no grace, bounded saves.
+    private var quitting = false
 
     init(model: AppModel, registry: ProbeRegistry, loadingTimeout: Duration = .seconds(30), tailWindow: Duration = .seconds(6),
          stopGrace: Duration = .seconds(1)) {
@@ -149,7 +157,34 @@ final class ProbeController: ProbeActions {
 
     @discardableResult
     func stopProbe() async -> ProbeSession? {
-        guard model.probe.running != nil else { return nil }
+        await stopProbe(quitting: false)
+    }
+
+    /// Stops the probe and saves it. A stop already in progress (Stop, then Quit) is awaited rather than
+    /// skipped, so its save still happens before Tidemark exits. `quitting` skips the rest of the tail and the
+    /// grace for late Surge records (also for a stop already in progress) and bounds the database writes.
+    @discardableResult
+    func stopProbe(quitting: Bool) async -> ProbeSession? {
+        if quitting {
+            self.quitting = true
+            tailTask?.cancel()
+            graceTask?.cancel()
+        }
+        var previous: ProbeSession?
+        while let stopping { previous = await stopping.task.value }
+        // Nothing (else) is running: the stop that was in progress, if any, saved the probe.
+        guard model.probe.running != nil else { return previous }
+        let id = UUID()
+        let task = Task { () -> ProbeSession? in
+            let session = await self.performStop()
+            if self.stopping?.id == id { self.stopping = nil }
+            return session
+        }
+        stopping = (id, task)
+        return await task.value
+    }
+
+    private func performStop() async -> ProbeSession? {
         // Keep recording until the tail after the first load has passed.
         if let tailTask {
             await tailTask.value
@@ -171,7 +206,12 @@ final class ProbeController: ProbeActions {
         model.probe.selectedID = session.id
 
         // Let the last Surge records (and their resolved IPs) arrive before closing the session.
-        try? await Task.sleep(for: stopGrace)
+        if !quitting {
+            let grace = Task { [stopGrace] () -> Void in try? await Task.sleep(for: stopGrace) }
+            graceTask = grace
+            await grace.value
+            graceTask = nil
+        }
         if registry.snapshot().sessionID == session.id {
             session.hosts = registry.end().hosts
             if let index = model.probe.sessions.firstIndex(where: { $0.id == session.id }) {
@@ -180,20 +220,27 @@ final class ProbeController: ProbeActions {
         }
 
         let database = model.database
-        do {
-            try await database.saveProbeSession(session)
-        } catch {
-            Self.log.error("Saving probe session failed: \(error.localizedDescription, privacy: .public)")
-        }
+        let saved = session
+        await write("Saving probe session") { try await database.saveProbeSession(saved) }
         let sources = Self.sources(for: session)
         if !sources.isEmpty {
-            do {
-                try await database.touchHostSources(sources)
-            } catch {
-                Self.log.error("Recording probe hosts failed: \(error.localizedDescription, privacy: .public)")
-            }
+            await write("Recording probe hosts") { try await database.touchHostSources(sources) }
         }
         return session
+    }
+
+    /// One database write of a stop. While quitting an unreachable server must not hold the process, so each
+    /// write then gets `quitSaveTimeout`.
+    private func write(_ label: String, _ operation: @escaping @Sendable () async throws -> Void) async {
+        do {
+            if quitting {
+                try await CaptureTimeout.unstructured(quitSaveTimeout, operation)
+            } else {
+                try await operation()
+            }
+        } catch {
+            Self.log.error("\(label, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     func deleteProbe(_ id: UUID) async {

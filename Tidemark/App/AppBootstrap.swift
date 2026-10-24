@@ -53,23 +53,27 @@ enum AppBootstrap {
     }
 
     /// Stops a running probe and the egress checks, and flushes buffered rows to PostgreSQL (or the on-disk
-    /// spool). The probe is saved while capture flushes, so a slow probe save cannot use up the time the
-    /// final flush needs. Gives up after `timeout` so quitting never hangs on an unreachable server.
+    /// spool). The probe is saved right away (no tail, no grace) while capture flushes, so a slow probe save
+    /// cannot use up the time the final flush needs. Returns after `timeout` at the latest, whatever is still
+    /// running, so quitting never hangs on an unreachable server.
     static func stop(_ model: AppModel, timeout: Duration = .seconds(6)) async {
         StatusItemController.uninstall()
         DockIconUpdater.stop()
-        let probe = self.probe, egress = self.egress, engine = self.engine
+        await shutDown(probe: probe, egress: egress, engine: engine, timeout: timeout)
+    }
+
+    /// The shutdown work, raced against `timeout` (`CaptureTimeout` returns at the deadline without waiting for
+    /// the work, which awaiting a task's value would).
+    static func shutDown(probe: ProbeController?, egress: EgressMonitor?, engine: CaptureEngine?, timeout: Duration) async {
         let shutdown = Task(name: "shutdown") { @MainActor in
             egress?.stop()
-            let probeStopped = Task { @MainActor in _ = await probe?.stopProbe() }
+            let probeStopped = Task { @MainActor in _ = await probe?.stopProbe(quitting: true) }
             await engine?.stop()
             await probeStopped.value
         }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await shutdown.value }
-            group.addTask { try? await Task.sleep(for: timeout) }
-            await group.next()
-            group.cancelAll()
+        _ = await CaptureTimeout.value(within: timeout) { () async -> Bool? in
+            await shutdown.value
+            return true
         }
     }
 
