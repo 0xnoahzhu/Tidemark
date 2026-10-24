@@ -53,7 +53,13 @@ For a remote Surge, add `--remote host:port` and send the password on stdin with
   `{"in":23416,"out":1140,"downloadSpeedHistory":[…],"uploadSpeedHistory":[…]}`.
 * **Sessions** — request IDs restart when the Surge engine restarts. `status` → `start-time` (seconds)
   is the session key; the DB key is `(device_id, surge_session_ms, surge_id)`.
-* **Backfill** — on (re)connect, `dump recent` returns the last 200 requests with full details.
+* **Backfill** — on (re)connect, `dump recent` returns the last 200 requests with full details, and `dump active`
+  lists the connections that are still open; requests the pipeline still holds as active but Surge no longer
+  lists are closed.
+* **Liveness** — `real-time-speed` arrives every second while subscribed, so a stream that stays silent for 15 s
+  is restarted. `status` is polled every 30 s: a new `start-time` means Surge restarted (even if the watch
+  survived), and `closeActiveRequests` marks the previous session's still-active rows completed. `environment`
+  is polled every 60 s as a backstop for policy switches the watch did not report.
 * **Process** — `pid`, `processPath`, and `pathForStatistics` (the app bundle, e.g. `/Applications/Grok Bot.app/`).
 * **Policy** — `policyName` is the final policy. Notes contain the decision path, e.g.
   `[Rule] Policy decision path: AI -> AT&T-RackNerd-Hysteria2` → `policyPath = ["AI", "AT&T-RackNerd-Hysteria2"]`.
@@ -80,7 +86,10 @@ The request belongs to the nearest process in the chain (leaf first) whose execu
 monitored app's bundle (`MonitoredApp.contains(processPath:)`), so `node` launched by `Cursor Helper
 (Plugin)` launched by `Cursor` rolls up to Cursor ("Rolled up to Cursor through 2 parent processes").
 Unmonitored requests are shown under the top-most `.app` bundle in the chain (or Surge's
-`pathForStatistics`, the only option for a remote Surge) and land only in the global log.
+`pathForStatistics`, the only option for a remote Surge; Surge reports system daemons as the literal
+`SYSTEM`, which is ignored) and land only in the global log. Tidemark's own requests (the site probe's
+forwarder, IP-info lookups) are never attributed to a monitored app, even when Tidemark was launched from
+inside one's process tree.
 
 Processes are stored once per `(device, pid, start_time)` with a `parent_id` link; the app's Process Tree
 aggregates them by executable path under their parent path, showing the latest PID and Running/Exited.
@@ -112,8 +121,18 @@ session):
 * **Writes** go through `WriteBuffer`: flush every *N* rows or *T* seconds (default 200 rows / 1 s), as
   multi-row `INSERT … ON CONFLICT (device_id, surge_session, surge_id) DO UPDATE`. A request is written when
   first seen, again when it completes, and every ~10 s while it stays active.
+* **Errors** — `DatabaseError.unreachable` (connection lost, timeouts, server out of resources, read-only…)
+  keeps the data and takes the pipeline offline; `DatabaseError.query` means the rows themselves were
+  refused, so the pipeline retries item by item, drops app/probe links that no longer exist, and quarantines
+  rows that are still refused in `spool/rejected.jsonl`.
 * **Offline** — when PostgreSQL is unreachable rows are appended to a JSON-lines spool in
   `~/Library/Application Support/Tidemark/spool/` (up to 500,000 rows) and replayed on reconnect.
+  `shared-state.json` keeps the last known apps, mutes and inventory index so attribution and first-contact
+  detection keep working when Tidemark starts without a database, and `auxiliary.json` keeps unwritten
+  inventory and alert work across a quit.
+* **Pools** — a 6-connection pool for reads and a separate 2-connection writer pool, each with server-side
+  `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout`, so a slow page query can
+  never starve the writer.
 * **Counts** — total rows use `pg_class.reltuples` plus rows written since; "today" is an indexed count.
 * **Retention** — optional; deletes requests older than *N* days in batches every hour.
 * **Credentials** — the URL is stored without its password in `UserDefaults`; the password lives in the
@@ -123,7 +142,8 @@ session):
 
 Every row carries `device_id`. Each Mac records and alerts on its own requests. The sidebar's Mac menu
 scopes every page to one Mac or all. The live table merges this Mac's stream with rows other Macs wrote
-(polled by `updated_at` through `requestsWritten(after:)`). Apps are shared by bundle path; each Mac reports in `app_installs` whether the
+(polled by `updated_at` through `requestsWritten(after:)`, with a few seconds of overlap). Retention and
+"Mark All as Read" only touch the selected Mac's rows. Apps are shared by bundle path; each Mac reports in `app_installs` whether the
 path exists locally ("Installed on MacBook Pro · Mac mini (Office) · Path not found").
 
 ## Site Probe
@@ -134,7 +154,9 @@ session. The proxy forwards every tunnel to Surge's HTTP proxy port, so Surge st
 records IP, policy and rule, while Tidemark knows that every connection on that port belongs to the probe.
 Hosts are recorded with their first/last activity relative to the probe start and the step (page load,
 click, device switch) that first reached them; the waterfall colors same-site hosts with the accent and
-other sites in amber. The proxy matches Surge records to the probe by the forwarder's source port.
+other sites in amber. The proxy matches Surge records to the probe by the forwarder's source port and
+address. The forwarder dials the interface Surge's HTTP listener is bound to; probes are not available with a
+remote Surge, whose proxy is not reachable through a loopback forwarder.
 
 ## Egress IP
 
@@ -142,8 +164,12 @@ For DIRECT, the global policy (proxy mode) and each policy group's current selec
 asks Surge for the external IP through that policy (`test-policy-external-ip <line hash>`), its latency
 (`test-policy <line hash>`) and GeoIP data, and stores the samples. The *current* egress is the policy the
 outbound mode or FINAL rule uses. A change of the current egress IP is logged with its likely cause
-(policy-group switch from an `environment` event, auto-test pick, network change from `NWPathMonitor`,
-Surge restart from a new `start-time`).
+(policy-group switch from an `environment` event, an automatic group's new pick (`policy-group list` reports
+the group type), a network change — `NWPathMonitor` updates are confirmed against Surge's `summary`, because
+under enhanced mode the system path describes Surge's own utun interface — and a Surge restart from a new
+`start-time`). In rule mode the current route is the FINAL rule's policy (`dump rule`). The network type
+(hosting, residential…) comes from the IP info service chosen in Settings (proxycheck.io, or off); it is only
+asked about Tidemark's own egress IPs and IPs the user looks up.
 
 ## UI
 
@@ -158,7 +184,9 @@ holding the `zh-Hans` translations; Settings › Language switches at runtime.
 
 ## Conventions
 
-* Swift 6 language mode, complete strict concurrency, no warnings.
+* Swift 6 language mode (which implies complete strict concurrency), no warnings.
+* Views inside SwiftUI `Table` cells and AppKit-hosted panels do not receive custom environment objects on
+  macOS 27: pass `AppModel` explicitly there.
 * English for all code, comments, docs and commit messages; other languages only in String Catalogs.
 * Conventional Commits (`feat(capture): …`, `fix(ui): …`, `test(database): …`).
 * No credentials in the repository.

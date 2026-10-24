@@ -33,6 +33,11 @@ struct AlertItem: Identifiable, Hashable, Codable, Sendable {
     var readAt: Date?
 
     var isUnread: Bool { readAt == nil }
+
+    /// The process name, or nil when Surge did not report one (stored as empty or `Unknown`).
+    var knownProcessName: String? {
+        processName.isEmpty || processName == "Unknown" ? nil : processName
+    }
 }
 
 /// Filter segments on the Notifications page.

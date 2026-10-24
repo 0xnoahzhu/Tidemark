@@ -42,7 +42,6 @@ enum AppBootstrap {
         self.egress = egress
         self.probe = probe
 
-        TidemarkIntents.register(model: model)
         StatusItemController.install(model: model)
         DockIconUpdater.start(model: model)
 

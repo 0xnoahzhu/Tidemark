@@ -291,6 +291,16 @@
         }
       }
     },
+    "Process not reported by Surge" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 未报告进程"
+          }
+        }
+      }
+    },
     "Requests" : {
       "localizations" : {
         "zh-Hans" : {

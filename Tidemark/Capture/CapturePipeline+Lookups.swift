@@ -19,7 +19,7 @@ extension CapturePipeline {
         if entry.record.remoteIP == nil, !host.isEmpty, !HostName.isIPAddress(host) {
             if let cached = dnsCache[host], cached.expires > now, let ip = Self.preferredIP(cached.ips) {
                 entry.record.remoteIP = ip
-                if entry.probeMatched, let port = entry.sourcePort { probes.addIP(ip, sourcePort: port) }
+                if entry.probeMatched, let port = entry.sourcePort { probes.addIP(ip, sourcePort: port, sourceAddress: entry.sourceAddress) }
             } else if (dnsFailures[host] ?? .distantPast) <= now {
                 waitingForHost[host, default: []].insert(id)
                 if !dnsInFlight.contains(host), !dnsQueue.contains(host) {
@@ -79,7 +79,7 @@ extension CapturePipeline {
             entry.record.geo = geoCache[ip]
             entry.dirty = true
             entry.urgent = true
-            if entry.probeMatched, let port = entry.sourcePort { probes.addIP(ip, sourcePort: port) }
+            if entry.probeMatched, let port = entry.sourcePort { probes.addIP(ip, sourcePort: port, sourceAddress: entry.sourceAddress) }
             resolveAddress(&entry, id: id, now: now)
             recordSources(&entry, now: now)
             entries[id] = entry

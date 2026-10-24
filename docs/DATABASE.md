@@ -9,6 +9,25 @@ All timestamps are `timestamptz` (stored in UTC). Request IDs from Surge restart
 restarts, so a request is identified by `(device_id, surge_session, surge_id)`, where `surge_session` is the
 engine start time in milliseconds.
 
+## Schema versions
+
+| Version | Changes |
+|---|---|
+| 1 | Initial tables. |
+| 2 | `egress_checks.network_type` / `has_ipv6`; `requests` fillfactor 80; the btree on `requests.updated_at` replaced by a BRIN index (so rewriting a request row can stay a HOT update on PostgreSQL 16+); one trigram index over host, process name, remote IP and bundle path for searches, replacing the separate host and remote-IP indexes; `schema_migrations.requires_version`. Indexes are built `CONCURRENTLY`, so the upgrade never blocks other Macs' writes. |
+
+A migration records the oldest schema its writers still understand (`requires_version`). A Mac running an
+older Tidemark keeps writing as long as that version is not newer than its own schema, and otherwise asks to
+be updated.
+
+## Connections
+
+Tidemark opens a 6-connection pool for reads and a 2-connection writer pool (`Tidemark writer` in
+`pg_stat_activity`). Each sets `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout`
+(30 s / 10 s / 60 s for reads, 60 s / 5 s / 30 s for writes). URLs without `sslmode` use `prefer` for remote
+hosts (TLS when the server offers it) and `disable` for loopback; `sslmode=require`, `verify-ca` and
+`verify-full` (with `sslrootcert=`) are supported.
+
 ## Tables
 
 | Table | One row per | Notes |
@@ -73,6 +92,15 @@ Every process (and its parents) that talked to a host:
 ```sql
 SELECT started_at, process_name, chain, remote_ip, policy_path
 FROM requests WHERE host = 'api.github.com' ORDER BY started_at DESC LIMIT 50;
+```
+
+Every request that touched a host (uses the v2 search index for `ILIKE`, so prefer it over `host = …`):
+
+```sql
+SELECT started_at, process_name, remote_ip, policy_path FROM requests
+WHERE (host || E'\n' || COALESCE(process_name, '') || E'\n' || COALESCE(host(remote_ip), '') || E'\n' || COALESCE(bundle_path, ''))
+      ILIKE '%api.github.com%'
+ORDER BY started_at DESC LIMIT 50;
 ```
 
 Busiest destinations this week:

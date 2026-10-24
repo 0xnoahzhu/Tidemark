@@ -93,7 +93,7 @@ struct UnavailableSurgeClient: SurgeClient {
     func externalIP(policy: String?) async throws -> String { throw error }
     func policyLatency(policy: String) async throws -> Int? { throw error }
     func network() async throws -> ThisMacNetwork { throw error }
-    func httpProxyPort() async throws -> Int { 6152 }
+    func httpProxyPort() async throws -> Int { throw error }
 }
 
 struct NoProcessInspector: ProcessInspecting {

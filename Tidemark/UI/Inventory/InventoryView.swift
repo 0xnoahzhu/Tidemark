@@ -311,6 +311,11 @@ struct InventorySourcesList: View {
         path.replacingOccurrences(of: "/", with: "/\u{200B}")
     }
 
+    /// A source whose process Surge never reported (stored with an empty or legacy `unknown` path).
+    static func isUnreported(_ source: InventorySource) -> Bool {
+        source.path.isEmpty || source.path == "unknown"
+    }
+
     static func isProbe(_ source: InventorySource) -> Bool {
         source.probeSessionID != nil || source.path.hasPrefix(probePrefix) || source.path.hasPrefix("probe:")
     }
@@ -318,6 +323,7 @@ struct InventorySourcesList: View {
     /// The process path, or `Site probe · github.com` in the current language.
     @MainActor
     static func displayPath(_ source: InventorySource) -> String {
+        if isUnreported(source) { return tr("Process not reported by Surge", "Inventory") }
         if source.path.hasPrefix(probePrefix) {
             return trf("Site probe · %@", "Inventory", String(source.path.dropFirst(probePrefix.count)))
         }
@@ -342,6 +348,8 @@ struct InventorySourceTile: View {
     var body: some View {
         if InventorySourcesList.isProbe(source) {
             LetterTile(letter: "P", color: Theme.tileProbe, size: size)
+        } else if InventorySourcesList.isUnreported(source) {
+            LetterTile(letter: "?", color: Theme.tileNeutral, size: size)
         } else if let app = model.catalog.app(source.appID) {
             AppTile(app: app, size: size)
         } else {

@@ -66,6 +66,8 @@ actor CapturePipeline {
         var record: RequestRecord
         var pathForStatistics: String?
         var sourcePort: Int?
+        /// Surge's `sourceAddress` (`127.0.0.1` for proxy clients such as the probe, `198.18.0.1` for VIF flows).
+        var sourceAddress: String? = nil
         /// Surge's name of the device that made the request (LAN clients of a gateway Surge).
         var deviceName: String?
         var appsVersion: Int
@@ -532,7 +534,7 @@ actor CapturePipeline {
 
     private func create(_ mapped: RequestRecord, request: SurgeRequest, backfill: Bool, now: Date) {
         var entry = Entry(record: mapped, pathForStatistics: request.pathForStatistics, sourcePort: request.sourcePort,
-                          deviceName: request.deviceName, appsVersion: attributor.appsVersion, firstSeen: now, lastQueued: now,
+                          sourceAddress: request.sourceAddress, deviceName: request.deviceName, appsVersion: attributor.appsVersion, firstSeen: now, lastQueued: now,
                           lastSeen: now, backfilled: backfill)
         let attribution = attribution(for: entry.record, pathForStatistics: entry.pathForStatistics, reuseChain: false)
         entry.record.chain = attribution.chain
@@ -578,6 +580,7 @@ actor CapturePipeline {
         record.pid = mapped.pid ?? record.pid
         record.processPath = mapped.processPath ?? record.processPath
         entry.sourcePort = request.sourcePort ?? entry.sourcePort
+        entry.sourceAddress = request.sourceAddress ?? entry.sourceAddress
         entry.pathForStatistics = request.pathForStatistics ?? entry.pathForStatistics
         entry.deviceName = request.deviceName ?? entry.deviceName
         entry.lastSeen = now
@@ -594,7 +597,9 @@ actor CapturePipeline {
         }
         matchProbe(&entry)
         resolveAddress(&entry, id: request.id, now: now)
-        if !hadIP, entry.probeMatched, let port = entry.sourcePort, let ip = entry.record.remoteIP { probes.addIP(ip, sourcePort: port) }
+        if !hadIP, entry.probeMatched, let port = entry.sourcePort, let ip = entry.record.remoteIP {
+            probes.addIP(ip, sourcePort: port, sourceAddress: entry.sourceAddress)
+        }
         recordSources(&entry, now: now)
 
         let finished = wasActive && entry.record.state != .active
@@ -673,10 +678,10 @@ actor CapturePipeline {
 
     private func matchProbe(_ entry: inout Entry) {
         guard !entry.probeMatched, let own = settings.ownExecutablePath, entry.record.processPath == own,
-              let port = entry.sourcePort, let match = probes.match(sourcePort: port) else { return }
+              let port = entry.sourcePort, let match = probes.match(sourcePort: port, sourceAddress: entry.sourceAddress) else { return }
         entry.probeMatched = true
         entry.record.probeSessionID = match.sessionID
-        if let ip = entry.record.remoteIP { probes.addIP(ip, sourcePort: port) }
+        if let ip = entry.record.remoteIP { probes.addIP(ip, sourcePort: port, sourceAddress: entry.sourceAddress) }
     }
 
     // MARK: Global inventory sources

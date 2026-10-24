@@ -22,18 +22,18 @@ enum CaptureAlertText {
     static func subtitle(alert: AlertItem, deviceName: String? = nil) -> String {
         var parts: [String] = []
         if let deviceName, !deviceName.isEmpty { parts.append(deviceName) }
-        let via = trf("via %@", "Capture", alert.processName)
+        let via = alert.knownProcessName.map { trf("via %@", "Capture", $0) }
         let geo = alert.geo?.display ?? ""
         switch alert.scope {
         case .site:
             parts.append(trf("First host %@", "Capture", alert.value))
-            parts.append(via)
+            if let via { parts.append(via) }
         case .host:
-            parts.append(via)
+            if let via { parts.append(via) }
             if let ip = alert.ip, !ip.isEmpty { parts.append(ip) }
         case .ip:
             if let host = alert.host, !host.isEmpty { parts.append(host) } else { parts.append(tr("No hostname", "Capture")) }
-            parts.append(via)
+            if let via { parts.append(via) }
         }
         if !geo.isEmpty { parts.append(geo) }
         return parts.joined(separator: " · ")

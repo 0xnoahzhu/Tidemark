@@ -253,7 +253,7 @@ private struct MenuBarAlertRow: View {
                         .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Text(identity.name + " · " + alert.processName)
+                    Text([identity.name, alert.knownProcessName].compactMap { $0 }.joined(separator: " · "))
                         .font(.system(size: 10.5))
                         .foregroundStyle(Theme.ink2)
                         .lineLimit(1)

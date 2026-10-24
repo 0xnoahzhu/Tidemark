@@ -6,11 +6,20 @@ struct PolicyChip: View {
     var maxWidth: CGFloat? = nil
 
     var body: some View {
+        if policyPath.isEmpty {
+            // Surge reports the policy only after the connection is set up.
+            Text("—").font(.system(size: 11)).foregroundStyle(Theme.ink3)
+        } else {
+            chip
+        }
+    }
+
+    private var chip: some View {
         let tint = Theme.tint(Theme.policyHue(policyPath))
-        Text(policyPath.isEmpty ? "—" : policyPath.joined(separator: " › "))
+        return Text(policyPath.joined(separator: " › "))
             .font(.system(size: 11, weight: .medium))
             .lineLimit(1)
-            .truncationMode(.tail)
+            .truncationMode(policyPath.count > 1 ? .middle : .tail)
             .padding(.horizontal, 6)
             .frame(height: 18)
             .background(tint.background, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
