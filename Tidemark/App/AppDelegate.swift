@@ -13,8 +13,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The unit tests run inside this app (TEST_HOST); they must never start capture against the real
+        // Surge and database.
+        guard !Self.isTestHost else { return }
         AppBootstrap.start(model)
     }
+
+    static var isTestHost: Bool { ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil }
 
     /// Capture keeps running from the menu bar when the window closes.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
