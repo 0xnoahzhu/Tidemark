@@ -222,7 +222,11 @@ final class ProbeController: ProbeActions {
                 message: tr("Surge's HTTP proxy is off. Turn on its HTTP proxy (http-listen) to run a probe.", Self.table)
             )
         } catch {
-            let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            let detail = switch error {
+            case is CaptureTimeoutError: tr("Surge did not answer in time", Self.table)
+            case is SurgeError: CaptureEngine.message(for: error)
+            default: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
             throw ProbeStartError(reason: .httpProxyUnknown, message: trf("Couldn't find Surge's HTTP proxy port: %@", Self.table, detail))
         }
     }

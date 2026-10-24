@@ -31,14 +31,19 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已连接 · PostgreSQL %@ · %lld ms" } }
       }
     },
+    "Could not read the output of surge-cli %1$@: %2$@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法读取 surge-cli %1$@ 的输出：%2$@" } }
+      }
+    },
     "First host %@" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "首个主机 %@" } }
       }
     },
-    "Found · controller connected · streaming" : {
+    "Invalid PostgreSQL URL: %@" : {
       "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已找到 · 控制器已连接 · 正在订阅" } }
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PostgreSQL 连接地址无效：%@" } }
       }
     },
     "Mute Host" : {
@@ -51,19 +56,29 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有域名" } }
       }
     },
+    "No PostgreSQL connection is configured." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还没有设置 PostgreSQL 连接。" } }
+      }
+    },
     "PostgreSQL did not answer in time" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PostgreSQL 未及时响应" } }
       }
     },
+    "PostgreSQL error: %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PostgreSQL 错误：%@" } }
+      }
+    },
+    "PostgreSQL is unreachable: %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连不上 PostgreSQL：%@" } }
+      }
+    },
     "PostgreSQL refused every write: %@" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PostgreSQL 拒绝了所有写入：%@" } }
-      }
-    },
-    "Remote · controller connected · streaming" : {
-      "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "远程 · 控制器已连接 · 正在订阅" } }
       }
     },
     "Surge is shutting down" : {
@@ -74,6 +89,21 @@
     "Surge stopped streaming" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surge 已停止推送" } }
+      }
+    },
+    "surge-cli %1$@ failed: %2$@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "surge-cli %1$@ 失败：%2$@" } }
+      }
+    },
+    "surge-cli %@ timed out." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "surge-cli %@ 超时。" } }
+      }
+    },
+    "surge-cli was not found at %@." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在 %@ 找不到 surge-cli。" } }
       }
     },
     "Unknown app" : {

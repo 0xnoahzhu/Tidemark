@@ -222,6 +222,7 @@ extension CaptureEngine: CaptureActions {
 
     /// Tests the connection the current settings describe. When the URL or the Keychain password differs from
     /// the live connection's, a throwaway client tests the new settings (the live one keeps recording).
+    /// A failure is described in the UI language (`CaptureDisplayError`).
     func testDatabaseConnection() async -> Result<String, Error> {
         if let make = makeDatabase, let changed = changedDatabaseURL() {
             let candidate = make(changed.url)
@@ -239,7 +240,7 @@ extension CaptureEngine: CaptureActions {
             let ms = milliseconds(result.roundTrip)
             return .success(trf("Connected · PostgreSQL %@ · %lld ms", "Capture", result.serverVersion, Int(ms.rounded())))
         } catch {
-            return .failure(error)
+            return .failure(CaptureDisplayError(error))
         }
     }
 

@@ -439,9 +439,6 @@ final class CaptureEngine {
                 if Task.isCancelled { return }
                 let stream = surge.events()
                 model.live.surge = .connected(detail: tr("watching requests", "Capture"))
-                model.live.surgeDetail = surge.endpoint.remote == nil
-                    ? tr("Found · controller connected · streaming", "Capture")
-                    : tr("Remote · controller connected · streaming", "Capture")
                 streamConnectedAt = .now
                 attempt = 0
                 let backfill = Task { [surge, pipeline] in
@@ -467,7 +464,6 @@ final class CaptureEngine {
                 if Task.isCancelled { return }
                 streamConnectedAt = nil
                 model.live.surge = .failed(message: Self.message(for: error))
-                model.live.surgeDetail = Self.message(for: error)
             }
             guard model.preferences.surgeReconnect else { return }
             attempt += 1
@@ -968,12 +964,42 @@ final class CaptureEngine {
         min(60, pow(2, Double(max(0, attempt - 1))))
     }
 
-    /// A failure for display; capture's own write failures are described in the UI language.
+    /// A failure for display (Settings › Database and Surge, the sidebar's status), in the UI language. Details
+    /// that come from the server or surge-cli stay as they were reported.
     static func message(for error: any Error) -> String {
         switch error {
         case is CaptureTimeoutError: tr("PostgreSQL did not answer in time", "Capture")
         case let rejection as CaptureServerRejection: trf("PostgreSQL refused every write: %@", "Capture", rejection.message)
+        case let failure as CaptureDisplayError: message(for: failure.underlying)
+        case let error as DatabaseError:
+            switch error {
+            case .notConfigured: tr("No PostgreSQL connection is configured.", "Capture")
+            case .invalidURL(let url): trf("Invalid PostgreSQL URL: %@", "Capture", url)
+            case .unreachable(let reason): trf("PostgreSQL is unreachable: %@", "Capture", reason)
+            case .query(let reason): trf("PostgreSQL error: %@", "Capture", reason)
+            }
+        case let error as SurgeError:
+            switch error {
+            case .cliNotFound(let path): trf("surge-cli was not found at %@.", "Capture", path)
+            case .commandFailed(let command, let reason): trf("surge-cli %1$@ failed: %2$@", "Capture", command, reason)
+            case .decoding(let command, let reason): trf("Could not read the output of surge-cli %1$@: %2$@", "Capture", command, reason)
+            case .timedOut(let command): trf("surge-cli %@ timed out.", "Capture", command)
+            }
         default: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
+}
+
+/// An error whose description is `CaptureEngine.message(for:)` of the error it wraps, written in the UI
+/// language when it was created (for views that show `localizedDescription`).
+struct CaptureDisplayError: Error, LocalizedError {
+    var underlying: any Error
+    var message: String
+
+    @MainActor init(_ underlying: any Error) {
+        self.underlying = underlying
+        message = CaptureEngine.message(for: underlying)
+    }
+
+    var errorDescription: String? { message }
 }

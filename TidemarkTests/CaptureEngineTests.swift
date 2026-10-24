@@ -369,6 +369,37 @@ struct CaptureEngineTests {
         #expect(CaptureEngine.message(for: CaptureTimeoutError(seconds: 20)) == "PostgreSQL did not answer in time")
     }
 
+    @Test func describesDatabaseAndSurgeFailuresInTheUILanguage() {
+        Localizer.shared.preference = .english
+        #expect(CaptureEngine.message(for: DatabaseError.unreachable("connection refused")) == "PostgreSQL is unreachable: connection refused")
+        #expect(CaptureEngine.message(for: SurgeError.commandFailed(command: "status", message: "denied")) == "surge-cli status failed: denied")
+        #expect(CaptureEngine.message(for: CaptureDisplayError(DatabaseError.notConfigured)) == "No PostgreSQL connection is configured.")
+
+        Localizer.shared.preference = .chinese
+        defer { Localizer.shared.preference = .english }
+        guard Localizer.shared.bundle != nil else { return }
+        #expect(CaptureEngine.message(for: DatabaseError.unreachable("connection refused")) == "连不上 PostgreSQL：connection refused")
+        #expect(CaptureEngine.message(for: DatabaseError.query("syntax error")) == "PostgreSQL 错误：syntax error")
+        #expect(CaptureEngine.message(for: DatabaseError.invalidURL("postgresql://x")) == "PostgreSQL 连接地址无效：postgresql://x")
+        #expect(CaptureEngine.message(for: DatabaseError.notConfigured) == "还没有设置 PostgreSQL 连接。")
+        #expect(CaptureEngine.message(for: SurgeError.cliNotFound(path: "/opt/surge-cli")) == "在 /opt/surge-cli 找不到 surge-cli。")
+        #expect(CaptureEngine.message(for: SurgeError.commandFailed(command: "status", message: "denied")) == "surge-cli status 失败：denied")
+        #expect(CaptureEngine.message(for: SurgeError.decoding(command: "dump active", message: "bad JSON")) == "无法读取 surge-cli dump active 的输出：bad JSON")
+        #expect(CaptureEngine.message(for: SurgeError.timedOut(command: "status")) == "surge-cli status 超时。")
+    }
+
+    @Test func aFailedConnectionTestIsDescribedInTheUILanguage() async {
+        Localizer.shared.preference = .english
+        let failing = CaptureFakeDatabase()
+        await failing.setFailing(true)
+        let (engine, _) = makeEngine(database: failing)
+        guard case .failure(let error) = await engine.testDatabaseConnection() else {
+            Issue.record("an unreachable database must fail")
+            return
+        }
+        #expect(error.localizedDescription == "PostgreSQL is unreachable: test")
+    }
+
     // MARK: Apps
 
     @Test func anAppAddedOnAnotherMacWaitsForItsInventory() async throws {
