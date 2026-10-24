@@ -178,8 +178,12 @@ private struct RequestsInspectorConnection: View {
             VStack(alignment: .leading, spacing: 5) {
                 KeyValueRow(tr("Remote IP", "Requests"), record.remoteIP ?? record.remoteAddress ?? "—", mono: true, labelWidth: 70)
                 KeyValueRow(tr("Network", "Requests"), networkText, labelWidth: 70)
-                KeyValueRow(label: tr("Policy", "Requests"), labelWidth: 70) {
-                    PolicyChip(policyPath: record.policyPath)
+                if record.policyPath.isEmpty {
+                    KeyValueRow(tr("Policy", "Requests"), "—", labelWidth: 70)
+                } else {
+                    KeyValueRow(label: tr("Policy", "Requests"), labelWidth: 70) {
+                        PolicyChip(policyPath: record.policyPath)
+                    }
                 }
                 KeyValueRow(tr("Rule", "Requests"), record.rule ?? "—", mono: true, labelWidth: 70)
                 KeyValueRow(tr("Local", "Requests"), record.localAddress ?? "—", mono: true, labelWidth: 70)

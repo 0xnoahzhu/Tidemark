@@ -177,22 +177,30 @@ struct RequestsSizeCell: View {
     }
 }
 
-/// A policy chip that hugs its text and truncates inside narrow table columns.
+/// A policy chip that hugs its text and truncates inside narrow table columns. A row without a policy yet
+/// (written before Surge decided) shows a plain dash, like any other missing value.
 struct RequestsPolicyTag: View {
     var policyPath: [String]
 
     var body: some View {
-        let tint = Theme.tint(Theme.policyHue(policyPath))
-        Text(policyPath.isEmpty ? "—" : policyPath.joined(separator: " › "))
-            .font(.system(size: 11, weight: .medium))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .padding(.horizontal, 7)
-            .frame(height: 18)
-            .background(tint.background, in: .rect(cornerRadius: 5, style: .continuous))
-            .foregroundStyle(tint.foreground)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .help(policyPath.joined(separator: " › "))
+        if policyPath.isEmpty {
+            Text(verbatim: "—")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.ink3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            let tint = Theme.tint(Theme.policyHue(policyPath))
+            Text(policyPath.joined(separator: " › "))
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.horizontal, 7)
+                .frame(height: 18)
+                .background(tint.background, in: .rect(cornerRadius: 5, style: .continuous))
+                .foregroundStyle(tint.foreground)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(policyPath.joined(separator: " › "))
+        }
     }
 }
 
