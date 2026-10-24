@@ -122,6 +122,8 @@ struct CaptureMappingTests {
         #expect(CaptureRecordMapper.hostAndPort(remoteHost: nil, url: "http://[2001:db8::2]:8080/x") == ("2001:db8::2", 8080))
         #expect(CaptureRecordMapper.hostAndPort(remoteHost: "", url: "api.github.com:443") == ("api.github.com", 443))
         #expect(CaptureRecordMapper.hostAndPort(remoteHost: "API.GitHub.com:443", url: nil) == ("api.github.com", 443))
+        // Plain HTTP through Surge's proxy: `remoteHost` has no port.
+        #expect(CaptureRecordMapper.hostAndPort(remoteHost: "example.com", url: "http://example.com/") == ("example.com", 80))
     }
 
     @Test func formatsLocalAddresses() {

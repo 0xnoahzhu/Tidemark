@@ -46,11 +46,15 @@ enum CaptureRecordMapper {
 
     // MARK: Fields
 
-    /// Host (lowercased, without brackets) and port from `remoteHost`, falling back to the URL.
+    /// Host (lowercased, without brackets) and port from `remoteHost`, falling back to the URL (plain HTTP
+    /// requests report `remoteHost` without a port).
     static func hostAndPort(remoteHost: String?, url: String?) -> (host: String, port: Int?) {
         if let remoteHost = nonEmpty(remoteHost) {
             let (host, port) = HostName.splitHostPort(remoteHost)
-            if !host.isEmpty { return (host.lowercased(), port) }
+            if !host.isEmpty {
+                let bare = host.hasPrefix("[") && host.hasSuffix("]") ? String(host.dropFirst().dropLast()) : host
+                return (bare.lowercased(), port ?? (url.map { hostAndPort(remoteHost: nil, url: $0).port } ?? nil))
+            }
         }
         guard let url = nonEmpty(url) else { return ("", nil) }
         if url.contains("://"), let components = URLComponents(string: url), let host = components.host, !host.isEmpty {
