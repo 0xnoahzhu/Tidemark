@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 import Observation
 import os
@@ -6,10 +7,10 @@ import os
 /// Records every request Surge handles into PostgreSQL, rolls requests up to monitored apps and alerts on
 /// first contact. Implements `CaptureActions` for the UI.
 ///
-/// The engine owns the connection lifecycles (Surge stream with reconnect and backfill, PostgreSQL with
-/// reconnect and spool replay), the periodic jobs (stats, devices, retention, polling other Macs) and
-/// the main-actor state. Request processing happens off the main actor in `CapturePipeline`; the engine
-/// drains its coalesced changes four times a second.
+/// The engine owns the connection lifecycles (Surge stream with reconnect, backfill, session tracking and a
+/// liveness watchdog; PostgreSQL with reconnect and spool replay), the periodic jobs (stats, devices,
+/// retention, shared state, polling other Macs) and the main-actor state. Request processing happens off
+/// the main actor in `CapturePipeline`; the engine drains its coalesced changes four times a second.
 @MainActor
 final class CaptureEngine {
     let model: AppModel
@@ -25,31 +26,55 @@ final class CaptureEngine {
 
     /// Receives Surge signals (policy switches, reloads, restarts, wake) to schedule egress checks.
     weak var egress: EgressMonitor?
-    /// Builds a client when the surge-cli path or the remote controller changes. When nil the engine keeps
-    /// its client and only restarts the stream.
+    /// Builds a client when the surge-cli path, the remote controller or its password changes. When nil the
+    /// engine keeps its client and only restarts the stream.
     var makeSurgeClient: ((SurgeEndpoint) -> any SurgeClient)?
-    /// Builds a database when the connection URL changes. When nil the engine reconnects its instance.
-    var makeDatabase: ((Preferences) -> any TidemarkDatabase)?
+    /// Builds a database for a connection URL (password included). Used when the URL or the Keychain
+    /// password changes, and for testing new settings. When nil the engine reconnects its instance.
+    var makeDatabase: ((String) -> any TidemarkDatabase)?
+    /// Called on the main actor after the engine switched to a new database (services that read it follow).
+    var databaseChanged: ((any TidemarkDatabase) -> Void)?
+    /// Releases a database the engine no longer uses (closes its connection pool).
+    var retireDatabase: (@Sendable (any TidemarkDatabase) async -> Void)?
+    /// The PostgreSQL URL (Keychain password included) the settings describe. Read only when `makeDatabase`
+    /// is set; tests replace it so they never touch the Keychain.
+    var settingsDatabaseURL: @MainActor () -> String
 
     static let log = Logger(subsystem: "io.tidemark.Tidemark", category: "capture")
+
+    /// Nothing from the watch stream for this long (Surge sends a speed event every second) restarts it.
+    let streamSilenceLimit: TimeInterval = 15
+    /// Explaining a host may delay its notification by at most this much.
+    let explanationTimeout: Duration = .milliseconds(1500)
 
     private var started = false
     private var jobs: [String: Task<Void, Never>] = [:]
     private var streamTask: Task<Void, Never>?
+    private var streamConnectedAt: Date?
     private var databaseTask: Task<Void, Never>?
     private var pipelineTask: Task<Void, Never>?
+    private var surgeSettingsTask: Task<Void, Never>?
     private var scopeObservation: ObservationTracking.Token?
     private var preferencesObservation: ObservationTracking.Token?
     private var workspaceTokens: [NotificationCenter.ObservationToken] = []
 
     private var rateMeter = CaptureRateMeter()
     private var surgeStartTime: Double?
+    private var lastEnvironment: SurgeEnvironment?
     private var observedScope: DeviceScope = .all
     private var observedPreferences: PreferenceValues?
+    /// Device the pipeline currently writes under.
+    private var appliedRecordingDevice: DeviceID
+    /// SHA-256 of the connection URL (password included) the current database was built with; nil when unknown.
+    private(set) var databaseFingerprint: String?
+    private var reconnectAttempt = 0
+    /// Last time a write failed after the connection had been established.
+    private var lastWriteFailureAt: Date?
     private var todayStart = Calendar.current.startOfDay(for: .now)
     private var totalBase: Int64 = 0
     private var writtenSinceEstimate: Int64 = 0
     private var lastAlertID: Int64 = 0
+    private var notifiedAlerts: Set<Int64> = []
     private var liveCursor = Date.now.addingTimeInterval(-60)
 
     /// Preferences the engine reacts to.
@@ -82,7 +107,8 @@ final class CaptureEngine {
         processes: any ProcessInspecting,
         classifier: any SiteClassifying,
         probeRegistry: ProbeRegistry = ProbeRegistry(),
-        spool: CaptureSpool? = nil
+        spool: CaptureSpool? = nil,
+        contactGrace: TimeInterval = 2.5
     ) {
         self.model = model
         self.surge = surge
@@ -91,6 +117,8 @@ final class CaptureEngine {
         self.classifier = classifier
         self.probeRegistry = probeRegistry
         let preferences = model.preferences
+        appliedRecordingDevice = CaptureDeviceInfo.recordingDeviceID(preferences)
+        settingsDatabaseURL = { preferences.databaseURLWithPassword }
         pipeline = CapturePipeline(
             settings: Self.settings(preferences, surge: surge),
             database: database,
@@ -98,7 +126,8 @@ final class CaptureEngine {
             processes: processes,
             classifier: classifier,
             probes: probeRegistry,
-            spool: spool ?? CaptureSpool(limit: preferences.spoolLimit)
+            spool: spool ?? CaptureSpool(limit: preferences.spoolLimit),
+            contactGrace: contactGrace
         )
     }
 
@@ -116,10 +145,24 @@ final class CaptureEngine {
         )
     }
 
+    /// Records which connection URL (password included) the current database was built with, so a later
+    /// change of the URL or of the Keychain password rebuilds it.
+    func adoptDatabaseURL(_ url: String) {
+        databaseFingerprint = Self.fingerprint(url)
+    }
+
+    static func fingerprint(_ secret: String) -> String {
+        SHA256.hash(data: Data(secret.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Surge's `start-time` (seconds) as the session key (milliseconds).
+    static func sessionKey(_ startTime: Double) -> Int64 { Int64((startTime * 1000).rounded()) }
+
     // MARK: Lifecycle
 
     /// Connects PostgreSQL (migrating it) and loads the shared state, then subscribes to Surge and starts
-    /// the periodic jobs. Recording always starts on.
+    /// the periodic jobs. Recording always starts on. Without a database the shared state saved by the
+    /// last run is used, so attribution and first contact keep working.
     func start() {
         guard !started else { return }
         started = true
@@ -141,13 +184,14 @@ final class CaptureEngine {
         databaseTask = Task { [weak self] in
             guard let self else { return }
             let connected = await self.connectDatabase()
+            if !connected { await self.restoreSavedState() }
             self.startStream()
             if !connected { self.scheduleDatabaseReconnect() }
         }
     }
 
     /// Stops every job and writes what is buffered. The final flush is shielded from cancellation so a
-    /// terminating app still gets its rows out (or onto the spool).
+    /// terminating app still gets its rows out (or onto the spool) within a few seconds.
     func stop() async {
         guard started else { return }
         started = false
@@ -162,7 +206,7 @@ final class CaptureEngine {
         let pipeline = self.pipeline
         // macOS 27: the final flush runs to completion even when the calling task was cancelled.
         await withTaskCancellationShield {
-            await pipeline.flushAll()
+            await pipeline.flushAll(final: true)
         }
         pipelineTask?.cancel()
     }
@@ -190,31 +234,55 @@ final class CaptureEngine {
         return true
     }
 
-    /// Retries the connection with exponential backoff (1 s … 60 s) until it succeeds.
+    /// Retries the connection with exponential backoff (1 s … 60 s) until it succeeds. The backoff keeps
+    /// growing across failures until a write succeeds, so a server that accepts connections but refuses
+    /// writes is not hammered.
     func scheduleDatabaseReconnect() {
         databaseTask?.cancel()
         databaseTask = Task { [weak self] in
-            var attempt = 0
             while !Task.isCancelled {
-                attempt += 1
-                try? await Task.sleep(for: .seconds(Self.backoff(attempt)))
-                guard !Task.isCancelled, let self else { return }
+                guard let self else { return }
+                self.reconnectAttempt += 1
+                try? await Task.sleep(for: .seconds(Self.backoff(self.reconnectAttempt)))
+                guard !Task.isCancelled else { return }
                 if await self.connectDatabase() { return }
             }
         }
     }
 
-    private func reconnectDatabase(replacing: Bool) {
+    /// Reconnects PostgreSQL; rebuilds the client first when the URL or the Keychain password changed.
+    /// Without `force` nothing happens unless something changed.
+    func applyDatabaseSettings(force: Bool) {
+        let replacement = changedDatabaseURL()
+        guard replacement != nil || force else { return }
+        reconnectDatabase(replacingWith: replacement)
+    }
+
+    /// The settings' URL when it (or its Keychain password) differs from the live connection's.
+    func changedDatabaseURL() -> (url: String, fingerprint: String)? {
+        guard makeDatabase != nil else { return nil }
+        let url = settingsDatabaseURL()
+        let fingerprint = Self.fingerprint(url)
+        return fingerprint == databaseFingerprint ? nil : (url, fingerprint)
+    }
+
+    private func reconnectDatabase(replacingWith replacement: (url: String, fingerprint: String)?) {
         databaseTask?.cancel()
+        reconnectAttempt = 0
         databaseTask = Task { [weak self] in
             guard let self else { return }
-            if replacing, let make = self.makeDatabase {
-                let database = make(self.model.preferences)
+            // Rows are spooled until the (new) connection is up.
+            await self.pipeline.setDatabaseOnline(false)
+            if let replacement, let make = self.makeDatabase {
+                let old = self.database
+                let database = make(replacement.url)
                 self.database = database
                 self.model.database = database
+                self.databaseFingerprint = replacement.fingerprint
+                self.databaseChanged?(database)
                 await self.pipeline.setServices(surge: self.surge, database: database)
+                if let retire = self.retireDatabase { Task.detached { await retire(old) } }
             }
-            await self.pipeline.setDatabaseOnline(false)
             if !(await self.connectDatabase()) { self.scheduleDatabaseReconnect() }
         }
     }
@@ -224,8 +292,7 @@ final class CaptureEngine {
         await registerDevices()
         do {
             let apps = try await database.apps()
-            model.catalog.apps = apps
-            await pushApps()
+            await applyCatalog(apps)
         } catch {
             Self.log.error("Loading apps failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -240,8 +307,9 @@ final class CaptureEngine {
         } catch {
             Self.log.error("Loading inventory failed: \(error.localizedDescription, privacy: .public)")
         }
-        if let newest = try? await database.alerts(filter: .all, appID: nil, scope: .all, limit: 1).first {
-            lastAlertID = max(lastAlertID, newest.id)
+        // The highest ID, not the newest by (client) time: Macs' clocks differ.
+        if let recent = try? await database.alerts(filter: .all, appID: nil, scope: .all, limit: 200), let newest = recent.map(\.id).max() {
+            lastAlertID = max(lastAlertID, newest)
         }
         await reloadScoped()
         if let sessions = try? await database.probeSessions(limit: 100) {
@@ -250,6 +318,30 @@ final class CaptureEngine {
         }
         await refreshTotal()
         await refreshToday()
+    }
+
+    /// The apps, mutes and inventory saved by the last run, when PostgreSQL is unreachable at launch.
+    private func restoreSavedState() async {
+        guard model.catalog.apps.isEmpty, let snapshot = await pipeline.restoreSnapshot() else { return }
+        Self.log.info("PostgreSQL is unreachable; using the shared state saved \(snapshot.savedAt, privacy: .public)")
+        model.catalog.apps = snapshot.apps
+        model.alerts.mutes = snapshot.mutes
+        await pushApps()
+    }
+
+    /// Replaces the app list, purging apps another Mac deleted from everything queued.
+    private func applyCatalog(_ apps: [MonitoredApp]) async {
+        let removed = Set(model.catalog.apps.map(\.id)).subtracting(apps.map(\.id))
+        if apps != model.catalog.apps { model.catalog.apps = apps }
+        await pushApps()
+        for id in removed {
+            model.catalog.paused.remove(id)
+            model.catalog.stats[id] = nil
+            model.catalog.installs[id] = nil
+            model.alerts.items.removeAll { $0.appID == id }
+            await pipeline.purgeApp(id)
+            if model.nav.page == .app(id) { model.nav.open(.requests) }
+        }
     }
 
     /// Upserts this Mac's row (and the remote Surge's row) and loads every device.
@@ -291,7 +383,17 @@ final class CaptureEngine {
     /// (Re)starts the subscription.
     func startStream() {
         streamTask?.cancel()
+        streamConnectedAt = nil
         streamTask = Task { [weak self] in await self?.runStream() }
+    }
+
+    /// Cancels the subscription and waits until it stopped delivering events.
+    func stopStream() async {
+        let task = streamTask
+        streamTask = nil
+        streamConnectedAt = nil
+        task?.cancel()
+        await task?.value
     }
 
     private func runStream() async {
@@ -300,31 +402,86 @@ final class CaptureEngine {
             model.live.surge = .connecting
             do {
                 let status = try await surge.status()
+                if Task.isCancelled { return }
                 let startTime = status.startTime ?? 0
-                if let previous = surgeStartTime, abs(previous - startTime) > 0.001 { egress?.note(.surgeRestarted) }
+                if let previous = surgeStartTime, abs(previous - startTime) > 0.001 {
+                    egress?.note(.surgeRestarted)
+                    // A restarted engine is compared from scratch, so the restart is not also logged as a policy switch.
+                    lastEnvironment = nil
+                }
                 surgeStartTime = startTime
-                await pipeline.beginSession(Int64((startTime * 1000).rounded()))
+                let epoch = await pipeline.beginSession(Self.sessionKey(startTime))
+                // A replaced run must not touch the state of the run that replaced it.
+                if Task.isCancelled { return }
                 let stream = surge.events()
                 model.live.surge = .connected(detail: tr("watching requests", "Capture"))
                 model.live.surgeDetail = surge.endpoint.remote == nil
                     ? tr("Found · controller connected · streaming", "Capture")
                     : tr("Remote · controller connected · streaming", "Capture")
+                streamConnectedAt = .now
                 attempt = 0
                 let backfill = Task { [surge, pipeline] in
-                    if let recent = try? await surge.recentRequests() { await pipeline.ingestBackfill(recent) }
+                    let fetchedAt = Date.now
+                    async let recent = try? surge.recentRequests()
+                    async let active = try? surge.activeRequests()
+                    let (recentRequests, activeRequests) = await (recent, active)
+                    guard !Task.isCancelled else { return }
+                    await pipeline.ingestBackfill((recentRequests ?? []) + (activeRequests ?? []), epoch: epoch)
+                    // Requests that ended while the stream was away get no completion event.
+                    if let activeRequests {
+                        await pipeline.reconcileActive(Set(activeRequests.map(\.id)), fetchedAt: fetchedAt, epoch: epoch)
+                    }
                 }
                 defer { backfill.cancel() }
                 try await pipeline.consume(stream)
                 if Task.isCancelled { return }
+                streamConnectedAt = nil
                 model.live.surge = .failed(message: tr("Surge stopped streaming", "Capture"))
             } catch {
                 if Task.isCancelled { return }
+                streamConnectedAt = nil
                 model.live.surge = .failed(message: Self.message(for: error))
                 model.live.surgeDetail = Self.message(for: error)
             }
             guard model.preferences.surgeReconnect else { return }
             attempt += 1
             try? await Task.sleep(for: .seconds(Self.backoff(attempt)))
+        }
+    }
+
+    /// Re-reads Surge's start time: a restarted engine (that kept the watch alive) restarts the stream so the
+    /// new session begins before recycled request IDs are recorded; the same session releases held events.
+    func checkSurgeSession() async {
+        guard streamTask != nil, streamConnectedAt != nil, let current = surgeStartTime else { return }
+        let surge = self.surge
+        guard let status = try? await CaptureTimeout.unstructured(.seconds(10), { try await surge.status() }),
+              let startTime = status.startTime, streamTask != nil else { return }
+        if abs(startTime - current) > 0.001 {
+            Self.log.info("Surge's engine restarted; reconnecting the stream")
+            startStream()
+        } else {
+            await pipeline.confirmSession(Self.sessionKey(startTime))
+        }
+    }
+
+    /// Surge sends a speed event every second while subscribed: silence means the stream is stale.
+    func checkStreamLiveness(now: Date = .now) async {
+        guard streamTask != nil, let connectedAt = streamConnectedAt, model.live.surge.isHealthy else { return }
+        let last = max(await pipeline.lastStreamEventAt ?? connectedAt, connectedAt)
+        guard now.timeIntervalSince(last) > streamSilenceLimit, streamConnectedAt == connectedAt else { return }
+        Self.log.error("No events from Surge for \(Int(now.timeIntervalSince(last))) s; restarting the stream")
+        startStream()
+    }
+
+    /// Backstop for missed `environment` events: a changed outbound mode, global policy or group selection
+    /// schedules an egress check.
+    func pollEnvironment() async {
+        guard model.live.surge.isHealthy else { return }
+        let surge = self.surge
+        guard let environment = try? await CaptureTimeout.unstructured(.seconds(10), { try await surge.environment() }) else { return }
+        defer { lastEnvironment = environment }
+        if let previous = lastEnvironment, previous != environment {
+            egress?.note(.policyChanged)
         }
     }
 
@@ -370,16 +527,16 @@ final class CaptureEngine {
 
     private func preferencesChanged(from old: PreferenceValues, to new: PreferenceValues) {
         if old.cliPath != new.cliPath || old.remote != new.remote {
-            debounce("surge-settings", .milliseconds(1500)) { await $0.applySurgeSettings() }
+            debounce("surge-settings", .milliseconds(1500)) { $0.scheduleSurgeSettings(restartStream: false) }
         } else if old.remoteTag != new.remoteTag {
             debounce("remote-tag", .milliseconds(1500)) { await $0.registerDevices() }
         }
         if old.databaseURL != new.databaseURL {
-            debounce("database-url", .milliseconds(1500)) { $0.reconnectDatabase(replacing: true) }
+            debounce("database-url", .milliseconds(1500)) { $0.applyDatabaseSettings(force: false) }
         }
         if old.batchRows != new.batchRows || old.batchInterval != new.batchInterval {
-            let settings = Self.settings(model.preferences, surge: surge)
-            Task { await pipeline.update(settings: settings) }
+            let rows = new.batchRows, interval = new.batchInterval
+            Task { await pipeline.setBatching(rows: rows, interval: interval) }
         }
         if old.spoolLimit != new.spoolLimit {
             let limit = new.spoolLimit
@@ -390,18 +547,39 @@ final class CaptureEngine {
         }
     }
 
-    /// A new surge-cli path or remote controller: rebuild the client, switch the device rows are written
-    /// under, and restart the stream.
-    private func applySurgeSettings() async {
-        if let make = makeSurgeClient {
-            let client = make(model.preferences.surgeEndpoint)
-            surge = client
-            model.surge = client
-            await pipeline.setServices(surge: client, database: database)
+    /// Applies Surge settings after any earlier application finished (they must not interleave).
+    func scheduleSurgeSettings(restartStream: Bool) {
+        let previous = surgeSettingsTask
+        surgeSettingsTask = Task { [weak self] in
+            await previous?.value
+            await self?.applySurgeSettings(restartStream: restartStream)
         }
-        await pipeline.update(settings: Self.settings(model.preferences, surge: surge))
-        surgeStartTime = nil
-        await registerDevices()
+    }
+
+    /// A new surge-cli path, remote controller or remote password rebuilds the client; a new recording
+    /// device (local ↔ remote) switches the rows' device. The old stream is stopped and its requests written
+    /// first, so nothing it still delivers lands under the new device. Without changes, `restartStream`
+    /// only reconnects the stream.
+    private func applySurgeSettings(restartStream: Bool) async {
+        let endpoint = model.preferences.surgeEndpoint
+        let device = recordingDeviceID
+        let clientChanged = makeSurgeClient != nil && endpoint != surge.endpoint
+        let deviceChanged = device != appliedRecordingDevice
+        guard clientChanged || deviceChanged || restartStream else { return }
+        if clientChanged || deviceChanged {
+            await stopStream()
+            if clientChanged, let make = makeSurgeClient {
+                let client = make(endpoint)
+                surge = client
+                model.surge = client
+                lastEnvironment = nil
+            }
+            appliedRecordingDevice = device
+            await registerDevices()
+            await pipeline.setServices(surge: surge, database: database)
+            await pipeline.update(settings: Self.settings(model.preferences, surge: surge))
+            surgeStartTime = nil
+        }
         startStream()
     }
 
@@ -409,6 +587,9 @@ final class CaptureEngine {
 
     private func startJobs() {
         every("ui", .milliseconds(250)) { await $0.drainPipeline() }
+        every("watchdog", .seconds(5), delay: .seconds(5)) { await $0.checkStreamLiveness() }
+        every("session", .seconds(30), delay: .seconds(30)) { await $0.checkSurgeSession() }
+        every("environment", .seconds(60), delay: .seconds(10)) { await $0.pollEnvironment() }
         every("other-macs-rows", .seconds(2), delay: .seconds(2)) { await $0.pollOtherMacRows() }
         every("other-macs-alerts", .seconds(10), delay: .seconds(10)) { await $0.pollOtherMacAlerts() }
         every("ping", .seconds(15), delay: .seconds(15)) { await $0.ping() }
@@ -418,6 +599,8 @@ final class CaptureEngine {
             await engine.refreshToday()
         }
         every("dns", .seconds(30), delay: .seconds(5)) { await $0.pipeline.refreshDNSCache() }
+        every("shared", .seconds(60), delay: .seconds(60)) { await $0.refreshSharedState() }
+        every("inventory", .seconds(300), delay: .seconds(300)) { await $0.mergeInventory() }
         every("total", .seconds(60), delay: .seconds(60)) { await $0.refreshTotal() }
         every("installs", .seconds(300), delay: .seconds(300)) { await $0.updateInstalls(force: false) }
         every("retention", .seconds(3600), delay: .seconds(120)) { await $0.applyRetention() }
@@ -475,7 +658,13 @@ final class CaptureEngine {
             live.writtenThisSession += Int64(update.rowsWritten)
             live.totalRows = totalBase + writtenSinceEstimate
         }
-        if let written = update.lastWriteAt, live.lastWriteAt != written { live.lastWriteAt = written }
+        var wrote = false
+        if let written = update.lastWriteAt, live.lastWriteAt != written {
+            live.lastWriteAt = written
+            wrote = true
+            reconnectAttempt = 0
+        }
+        if wrote || update.rowsWritten > 0 { touchRecordingDevice(lastWriteAt: update.lastWriteAt, inserted: Int64(update.rowsWritten)) }
         if live.bufferedRows != update.bufferedRows { live.bufferedRows = update.bufferedRows }
         if let speed = update.speed {
             live.downloadSpeed = speed.in
@@ -486,34 +675,97 @@ final class CaptureEngine {
         if !update.inventoryChanged.isEmpty {
             debounce("stats-after-inventory", .seconds(2)) { await $0.refreshStats() }
         }
+        if update.lostInventoryRace {
+            debounce("inventory-merge", .seconds(5)) { await $0.mergeInventory() }
+        }
         for signal in update.signals {
             switch signal {
-            case .environmentChanged: egress?.note(.policyChanged)
-            case .reload: egress?.note(.profileReloaded)
-            case .shutdown: live.surge = .failed(message: tr("Surge is shutting down", "Capture"))
+            case .environmentChanged:
+                egress?.note(.policyChanged)
+                debounce("environment-snapshot", .seconds(1)) { engine in
+                    let surge = engine.surge
+                    if let environment = try? await surge.environment() { engine.lastEnvironment = environment }
+                }
+            case .reload:
+                egress?.note(.profileReloaded)
+                scheduleSessionCheck()
+            case .shutdown:
+                live.surge = .failed(message: tr("Surge is shutting down", "Capture"))
+            case .sessionCheck:
+                scheduleSessionCheck()
             }
         }
         if let failure = update.databaseFailure {
             live.database = .failed(message: failure)
+            lastWriteFailureAt = now
             scheduleDatabaseReconnect()
         }
     }
 
+    private func scheduleSessionCheck() {
+        debounce("session-check", .milliseconds(300)) { await $0.checkSurgeSession() }
+    }
+
+    /// Keeps the recording device's row ("Writing now", row count) current between device refreshes.
+    private func touchRecordingDevice(lastWriteAt: Date?, inserted: Int64) {
+        let id = recordingDeviceID
+        guard let index = model.devices.devices.firstIndex(where: { $0.id == id }) else { return }
+        var device = model.devices.devices[index]
+        if let lastWriteAt, device.lastWriteAt.map({ $0 < lastWriteAt }) ?? true { device.lastWriteAt = lastWriteAt }
+        device.rowCount += inserted
+        if device != model.devices.devices[index] { model.devices.devices[index] = device }
+    }
+
     /// New alerts: into the Notifications list (when the scope shows their Mac) and as system notifications.
+    /// Alerts from other Macs are skipped when their host is muted or their app is archived (or gone) here.
     private func receive(_ alerts: [AlertItem], fromOtherMac: Bool) {
         let preferences = model.preferences
         for alert in alerts.sorted(by: { $0.id < $1.id }) {
+            if fromOtherMac {
+                guard let app = model.catalog.app(alert.appID), !app.isArchived else { continue }
+                let muted = model.alerts.isMuted(alert.value) || (alert.host.map { model.alerts.isMuted($0) } ?? false)
+                guard !muted else { continue }
+            }
             if model.devices.scope.includes(alert.deviceID), !model.alerts.items.contains(where: { $0.id == alert.id }) {
                 model.alerts.items.insert(alert, at: 0)
                 if alert.isUnread { model.alerts.unreadCount += 1 }
             }
             guard preferences.systemNotifications, !fromOtherMac || preferences.notifyOtherMacs else { continue }
             guard alert.kind == .domain ? preferences.notifyNewDomain : preferences.notifyNewIP else { continue }
+            guard !fromOtherMac || !model.catalog.paused.contains(alert.appID) else { continue }
+            guard notifiedAlerts.insert(alert.id).inserted else { continue }
+            if notifiedAlerts.count > 5_000 { notifiedAlerts = [alert.id] }
             let appName = model.catalog.app(alert.appID)?.name ?? tr("Unknown app", "Capture")
             let deviceName = fromOtherMac ? model.devices.device(alert.deviceID)?.name : nil
-            notifier.post(alert, appName: appName, deviceName: deviceName, groupBursts: preferences.groupBursts)
+            notifier.post(alert, appName: appName, deviceName: deviceName, groupBursts: preferences.groupBursts,
+                          explanation: explanation(for: alert, appName: appName))
         }
         if model.alerts.items.count > 500 { model.alerts.items.removeLast(model.alerts.items.count - 500) }
+    }
+
+    /// With Settings › Notifications › Explain hosts on: a line from the on-device model about the alert's host,
+    /// from the cache when possible, never waiting longer than `explanationTimeout`.
+    func explanation(for alert: AlertItem, appName: String) -> (@MainActor () async -> String?)? {
+        guard model.preferences.notifyExplainHosts else { return nil }
+        let host: String
+        switch alert.kind {
+        case .domain: host = alert.value
+        case .ip:
+            guard let name = alert.host, !name.isEmpty else { return nil }
+            host = name
+        }
+        let context = HostContext(host: host, appName: appName, processName: alert.processName, port: nil,
+                                  ips: alert.ip.map { [$0] } ?? [], geo: alert.geo, policy: nil, firstSeen: alert.createdAt, requestCount: nil)
+        let model = self.model
+        let timeout = explanationTimeout
+        return {
+            let insight = await CaptureTimeout.value(within: timeout) { @MainActor () async -> HostInsight? in
+                if let cached = await model.insights.cachedInsight(for: host) { return cached }
+                guard model.insights.isAvailable else { return nil }
+                return try? await model.insights.insight(for: context)
+            }
+            return insight.flatMap(CaptureAlertText.insightLine)
+        }
     }
 
     /// "View" on a notification: the app's Domains & IPs tab, alerts marked read.
@@ -533,6 +785,8 @@ final class CaptureEngine {
         do {
             let result = try await database.ping()
             model.live.lastRoundTrip = result.roundTrip
+            // A healthy connection with no recent write failure starts the next outage's backoff afresh.
+            if lastWriteFailureAt.map({ Date.now.timeIntervalSince($0) > 120 }) ?? true { reconnectAttempt = 0 }
             if model.live.serverVersion != result.serverVersion { model.live.serverVersion = result.serverVersion }
         } catch {
             model.live.database = .failed(message: Self.message(for: error))
@@ -562,8 +816,34 @@ final class CaptureEngine {
         if stats != model.catalog.stats { model.catalog.stats = stats }
     }
 
+    /// Apps and mutes changed on other Macs (added, archived, deleted, muted).
+    func refreshSharedState() async {
+        guard databaseReady else { return }
+        if let apps = try? await database.apps(), apps != model.catalog.apps { await applyCatalog(apps) }
+        if let mutes = try? await database.mutes(), Set(mutes) != Set(model.alerts.mutes) {
+            model.alerts.mutes = mutes
+            await pipeline.setMutes(mutes)
+        }
+    }
+
+    /// Inventory entries other Macs recorded since the last load.
+    private func mergeInventory() async {
+        guard databaseReady else { return }
+        do {
+            try await pipeline.mergeKnownHosts()
+        } catch {
+            Self.log.error("Refreshing the inventory failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     private func refreshDevices() async {
-        guard databaseReady, let devices = try? await database.devices() else { return }
+        guard databaseReady, var devices = try? await database.devices() else { return }
+        // This Mac's own writes are newer than the table's last refresh.
+        let id = recordingDeviceID
+        if let index = devices.firstIndex(where: { $0.id == id }), let written = model.live.lastWriteAt,
+           devices[index].lastWriteAt.map({ $0 < written }) ?? true {
+            devices[index].lastWriteAt = written
+        }
         if devices != model.devices.devices { model.devices.devices = devices }
     }
 
@@ -583,7 +863,8 @@ final class CaptureEngine {
         model.live.totalRows = estimate
     }
 
-    /// Rows other Macs wrote, merged into the live table while the scope includes them.
+    /// Rows other Macs wrote, merged into the live table while the scope includes them. Polls with a small
+    /// overlap: a row committed late can carry an `updated_at` just before the previous cursor.
     private func pollOtherMacRows() async {
         guard databaseReady, model.devices.devices.count > 1 else { return }
         let me = recordingDeviceID
@@ -596,15 +877,17 @@ final class CaptureEngine {
             liveCursor = .now
             return
         }
-        guard let rows = try? await database.requestsWritten(after: liveCursor, excluding: me, limit: 300), !rows.isEmpty else { return }
-        liveCursor = rows.compactMap(\.writtenAt).max() ?? liveCursor
+        guard let rows = try? await database.requestsWritten(after: liveCursor.addingTimeInterval(-3), excluding: me, limit: 300),
+              !rows.isEmpty else { return }
+        liveCursor = max(liveCursor, rows.compactMap(\.writtenAt).max() ?? liveCursor)
         model.live.upsert(rows.filter { scope.includes($0.deviceID) })
     }
 
-    /// Alerts other Macs wrote since the last poll.
-    private func pollOtherMacAlerts() async {
+    /// Alerts other Macs wrote since the last poll. Apps this Mac doesn't know yet are loaded first.
+    func pollOtherMacAlerts() async {
         guard databaseReady, let alerts = try? await database.alerts(after: lastAlertID, excluding: recordingDeviceID), !alerts.isEmpty else { return }
         lastAlertID = max(lastAlertID, alerts.map(\.id).max() ?? lastAlertID)
+        if alerts.contains(where: { model.catalog.app($0.appID) == nil }) { await refreshSharedState() }
         receive(alerts, fromOtherMac: true)
     }
 

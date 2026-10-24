@@ -83,6 +83,51 @@ struct CaptureWriteBufferTests {
         #expect(batch.chains.map { $0.chain[0].name } == ["a", "b"])
     }
 
+    @Test func purgesADeletedApp() {
+        var buffer = CaptureWriteBuffer(batchRows: 10, batchInterval: 1, now: start)
+        let app = UUID()
+        var linked = row(1)
+        linked.appID = app
+        linked.isNew = true
+        buffer.add(request: linked)
+        buffer.add(chain: [ProcessLink(name: "node", pid: 1, path: nil, startTime: start)], appID: app)
+        let host = AppHost(appID: app, kind: .domain, value: "a.com", site: "a.com", firstSeen: start, lastSeen: start, requestCount: 1,
+                           processName: "node", policy: nil, geo: nil, isDirect: false, hosts: [])
+        let draft = CaptureAlertDraft(appID: app, kind: .domain, scope: .site, value: "a.com", site: "a.com", host: "a.com", ip: nil, geo: nil,
+                                      processName: "node", isDirect: false, requestKey: linked.key)
+        buffer.add(CaptureFirstContact(hosts: [host], touches: [host], alert: draft))
+        buffer.add(source: HostSourceTouch(kind: .domain, value: "a.com", deviceID: device, sourcePath: "/x", sourceTitle: "x", appID: app,
+                                           bundlePath: nil, seenAt: start, requestDelta: 1, geo: nil))
+
+        buffer.purge(appID: app)
+        let batch = buffer.takeAll(now: start)
+        #expect(batch.requests.first?.appID == nil && batch.requests.first?.isNew == false)
+        #expect(batch.chains.first?.appID == nil)
+        #expect(batch.newHosts.isEmpty && batch.drafts.isEmpty && batch.touches.isEmpty)
+        #expect(batch.sources.count == 1 && batch.sources[0].appID == nil)
+    }
+
+    @Test func capsInventoryEntriesTogetherWithTheirDrafts() {
+        var buffer = CaptureWriteBuffer(batchRows: 10, batchInterval: 1, auxiliaryLimit: 3, now: start)
+        let app = UUID()
+        func contact(_ host: String) -> CaptureFirstContact {
+            let key = RequestKey(deviceID: device, session: 1, surgeID: 1)
+            let domain = AppHost(appID: app, kind: .domain, value: host, site: host, firstSeen: start, lastSeen: start, requestCount: 1,
+                                 processName: "p", policy: nil, geo: nil, isDirect: false, hosts: [])
+            var ip = domain
+            ip.kind = .ip
+            ip.value = "10.0.0.1"
+            let draft = CaptureAlertDraft(appID: app, kind: .domain, scope: .site, value: host, site: host, host: host, ip: nil, geo: nil,
+                                          processName: "p", isDirect: false, requestKey: key)
+            return CaptureFirstContact(hosts: [domain, ip], touches: [], alert: draft)
+        }
+        buffer.add(contact("a.com"))
+        buffer.add(contact("b.com"))
+        let batch = buffer.takeAll(now: start)
+        #expect(batch.newHosts.count == 2)
+        #expect(batch.drafts.map(\.value) == ["a.com"], "no draft without its entries")
+    }
+
     @Test func capsAuxiliaryQueues() {
         var buffer = CaptureWriteBuffer(batchRows: 10, batchInterval: 1, auxiliaryLimit: 2, now: start)
         for pid in 1...5 { buffer.add(chain: [ProcessLink(name: "p", pid: Int32(pid), path: nil, startTime: start)], appID: nil) }

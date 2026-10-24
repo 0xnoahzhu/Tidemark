@@ -10,15 +10,12 @@ extension CaptureEngine: CaptureActions {
         Task { await pipeline.setRecording(on) }
     }
 
+    /// Reconnects Surge and PostgreSQL with the current settings. A changed surge-cli path, remote controller
+    /// or remote password rebuilds the Surge client; a changed database URL or Keychain password rebuilds the
+    /// PostgreSQL client.
     func reconnect() {
-        startStream()
-        scheduleDatabaseReconnectNow()
-    }
-
-    private func scheduleDatabaseReconnectNow() {
-        Task {
-            if !(await connectDatabase()) { scheduleDatabaseReconnect() }
-        }
+        scheduleSurgeSettings(restartStream: true)
+        applyDatabaseSettings(force: true)
     }
 
     // MARK: Apps
@@ -41,6 +38,8 @@ extension CaptureEngine: CaptureActions {
         )
         try await database.insertApp(app)
         model.catalog.apps.append(app)
+        // Its inventory (rebuilt by the backfill) loads below; until then its requests are not judged new.
+        await pipeline.awaitInventory(for: app.id)
         await pushApps()
 
         let installed = FileManager.default.fileExists(atPath: bundlePath)
@@ -55,7 +54,11 @@ extension CaptureEngine: CaptureActions {
                 Self.log.error("Backfill failed: \(error.localizedDescription, privacy: .public)")
             }
         }
-        try? await pipeline.loadKnownHosts()
+        do {
+            try await pipeline.loadKnownHosts()
+        } catch {
+            Self.log.error("Loading the new app's inventory failed: \(error.localizedDescription, privacy: .public)")
+        }
         await refreshCatalog()
         return app
     }
@@ -84,16 +87,26 @@ extension CaptureEngine: CaptureActions {
         try await updateApp(app)
     }
 
+    /// Deletes an app. Attribution to it stops and every queued write that references it is dropped or
+    /// unlinked before its row disappears, so no insert can hit the deleted row's foreign keys.
     func deleteApp(_ id: AppID) async throws {
-        try await database.deleteApp(id)
+        await pipeline.setApps(model.catalog.apps.filter { $0.id != id }, paused: model.catalog.paused)
+        await pipeline.purgeApp(id)
+        do {
+            try await database.deleteApp(id)
+        } catch {
+            await pushApps()
+            throw error
+        }
         model.catalog.apps.removeAll { $0.id == id }
         model.catalog.stats[id] = nil
         model.catalog.installs[id] = nil
         model.catalog.paused.remove(id)
         model.alerts.items.removeAll { $0.appID == id }
-        if let unread = try? await database.unreadAlertCount(scope: model.devices.scope) { model.alerts.unreadCount = unread }
-        await pipeline.forgetApp(id)
+        // Anything a flush in progress put back meanwhile.
+        await pipeline.purgeApp(id)
         await pushApps()
+        if let unread = try? await database.unreadAlertCount(scope: model.devices.scope) { model.alerts.unreadCount = unread }
         if model.nav.page == .app(id) { model.nav.open(.requests) }
     }
 
@@ -209,11 +222,23 @@ extension CaptureEngine: CaptureActions {
         }
     }
 
+    /// Tests the connection the current settings describe. When the URL or the Keychain password differs from
+    /// the live connection's, a throwaway client tests the new settings (the live one keeps recording).
     func testDatabaseConnection() async -> Result<String, Error> {
+        if let make = makeDatabase, let changed = changedDatabaseURL() {
+            let candidate = make(changed.url)
+            let result = await Self.test(candidate, connect: true)
+            if let retire = retireDatabase { await retire(candidate) }
+            return result
+        }
+        return await Self.test(database, connect: !model.live.database.isHealthy)
+    }
+
+    private static func test(_ database: any TidemarkDatabase, connect: Bool) async -> Result<String, Error> {
         do {
-            if !model.live.database.isHealthy { try await database.connect() }
+            if connect { try await database.connect() }
             let result = try await database.ping()
-            let ms = Self.milliseconds(result.roundTrip)
+            let ms = milliseconds(result.roundTrip)
             return .success(trf("Connected · PostgreSQL %@ · %lld ms", "Capture", result.serverVersion, Int(ms.rounded())))
         } catch {
             return .failure(error)

@@ -8,7 +8,7 @@ import Foundation
 /// without bound; requests go to the disk spool instead.
 struct CaptureWriteBuffer {
     /// A process chain to upsert, with the app its subtree belongs to.
-    struct ChainWrite: Hashable, Sendable {
+    struct ChainWrite: Hashable, Sendable, Codable {
         var chain: [ProcessLink]
         var appID: AppID?
     }
@@ -23,8 +23,11 @@ struct CaptureWriteBuffer {
         var sources: [HostSourceTouch] = []
         var alerts: [AlertItem] = []
 
-        var isEmpty: Bool {
-            chains.isEmpty && requests.isEmpty && newHosts.isEmpty && drafts.isEmpty && touches.isEmpty && sources.isEmpty && alerts.isEmpty
+        var isEmpty: Bool { requests.isEmpty && auxiliaryIsEmpty }
+
+        /// Nothing but request rows (or nothing at all).
+        var auxiliaryIsEmpty: Bool {
+            chains.isEmpty && newHosts.isEmpty && drafts.isEmpty && touches.isEmpty && sources.isEmpty && alerts.isEmpty
         }
     }
 
@@ -55,9 +58,17 @@ struct CaptureWriteBuffer {
     /// Request rows waiting to be written.
     var requestCount: Int { order.count }
 
-    var isEmpty: Bool {
-        order.isEmpty && chains.isEmpty && newHosts.isEmpty && drafts.isEmpty && alerts.isEmpty && touches.isEmpty && sources.isEmpty
+    var isEmpty: Bool { order.isEmpty && auxiliaryIsEmpty }
+
+    var auxiliaryIsEmpty: Bool {
+        chains.isEmpty && newHosts.isEmpty && drafts.isEmpty && alerts.isEmpty && touches.isEmpty && sources.isEmpty
     }
+
+    /// Inventory entries queued for insertion (still optimistic: not in the database yet).
+    var pendingNewHosts: [AppHost] { newHosts }
+
+    /// Request rows waiting to be written, oldest first (without taking them).
+    var queuedRequests: [RequestRecord] { order.compactMap { requests[$0] } }
 
     /// `true` when `batchRows` rows are waiting or `batchInterval` passed since the last flush.
     func shouldFlush(now: Date) -> Bool {
@@ -77,9 +88,13 @@ struct CaptureWriteBuffer {
         chains.append(ChainWrite(chain: chain, appID: appID))
     }
 
+    /// Queues a request's new inventory entries with their alert drafts. Entries and drafts are capped
+    /// together, so a draft is never queued without the entry whose insert decides it.
     mutating func add(_ contact: CaptureFirstContact) {
-        if newHosts.count < auxiliaryLimit { newHosts.append(contentsOf: contact.hosts) }
-        if let alert = contact.alert, drafts.count < auxiliaryLimit { drafts.append(alert) }
+        if !contact.hosts.isEmpty, newHosts.count + contact.hosts.count <= auxiliaryLimit {
+            newHosts.append(contentsOf: contact.hosts)
+            for draft in [contact.alert, contact.fallback].compactMap({ $0 }) { drafts.append(draft) }
+        }
         for touch in contact.touches { add(touch: touch) }
     }
 
@@ -125,9 +140,24 @@ struct CaptureWriteBuffer {
 
     /// Removes and returns everything queued, and restarts the interval.
     mutating func takeAll(now: Date) -> Batch {
+        var batch = takeAuxiliary()
+        batch.requests = takeRequests()
+        lastFlush = now
+        return batch
+    }
+
+    /// Removes and returns the queued request rows only (used to spool them while offline).
+    mutating func takeRequests() -> [RequestRecord] {
+        let rows = order.compactMap { requests[$0] }
+        requests.removeAll(keepingCapacity: true)
+        order.removeAll(keepingCapacity: true)
+        return rows
+    }
+
+    /// Removes and returns everything except request rows (kept on disk when Tidemark quits offline).
+    mutating func takeAuxiliary() -> Batch {
         var batch = Batch()
         batch.chains = chains
-        batch.requests = takeRequests()
         batch.newHosts = newHosts
         batch.drafts = drafts
         batch.alerts = alerts
@@ -141,16 +171,7 @@ struct CaptureWriteBuffer {
         touchOrder.removeAll()
         sources.removeAll()
         sourceOrder.removeAll()
-        lastFlush = now
         return batch
-    }
-
-    /// Removes and returns the queued request rows only (used to spool them while offline).
-    mutating func takeRequests() -> [RequestRecord] {
-        let rows = order.compactMap { requests[$0] }
-        requests.removeAll(keepingCapacity: true)
-        order.removeAll(keepingCapacity: true)
-        return rows
     }
 
     /// Marks the interval as restarted without taking anything (after spooling).
@@ -171,5 +192,24 @@ struct CaptureWriteBuffer {
         sources.removeAll()
         sourceOrder.removeAll()
         for source in batch.sources + queuedSources { add(source: source) }
+    }
+
+    /// Forgets a deleted app: its inventory entries, drafts, alerts and touches are dropped, and queued
+    /// rows, chains and sources lose their link to it (they are still written, without an app).
+    mutating func purge(appID: AppID) {
+        for key in order where requests[key]?.appID == appID {
+            requests[key]?.appID = nil
+            requests[key]?.isNew = false
+        }
+        chains = chains.map { $0.appID == appID ? ChainWrite(chain: $0.chain, appID: nil) : $0 }
+        newHosts.removeAll { $0.appID == appID }
+        drafts.removeAll { $0.appID == appID }
+        alerts.removeAll { $0.appID == appID }
+        touchOrder.removeAll { key in
+            guard touches[key]?.appID == appID else { return false }
+            touches[key] = nil
+            return true
+        }
+        for key in sourceOrder where sources[key]?.appID == appID { sources[key]?.appID = nil }
     }
 }

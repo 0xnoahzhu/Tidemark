@@ -97,7 +97,7 @@ struct CapturePipelineTests {
         #expect(Set(sources.map(\.value)) == ["api.notion.com", "104.18.22.110"])
     }
 
-    @Test func anotherMacWinningTheRaceSuppressesTheAlert() async throws {
+    @Test func anotherMacWinningTheDomainLeavesOnlyTheIPAlert() async throws {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()
         let surge = CaptureFakeSurge()
@@ -111,8 +111,10 @@ struct CapturePipelineTests {
 
         await pipeline.ingest(nodeRequest(id: 5, host: "api.linear.app", remoteAddress: "10.0.0.8"), now: base)
         await pipeline.tick(now: base.addingTimeInterval(2))
-        #expect(await database.alertsInserted.isEmpty)
         #expect(await database.appHosts.count == 2, "the IP is still new for this Mac")
+        let alerts = await database.alertsInserted
+        #expect(alerts.map(\.scope) == [.ip], "the other Mac alerted on the domain; this Mac's new IP alerts on its own")
+        #expect(alerts.first?.value == "10.0.0.8" && alerts.first?.host == "api.linear.app")
     }
 
     @Test func pausedAppsAndArchivedAppsDontAlert() async throws {

@@ -13,17 +13,17 @@ struct CaptureKnownHosts: Sendable {
     init() {}
 
     init(loaded: [AppID: Set<String>], classifier: any SiteClassifying) {
-        for (appID, values) in loaded {
-            for raw in values {
-                let (kind, value) = Self.decode(raw)
-                insert(kind: kind, value: value, appID: appID, site: kind == .domain ? classifier.site(for: value) : nil)
-            }
-        }
+        merge(loaded, classifier: classifier)
     }
 
     func containsDomain(_ host: String, appID: AppID) -> Bool { domains[appID]?.contains(host.lowercased()) ?? false }
     func containsSite(_ site: String, appID: AppID) -> Bool { sites[appID]?.contains(site.lowercased()) ?? false }
     func containsIP(_ ip: String, appID: AppID) -> Bool { ips[appID]?.contains(ip.lowercased()) ?? false }
+
+    /// Number of entries across every app.
+    var count: Int {
+        domains.values.reduce(0) { $0 + $1.count } + ips.values.reduce(0) { $0 + $1.count }
+    }
 
     mutating func insert(kind: HostKind, value: String, appID: AppID, site: String?) {
         let value = value.lowercased()
@@ -36,10 +36,28 @@ struct CaptureKnownHosts: Sendable {
         }
     }
 
+    /// Adds entries (from the database or a local snapshot) without forgetting any known one.
+    mutating func merge(_ loaded: [AppID: Set<String>], classifier: any SiteClassifying) {
+        for (appID, values) in loaded {
+            for raw in values {
+                let (kind, value) = Self.decode(raw)
+                insert(kind: kind, value: value, appID: appID, site: kind == .domain ? classifier.site(for: value) : nil)
+            }
+        }
+    }
+
     mutating func remove(appID: AppID) {
         domains[appID] = nil
         sites[appID] = nil
         ips[appID] = nil
+    }
+
+    /// Every entry as `domain:x` / `ip:x`, the form `init(loaded:classifier:)` reads back.
+    var exported: [AppID: Set<String>] {
+        var result: [AppID: Set<String>] = [:]
+        for (appID, values) in domains { result[appID, default: []].formUnion(values.map { "domain:\($0)" }) }
+        for (appID, values) in ips { result[appID, default: []].formUnion(values.map { "ip:\($0)" }) }
+        return result
     }
 
     /// Splits `domain:x` / `ip:x`, or infers the kind of a bare value.
@@ -51,7 +69,7 @@ struct CaptureKnownHosts: Sendable {
 }
 
 /// An alert waiting for its inventory entry to win the cross-Mac insert race.
-struct CaptureAlertDraft: Hashable, Sendable {
+struct CaptureAlertDraft: Hashable, Sendable, Codable {
     var appID: AppID
     var kind: HostKind
     var scope: AlertScope
@@ -64,6 +82,9 @@ struct CaptureAlertDraft: Hashable, Sendable {
     var processName: String
     var isDirect: Bool
     var requestKey: RequestKey
+    /// Set on the IP alert kept as a stand-in for a domain alert (`hostID` of that domain entry): it fires
+    /// only when the domain entry loses the cross-Mac race while the IP entry wins.
+    var fallbackFor: String? = nil
 
     /// `AppHost.id` of the inventory entry that must be new for the alert to fire.
     var hostID: String { "\(kind.rawValue):\(value)" }
@@ -85,12 +106,15 @@ struct CaptureFirstContact: Hashable, Sendable {
     var touches: [AppHost]
     /// At most one alert per request: a new domain wins over its new IP.
     var alert: CaptureAlertDraft?
+    /// The IP alert that replaces a domain `alert` when another Mac already recorded the domain.
+    var fallback: CaptureAlertDraft? = nil
 }
 
 /// First-contact rules from ARCHITECTURE.md › First contact and alerts.
 enum CaptureFirstContactDetector {
     /// Evaluates a request attributed to a monitoring app and records any new host/IP in `known`
     /// (optimistically, so later requests don't fire twice while the database insert is in flight).
+    /// New inventory entries name the request's Mac (`record.deviceID`) as the one that made first contact.
     static func evaluate(
         record: RequestRecord,
         app: MonitoredApp,
@@ -109,7 +133,7 @@ enum CaptureFirstContactDetector {
         // 1. Domain
         if !isIPLiteral, !host.isEmpty {
             let site = classifier.site(for: host).lowercased()
-            let entry = AppHost(
+            var entry = AppHost(
                 appID: app.id, kind: .domain, value: host, site: site, firstSeen: seen, lastSeen: seen,
                 requestCount: 1, processName: process, policy: policy, geo: record.geo, isDirect: false, hosts: []
             )
@@ -118,6 +142,7 @@ enum CaptureFirstContactDetector {
             } else {
                 let scope: AlertScope = known.containsSite(site, appID: app.id) ? .host : .site
                 known.insert(kind: .domain, value: host, appID: app.id, site: site)
+                entry.firstDeviceID = record.deviceID
                 result.hosts.append(entry)
                 let wanted = app.alertRule == .anyHost || (app.alertRule == .site && scope == .site)
                 if wanted, !AlertState.matches(host, patterns: mutes) {
@@ -131,7 +156,7 @@ enum CaptureFirstContactDetector {
 
         // 2. IP
         if let ip {
-            let entry = AppHost(
+            var entry = AppHost(
                 appID: app.id, kind: .ip, value: ip, site: nil, firstSeen: seen, lastSeen: seen, requestCount: 1,
                 processName: process, policy: policy, geo: record.geo, isDirect: isIPLiteral,
                 hosts: isIPLiteral ? [] : [host]
@@ -140,13 +165,20 @@ enum CaptureFirstContactDetector {
                 result.touches.append(entry)
             } else {
                 known.insert(kind: .ip, value: ip, appID: app.id, site: nil)
+                entry.firstDeviceID = record.deviceID
                 result.hosts.append(entry)
                 let muted = AlertState.matches(ip, patterns: mutes) || (!isIPLiteral && AlertState.matches(host, patterns: mutes))
-                if result.alert == nil, app.alertNewIP, !muted {
-                    result.alert = CaptureAlertDraft(
+                if app.alertNewIP, !muted {
+                    var draft = CaptureAlertDraft(
                         appID: app.id, kind: .ip, scope: .ip, value: ip, site: nil, host: isIPLiteral ? nil : host, ip: ip,
                         geo: record.geo, processName: process, isDirect: isIPLiteral, requestKey: record.key
                     )
+                    if let primary = result.alert {
+                        draft.fallbackFor = primary.hostID
+                        result.fallback = draft
+                    } else {
+                        result.alert = draft
+                    }
                 }
             }
         }

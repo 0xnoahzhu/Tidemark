@@ -16,7 +16,8 @@ enum AppBootstrap {
         let classifier = PublicSuffixClassifier()
         let processes = LibProcInspector()
         let surge = SurgeCLIClient(endpoint: model.preferences.surgeEndpoint)
-        let database = PostgresDatabase(url: model.preferences.databaseURLWithPassword, siteClassifier: classifier)
+        let databaseURL = model.preferences.databaseURLWithPassword
+        let database = PostgresDatabase(url: databaseURL, siteClassifier: classifier)
         model.classifier = classifier
         model.processes = processes
         model.surge = surge
@@ -24,12 +25,13 @@ enum AppBootstrap {
         model.insights = HostInsightService(database: database)
 
         let engine = CaptureEngine(model: model, surge: surge, database: database, processes: processes, classifier: classifier)
+        engine.adoptDatabaseURL(databaseURL)
+        // Rebuilt when the endpoint or a password changes (`reconnect()`), and for testing new settings.
         engine.makeSurgeClient = { endpoint in SurgeCLIClient(endpoint: endpoint) }
-        engine.makeDatabase = { [weak model] preferences in
-            let database = PostgresDatabase(url: preferences.databaseURLWithPassword, siteClassifier: classifier)
-            model?.insights = HostInsightService(database: database)
-            return database
-        }
+        engine.makeDatabase = { url in PostgresDatabase(url: url, siteClassifier: classifier) }
+        // On-device host explanations are cached in the database the engine records into.
+        engine.databaseChanged = { [weak model] database in model?.insights = HostInsightService(database: database) }
+        engine.retireDatabase = { database in await (database as? PostgresDatabase)?.shutdown() }
         let egress = EgressMonitor(model: model)
         engine.egress = egress
         let probe = ProbeController(model: model, registry: engine.probeRegistry)
@@ -51,16 +53,18 @@ enum AppBootstrap {
         #endif
     }
 
-    /// Stops a running probe and the egress checks, then flushes buffered rows to PostgreSQL (or the
-    /// on-disk spool). Gives up after `timeout` so quitting never hangs on an unreachable server.
+    /// Stops a running probe and the egress checks, and flushes buffered rows to PostgreSQL (or the on-disk
+    /// spool). The probe is saved while capture flushes, so a slow probe save cannot use up the time the
+    /// final flush needs. Gives up after `timeout` so quitting never hangs on an unreachable server.
     static func stop(_ model: AppModel, timeout: Duration = .seconds(6)) async {
         StatusItemController.uninstall()
         DockIconUpdater.stop()
         let probe = self.probe, egress = self.egress, engine = self.engine
         let shutdown = Task(name: "shutdown") { @MainActor in
-            _ = await probe?.stopProbe()
             egress?.stop()
+            let probeStopped = Task { @MainActor in _ = await probe?.stopProbe() }
             await engine?.stop()
+            await probeStopped.value
         }
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await shutdown.value }

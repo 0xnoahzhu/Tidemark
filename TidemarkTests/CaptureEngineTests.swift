@@ -6,16 +6,29 @@ import Testing
 struct CaptureEngineTests {
     let temp = CaptureTempDirectory()
 
-    func makeEngine(database: CaptureFakeDatabase = CaptureFakeDatabase()) -> (CaptureEngine, AppModel) {
+    func makeEngine(database: CaptureFakeDatabase = CaptureFakeDatabase(), surge: CaptureFakeSurge = CaptureFakeSurge()) -> (CaptureEngine, AppModel) {
         let defaults = UserDefaults(suiteName: "tidemark-tests-\(UUID().uuidString)")!
         let preferences = Preferences(defaults: defaults)
         preferences.systemNotifications = false
+        preferences.surgeReconnect = false
         let model = AppModel(preferences: preferences)
         model.database = database
-        let engine = CaptureEngine(model: model, surge: CaptureFakeSurge(), database: database, processes: CaptureFakeProcesses(),
+        let engine = CaptureEngine(model: model, surge: surge, database: database, processes: CaptureFakeProcesses(),
                                    classifier: CaptureFakeClassifier(), spool: CaptureSpool(directory: temp.url, limit: 1000))
+        // Never read the Keychain from tests.
+        engine.settingsDatabaseURL = { "postgresql://tide@db-a.invalid/tidemark" }
         model.capture = engine
         return (engine, model)
+    }
+
+    /// Polls `condition` until it holds or the timeout passes.
+    func eventually(_ timeout: Duration = .seconds(3), _ condition: () async -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return await condition()
     }
 
     func row(_ id: Int64, device: DeviceID, started: Date) -> RequestRecord {
@@ -180,4 +193,213 @@ struct CaptureEngineTests {
         #expect(CaptureDeviceInfo.remoteDeviceID(thisDevice: me, remote: "10.0.0.2:6171") != CaptureDeviceInfo.remoteDeviceID(thisDevice: me, remote: "10.0.0.3:6171"))
         #expect(CaptureDeviceInfo.hue(for: me) == CaptureDeviceInfo.hue(for: me))
     }
+
+    // MARK: Credentials
+
+    @Test func reconnectRebuildsTheDatabaseWhenItsURLOrPasswordChanged() async {
+        let (engine, model) = makeEngine()
+        let built = CaptureBox<[String]>([])
+        let replacement = CaptureFakeDatabase()
+        engine.adoptDatabaseURL("postgresql://tide@db-a.invalid/tidemark")
+        engine.makeDatabase = { url in
+            built.value.append(url)
+            return replacement
+        }
+        let original = model.database as? CaptureFakeDatabase
+
+        engine.reconnect()
+        #expect(await eventually { model.live.database.isHealthy })
+        #expect(built.value.isEmpty, "unchanged settings keep the client")
+        #expect((model.database as? CaptureFakeDatabase) === original)
+
+        // A new Keychain password changes the full URL, not the stored one.
+        engine.settingsDatabaseURL = { "postgresql://tide@db-b.invalid/tidemark" }
+        engine.reconnect()
+        #expect(await eventually { (model.database as? CaptureFakeDatabase) === replacement })
+        #expect(built.value == ["postgresql://tide@db-b.invalid/tidemark"])
+        #expect(await eventually { (await engine.pipeline.database as? CaptureFakeDatabase) === replacement })
+        #expect(await eventually { model.live.database.isHealthy })
+    }
+
+    @Test func testingNewSettingsUsesAThrowawayClient() async {
+        let (engine, model) = makeEngine()
+        let original = model.database as? CaptureFakeDatabase
+        let candidate = CaptureFakeDatabase()
+        await candidate.setFailing(true)
+        let retired = CaptureRetiredDatabases()
+        engine.adoptDatabaseURL("postgresql://tide@db-a.invalid/tidemark")
+        engine.settingsDatabaseURL = { "postgresql://tide@db-b.invalid/tidemark" }
+        engine.makeDatabase = { _ in candidate }
+        engine.retireDatabase = { database in await retired.add(database) }
+
+        guard case .failure = await engine.testDatabaseConnection() else {
+            Issue.record("the new settings point at an unreachable server")
+            return
+        }
+        #expect((model.database as? CaptureFakeDatabase) === original, "the live connection keeps recording")
+        #expect(await retired.count == 1)
+    }
+
+    @Test func reconnectRebuildsTheSurgeClientOnlyWhenTheEndpointChanged() async {
+        let (engine, model) = makeEngine()
+        let made = CaptureBox<[SurgeEndpoint]>([])
+        model.preferences.surgeCLIPath = "/opt/test/surge-cli"
+        engine.makeSurgeClient = { endpoint in
+            made.value.append(endpoint)
+            return CaptureFakeSurge(cliPath: endpoint.cliPath)
+        }
+        engine.reconnect()
+        #expect(await eventually { made.value.count == 1 && engine.surge.endpoint.cliPath == "/opt/test/surge-cli" })
+        #expect(model.surge.endpoint.cliPath == "/opt/test/surge-cli")
+
+        engine.reconnect()
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(made.value.count == 1, "the same endpoint keeps its client")
+    }
+
+    // MARK: Surge stream
+
+    @Test func aRestartedEngineRestartsTheStream() async {
+        let surge = CaptureFakeSurge()
+        surge.update {
+            $0.silentStream = true
+            $0.startTime = 1_792_000_000
+        }
+        let (engine, model) = makeEngine(surge: surge)
+        engine.startStream()
+        #expect(await eventually { model.live.surge.isHealthy })
+        #expect(await engine.pipeline.currentSession == 1_792_000_000_000)
+
+        // Same session: nothing happens.
+        await engine.checkSurgeSession()
+        #expect(surge.snapshot.eventsCalls == 1)
+
+        surge.update { $0.startTime = 1_792_000_600 }
+        await engine.checkSurgeSession()
+        #expect(await eventually { await engine.pipeline.currentSession == 1_792_000_600_000 })
+        #expect(surge.snapshot.eventsCalls == 2)
+        await engine.stopStream()
+    }
+
+    @Test func aSilentStreamIsRestarted() async {
+        let surge = CaptureFakeSurge()
+        surge.update { $0.silentStream = true }
+        let (engine, model) = makeEngine(surge: surge)
+        engine.startStream()
+        #expect(await eventually { model.live.surge.isHealthy && surge.snapshot.eventsCalls == 1 })
+
+        surge.emit(.speed(SurgeSpeed(in: 10, out: 1, downloadSpeedHistory: nil, uploadSpeedHistory: nil)))
+        try? await Task.sleep(for: .milliseconds(50))
+        await engine.checkStreamLiveness(now: .now.addingTimeInterval(5))
+        #expect(surge.snapshot.eventsCalls == 1, "events keep arriving")
+
+        await engine.checkStreamLiveness(now: .now.addingTimeInterval(20))
+        #expect(await eventually { surge.snapshot.eventsCalls == 2 })
+        await engine.stopStream()
+    }
+
+    // MARK: Alerts and notifications
+
+    @Test func alertsFromOtherMacsSkipMutedHostsAndArchivedApps() async {
+        let database = CaptureFakeDatabase()
+        let (engine, model) = makeEngine(database: database)
+        let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
+        var docker = CaptureFixtures.app("Docker", path: "/Applications/Docker.app")
+        docker.archivedAt = .now
+        await database.setApps([cursor, docker])
+        await database.setMutes(["*.muted.example"])
+        #expect(await engine.connectDatabase())
+
+        let other = UUID()
+        func alert(_ id: Int64, _ app: MonitoredApp, _ value: String) -> AlertItem {
+            AlertItem(id: id, deviceID: other, appID: app.id, kind: .domain, scope: .host, value: value, site: nil, host: value, ip: nil,
+                      geo: nil, processName: "node", isDirect: false, requestRowID: nil, createdAt: .now, readAt: nil)
+        }
+        await database.setOtherMacAlerts([alert(1, cursor, "ok.example"), alert(2, cursor, "x.muted.example"), alert(3, docker, "y.example")])
+        await engine.pollOtherMacAlerts()
+        #expect(model.alerts.items.map(\.value) == ["ok.example"])
+        #expect(model.alerts.unreadCount == 1)
+    }
+
+    @Test func explainsHostsInNotificationsWithoutWaitingLong() async {
+        Localizer.shared.preference = .english
+        let (engine, model) = makeEngine()
+        let alert = AlertItem(id: 1, deviceID: UUID(), appID: UUID(), kind: .domain, scope: .site, value: "beacon.qq.com", site: "qq.com",
+                              host: "beacon.qq.com", ip: nil, geo: nil, processName: "WeChat", isDirect: false, requestRowID: nil,
+                              createdAt: .now, readAt: nil)
+        #expect(engine.explanation(for: alert, appName: "WeChat") == nil, "off by default")
+
+        model.preferences.notifyExplainHosts = true
+        let insights = CaptureFakeInsights()
+        let insight = HostInsight(host: "beacon.qq.com", category: .analytics, operatorName: "Tencent", summary: "Reports usage statistics.",
+                                  concern: nil, language: "en", model: nil, createdAt: .now)
+        insights.cached = insight
+        model.insights = insights
+        #expect(await engine.explanation(for: alert, appName: "WeChat")?() == "Tencent — Reports usage statistics.")
+
+        // Not cached: the model may answer, but never later than the timeout.
+        insights.cached = nil
+        insights.generated = insight
+        insights.delay = .seconds(5)
+        let clock = ContinuousClock()
+        let started = clock.now
+        #expect(await engine.explanation(for: alert, appName: "WeChat")?() == nil)
+        #expect(started.duration(to: clock.now) < .seconds(3))
+
+        insights.delay = .zero
+        #expect(await engine.explanation(for: alert, appName: "WeChat")?() == "Tencent — Reports usage statistics.")
+        insights.available = false
+        #expect(await engine.explanation(for: alert, appName: "WeChat")?() == nil)
+
+        var direct = alert
+        direct.kind = .ip
+        direct.scope = .ip
+        direct.host = nil
+        #expect(engine.explanation(for: direct, appName: "WeChat") == nil, "an IP without a hostname has no host to explain")
+    }
+
+    @Test func keepsTheRecordingMacsActivityFresh() {
+        let (engine, model) = makeEngine()
+        let me = model.preferences.thisDeviceID
+        let then = Date(timeIntervalSince1970: 1_792_000_000)
+        model.devices.devices = [Device(id: me, name: "Mac", model: nil, shortName: "Mac", hue: 240, isRemoteSurge: false, rowCount: 10,
+                                        lastWriteAt: then, createdAt: then)]
+        var update = CaptureUIUpdate()
+        update.rowsWritten = 3
+        update.lastWriteAt = then.addingTimeInterval(60)
+        engine.apply(update, now: then.addingTimeInterval(60))
+        #expect(model.devices.thisDevice?.rowCount == 13)
+        #expect(model.devices.thisDevice?.activity(now: then.addingTimeInterval(61)) == .writingNow)
+    }
+}
+
+/// A mutable value shared with a closure (main actor only).
+final class CaptureBox<Value> {
+    var value: Value
+    init(_ value: Value) { self.value = value }
+}
+
+/// Databases handed to `retireDatabase`.
+actor CaptureRetiredDatabases {
+    private(set) var count = 0
+    func add(_ database: any TidemarkDatabase) { count += 1 }
+}
+
+/// Scriptable on-device insights.
+@MainActor
+final class CaptureFakeInsights: HostInsightProviding {
+    var cached: HostInsight?
+    var generated: HostInsight?
+    var delay: Duration = .zero
+    var available = true
+
+    var isAvailable: Bool { available }
+    var unavailableReason: String? { available ? nil : "Off" }
+    func insight(for context: HostContext) async throws -> HostInsight {
+        if delay > .zero { try await Task.sleep(for: delay) }
+        guard let generated else { throw DatabaseError.notConfigured }
+        return generated
+    }
+    func cachedInsight(for host: String) async -> HostInsight? { cached }
+    func prewarm() {}
 }

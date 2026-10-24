@@ -123,6 +123,27 @@ struct CaptureFirstContactTests {
         #expect(second.alert == nil && second.hosts.isEmpty && second.touches.count == 2)
     }
 
+    @Test func aNewDomainKeepsItsNewIPAlertAsAFallback() throws {
+        let app = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
+        var known = CaptureKnownHosts()
+        let r = record(host: "api.linear.app", ip: "104.18.32.12", app: app)
+        let contact = CaptureFirstContactDetector.evaluate(record: r, app: app, known: &known, classifier: classifier, mutes: [])
+        #expect(contact.alert?.kind == .domain)
+        let fallback = try #require(contact.fallback)
+        #expect(fallback.kind == .ip && fallback.value == "104.18.32.12" && fallback.fallbackFor == "domain:api.linear.app")
+        #expect(contact.hosts.allSatisfy { $0.firstDeviceID == device }, "the recording Mac made first contact")
+    }
+
+    @Test func exportsTheIndexForTheLocalSnapshot() {
+        let app = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
+        var known = CaptureKnownHosts(loaded: [app.id: ["api.github.com", "ip:20.205.243.168"]], classifier: classifier)
+        known.merge([app.id: ["raw.githubusercontent.com"]], classifier: classifier)
+        let copy = CaptureKnownHosts(loaded: known.exported, classifier: classifier)
+        #expect(copy.containsDomain("raw.githubusercontent.com", appID: app.id) && copy.containsIP("20.205.243.168", appID: app.id))
+        #expect(copy.containsSite("githubusercontent.com", appID: app.id))
+        #expect(known.count == 3)
+    }
+
     @Test func decodesKnownHostForms() {
         #expect(CaptureKnownHosts.decode("domain:api.github.com") == (.domain, "api.github.com"))
         #expect(CaptureKnownHosts.decode("ip:2001:db8::1") == (.ip, "2001:db8::1"))

@@ -9,8 +9,12 @@ struct CaptureSettings: Sendable, Equatable {
     var isRemote: Bool
     var batchRows: Int
     var batchInterval: TimeInterval
-    /// Tidemark's own executable; Surge records from it may belong to a site probe.
+    /// Tidemark's own executable. Its requests (site probe forwarders, IP lookups) never roll up to a
+    /// monitored app, and Surge records from it may belong to a site probe.
     var ownExecutablePath: String?
+
+    /// Tidemark's own bundle (`/Applications/Tidemark.app`), shown as the app of its own requests.
+    var ownBundlePath: String? { ownExecutablePath.flatMap(CaptureRecordMapper.outermostBundle(in:)) }
 }
 
 /// Surge events the main actor reacts to (egress checks, status).
@@ -18,6 +22,9 @@ enum CaptureSurgeSignal: Hashable, Sendable {
     case environmentChanged
     case reload
     case shutdown
+    /// The stream suggests Surge's engine restarted (request IDs started over, a second subscription
+    /// acknowledgement): re-read `status` and compare the session key.
+    case sessionCheck
 }
 
 /// Coalesced changes for the main actor, drained about four times a second.
@@ -28,9 +35,11 @@ struct CaptureUIUpdate: Sendable {
     var fresh: Set<RequestKey> = []
     /// Requests first seen from the live stream (backfill excluded).
     var newRequests = 0
-    /// Rows written to PostgreSQL for the first time.
+    /// Rows PostgreSQL inserted (rewrites of rows it already had are not counted).
     var rowsWritten = 0
     var lastWriteAt: Date?
+    /// Rows waiting because PostgreSQL is unreachable: the on-disk spool, plus the rows queued in memory
+    /// while offline (not the batch that is about to be written normally).
     var bufferedRows = 0
     var speed: SurgeSpeed?
     /// Alerts inserted by this Mac, with their database IDs.
@@ -41,18 +50,28 @@ struct CaptureUIUpdate: Sendable {
     /// Set once when a write failed and the pipeline went offline.
     var databaseFailure: String?
     var databaseOnline = false
+    /// Another Mac had already recorded inventory entries this Mac believed were new: the local index is stale.
+    var lostInventoryRace = false
 }
 
 /// Processes Surge events off the main actor: maps and attributes requests, resolves remote IPs and GeoIP
 /// data, detects first contact, batches writes (spooling to disk while PostgreSQL is unreachable) and
 /// accumulates UI changes that the engine drains periodically.
+///
+/// The pipeline's state is internal (not private) only so its extensions in other files can reach it.
 actor CapturePipeline {
-    private struct Entry {
+    struct Entry {
         var record: RequestRecord
         var pathForStatistics: String?
         var sourcePort: Int?
+        /// Surge's name of the device that made the request (LAN clients of a gateway Surge).
+        var deviceName: String?
         var appsVersion: Int
+        /// When this pipeline first saw the request.
+        var firstSeen: Date
         var lastQueued: Date
+        /// Latest event (or backfill) that reported the request.
+        var lastSeen: Date
         var dirty = false
         /// Changed in a way worth writing soon (attribution, remote IP, GeoIP, NEW, probe), not only bytes.
         var urgent = false
@@ -60,9 +79,19 @@ actor CapturePipeline {
         var probeMatched = false
         /// First seen in `dump recent`: a previous run may already have counted it in the inventory.
         var backfilled = false
+        /// Its first-contact evaluation drafted an alert; a late IP must not add a second one.
+        var alertDrafted = false
+        var domainSourceRecorded = false
+        var ipSourceRecorded = false
     }
 
-    private static let log = Logger(subsystem: "io.tidemark.Tidemark", category: "capture")
+    /// Closing of `deviceID`'s rows left active by Surge sessions before `before`.
+    struct SessionClose: Equatable, Sendable {
+        var before: Int64
+        var at: Date
+    }
+
+    static let log = Logger(subsystem: "io.tidemark.Tidemark", category: "capture")
 
     /// Seconds to wait for a remote IP and its GeoIP data before evaluating first contact without them.
     let contactGrace: TimeInterval
@@ -71,61 +100,97 @@ actor CapturePipeline {
     /// Rows with attribution, IP, GeoIP or NEW changes are rewritten after this short pause (to coalesce them).
     let urgentRewriteDelay: TimeInterval = 2
     let maxConcurrentLookups = 4
+    /// Longest wait for a new app's inventory before its first contacts are evaluated anyway.
+    let inventoryWait: TimeInterval = 120
+    /// A process that keeps making requests is upserted again this often, keeping its `last_seen` fresh.
+    let processRetouchInterval: TimeInterval = 180
+    /// How long a request may stay without a process path before its host sources are recorded without one.
+    let sourceWait: TimeInterval = 10
+    /// Longest single database write; a statement stuck on a dead connection fails over to the spool.
+    let writeTimeout: Duration
+    /// Longest regular flush (all of its statements together).
+    let flushBudget: Duration = .seconds(30)
+    /// Longest flush when Tidemark quits (the rest goes to the spool).
+    let finalFlushBudget: Duration = .seconds(3)
+    /// The local snapshot of the shared state is rewritten at most this often.
+    let snapshotInterval: TimeInterval = 600
 
     // Dependencies
-    private var database: any TidemarkDatabase
-    private var surge: any SurgeClient
-    private let processes: any ProcessInspecting
-    private let classifier: any SiteClassifying
-    private let probes: ProbeRegistry
-    private var settings: CaptureSettings
+    var database: any TidemarkDatabase
+    var surge: any SurgeClient
+    let processes: any ProcessInspecting
+    let classifier: any SiteClassifying
+    let probes: ProbeRegistry
+    var settings: CaptureSettings
 
     // Session
-    private var session: Int64 = 0
-    private var recording = true
-    private var entries: [Int64: Entry] = [:]
-    private var ignored: Set<Int64> = []
+    var session: Int64 = 0
+    /// Bumped whenever the session or the recording device changes; backfills of an older epoch are dropped.
+    var epoch = 0
+    var recording = true
+    var entries: [Int64: Entry] = [:]
+    var ignored: Set<Int64> = []
+    /// Highest request ID seen in this session and its start (IDs grow with time within one engine session).
+    var maxSeen: (id: Int64, startedAt: Date)?
+    /// Events held while the engine checks whether Surge restarted (their IDs look recycled).
+    var held: [SurgeRequest] = []
+    var holdingSince: Date?
+    var lastSessionCheckSignal: Date?
+    var lastEventAt: Date?
+    var sessionCloses: [DeviceID: SessionClose] = [:]
 
     // Attribution and inventory
-    private var attributor: CaptureAttributor
-    private var monitored: [AppID: MonitoredApp] = [:]
-    private var paused: Set<AppID> = []
-    private var mutes: [String] = []
-    private var known = CaptureKnownHosts()
-    private var knownLoaded = false
-    /// Apps added since the inventory was loaded; their first contacts wait for the next load.
-    private var awaitingInventory: Set<AppID> = []
-    private var upsertedProcesses: [CaptureAttributor.ProcessKey: AppID?] = [:]
+    var attributor: CaptureAttributor
+    var monitored: [AppID: MonitoredApp] = [:]
+    /// Every app (archived ones included), for the local snapshot.
+    var allApps: [MonitoredApp] = []
+    var paused: Set<AppID> = []
+    var mutes: [String] = []
+    var known = CaptureKnownHosts()
+    var knownLoaded = false
+    /// New apps whose inventory (and backfill) is still loading → give up waiting at this time.
+    var awaitingInventory: [AppID: Date] = [:]
+    var upsertedProcesses: [CaptureAttributor.ProcessKey: (appID: AppID?, at: Date)] = [:]
     /// surge ID → evaluate first contact no later than this.
-    private var contactQueue: [Int64: Date] = [:]
+    var contactQueue: [Int64: Date] = [:]
     /// `appID|kind:value` → request that found the host first.
-    private var hostOrigins: [String: RequestKey] = [:]
+    var hostOrigins: [String: RequestKey] = [:]
 
     // Lookups
-    private var dnsCache: [String: (ips: [String], expires: Date)] = [:]
-    private var dnsFailures: [String: Date] = [:]
-    private var dnsQueue: [String] = []
-    private var dnsInFlight: Set<String> = []
-    private var waitingForHost: [String: Set<Int64>] = [:]
-    private var geoCache: [String: GeoInfo] = [:]
-    private var geoFailures: [String: Date] = [:]
-    private var geoQueue: [String] = []
-    private var geoInFlight: Set<String> = []
-    private var waitingForGeo: [String: Set<Int64>] = [:]
+    var dnsCache: [String: (ips: [String], expires: Date)] = [:]
+    var dnsFailures: [String: Date] = [:]
+    var dnsQueue: [String] = []
+    var dnsInFlight: Set<String> = []
+    var waitingForHost: [String: Set<Int64>] = [:]
+    var geoCache: [String: GeoInfo] = [:]
+    var geoFailures: [String: Date] = [:]
+    var geoQueue: [String] = []
+    var geoInFlight: Set<String> = []
+    var waitingForGeo: [String: Set<Int64>] = [:]
 
     // Writes
-    private var buffer: CaptureWriteBuffer
-    private var spool: CaptureSpool
-    private var online = false
-    private var isFlushing = false
-    private var lastScan = Date.distantPast
-    private var lastEviction = Date.distantPast
-    private var lastWriteAt: Date?
+    var buffer: CaptureWriteBuffer
+    var spool: CaptureSpool
+    let sidecar: CaptureSidecar
+    var online = false
+    var isFlushing = false
+    var flushStartedAt: Date?
+    /// Request rows of the flush in progress (spooled at quit if that flush is stuck).
+    var inFlightRequests: [RequestRecord] = []
+    /// Inventory entries being inserted right now (not in the database yet, not in the buffer either).
+    var inFlightHosts: [AppHost] = []
+    var lastScan = Date.distantPast
+    var lastEviction = Date.distantPast
+    var lastWriteAt: Date?
+    var lastSnapshotAt: Date?
+    /// A statement of the current flush or replay succeeded: refusals are then about the data, not the server.
+    var writesSucceeded = false
+    var auxiliaryRestored = false
 
     // UI
-    private var pending = CaptureUIUpdate()
-    private var changed: [RequestKey: RequestRecord] = [:]
-    private var fresh: Set<RequestKey> = []
+    var pending = CaptureUIUpdate()
+    var changed: [RequestKey: RequestRecord] = [:]
+    var fresh: Set<RequestKey> = []
 
     init(
         settings: CaptureSettings,
@@ -135,7 +200,8 @@ actor CapturePipeline {
         classifier: any SiteClassifying,
         probes: ProbeRegistry,
         spool: CaptureSpool,
-        contactGrace: TimeInterval = 2.5
+        contactGrace: TimeInterval = 2.5,
+        writeTimeout: Duration = .seconds(20)
     ) {
         self.settings = settings
         self.database = database
@@ -144,7 +210,9 @@ actor CapturePipeline {
         self.classifier = classifier
         self.probes = probes
         self.spool = spool
+        self.sidecar = CaptureSidecar(directory: spool.directory)
         self.contactGrace = contactGrace
+        self.writeTimeout = writeTimeout
         attributor = CaptureAttributor(isRemote: settings.isRemote)
         buffer = CaptureWriteBuffer(batchRows: settings.batchRows, batchInterval: settings.batchInterval)
     }
@@ -156,18 +224,27 @@ actor CapturePipeline {
         self.database = database
     }
 
-    func update(settings new: CaptureSettings) {
+    /// Applies new settings. A new recording device (local ↔ remote Surge) ends the old stream's requests:
+    /// they are written (active ones closed) before the in-memory state is dropped.
+    func update(settings new: CaptureSettings, now: Date = .now) {
         if new.deviceID != settings.deviceID || new.isRemote != settings.isRemote {
+            retireEntries(closingAt: nil, now: now)
             let apps = attributor.apps
             attributor = CaptureAttributor(isRemote: new.isRemote)
             attributor.setApps(apps)
-            entries.removeAll()
-            contactQueue.removeAll()
+            clearSessionState()
             upsertedProcesses.removeAll()
+            epoch += 1
         }
-        buffer.batchRows = max(1, new.batchRows)
-        buffer.batchInterval = max(0.05, new.batchInterval)
         settings = new
+        setBatching(rows: new.batchRows, interval: new.batchInterval)
+    }
+
+    func setBatching(rows: Int, interval: TimeInterval) {
+        buffer.batchRows = max(1, rows)
+        buffer.batchInterval = max(0.05, interval)
+        settings.batchRows = rows
+        settings.batchInterval = interval
     }
 
     func setSpoolLimit(_ limit: Int) { spool.limit = max(1, limit) }
@@ -176,14 +253,10 @@ actor CapturePipeline {
     /// re-attributed right away, so rows that get no further updates (backfill) roll up too.
     func setApps(_ apps: [MonitoredApp], paused: Set<AppID>, now: Date = .now) {
         let version = attributor.appsVersion
-        let previous = Set(monitored.keys)
+        allApps = apps
         attributor.setApps(apps)
         monitored = Dictionary(attributor.apps.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         self.paused = paused
-        if knownLoaded {
-            // A newly added app's inventory (and its backfill) arrives with the next `loadKnownHosts()`.
-            awaitingInventory.formUnion(Set(monitored.keys).subtracting(previous))
-        }
         guard attributor.appsVersion != version else { return }
         for id in Array(entries.keys) {
             guard var entry = entries[id] else { continue }
@@ -198,25 +271,10 @@ actor CapturePipeline {
         }
     }
 
-    /// Re-runs attribution for a live request and queues first contact when it newly rolls up to a monitoring app.
-    private func refreshAttribution(_ entry: inout Entry, id: Int64, now: Date) {
-        var record = entry.record
-        let chain = record.chain.isEmpty
-            ? attributor.chain(pid: record.pid, processPath: record.processPath, startedAt: record.startedAt, inspector: processes)
-            : record.chain
-        let attribution = attributor.attribute(chain: chain, pathForStatistics: entry.pathForStatistics)
-        let newlyAttributed = attribution.appID != nil && attribution.appID != record.appID
-        record.chain = attribution.chain
-        record.appID = attribution.appID
-        record.bundlePath = attribution.bundlePath ?? record.bundlePath
-        entry.record = record
-        entry.appsVersion = attributor.appsVersion
-        queueChain(attribution)
-        // Traffic from before the app was monitored is history (backfill), not first contact.
-        if newlyAttributed, let appID = attribution.appID, isMonitoring(appID),
-           let app = monitored[appID], record.startedAt >= app.createdAt {
-            contactQueue[id] = now.addingTimeInterval(contactGrace)
-        }
+    /// A newly monitored app's inventory (and backfill) arrives with the next `loadKnownHosts()`; until then
+    /// (at most `inventoryWait`) its first contacts wait, so its whole history doesn't look new.
+    func awaitInventory(for appID: AppID, now: Date = .now) {
+        awaitingInventory[appID] = now.addingTimeInterval(inventoryWait)
     }
 
     func setMutes(_ patterns: [String]) { mutes = patterns }
@@ -227,32 +285,121 @@ actor CapturePipeline {
         if !on { contactQueue.removeAll() }
     }
 
-    /// Loads every app's inventory for first-contact detection.
+    /// Loads every app's inventory for first-contact detection. Entries still on their way to the database
+    /// stay known.
     func loadKnownHosts() async throws {
-        let waiting = awaitingInventory
+        let waiting = Set(awaitingInventory.keys)
         let loaded = try await database.knownHosts()
-        known = CaptureKnownHosts(loaded: loaded, classifier: classifier)
+        var index = CaptureKnownHosts(loaded: loaded, classifier: classifier)
+        for host in buffer.pendingNewHosts + inFlightHosts {
+            index.insert(kind: host.kind, value: host.value, appID: host.appID, site: host.site)
+        }
+        known = index
         knownLoaded = true
-        awaitingInventory.subtract(waiting)
+        for id in waiting { awaitingInventory[id] = nil }
     }
 
-    func forgetApp(_ id: AppID) {
+    /// Adds inventory entries other Macs recorded since the last load (nothing known is forgotten).
+    func mergeKnownHosts() async throws {
+        let loaded = try await database.knownHosts()
+        known.merge(loaded, classifier: classifier)
+        knownLoaded = true
+    }
+
+    /// The shared state saved by an earlier run, used when PostgreSQL is unreachable at launch: first contact
+    /// is then detected against the saved inventory (the database still decides which Mac was first).
+    func restoreSnapshot() -> CaptureStateSnapshot? {
+        guard !knownLoaded, let snapshot = sidecar.loadSnapshot() else { return nil }
+        known = CaptureKnownHosts(loaded: snapshot.known, classifier: classifier)
+        knownLoaded = true
+        mutes = snapshot.mutes
+        return snapshot
+    }
+
+    /// Forgets a deleted app: no more attribution, inventory or alerts, and nothing queued may still point at
+    /// its row (rows and chains are kept without the link).
+    func purgeApp(_ id: AppID, now: Date = .now) {
         known.remove(appID: id)
         monitored[id] = nil
+        awaitingInventory[id] = nil
+        buffer.purge(appID: id)
+        for key in Array(entries.keys) where entries[key]?.record.appID == id {
+            guard var entry = entries[key] else { continue }
+            entry.record.appID = nil
+            entry.record.isNew = false
+            entry.dirty = true
+            entries[key] = entry
+            contactQueue[key] = nil
+            markChanged(entry.record, fresh: false)
+        }
+        let prefix = id.uuidString + "|"
+        hostOrigins = hostOrigins.filter { !$0.key.hasPrefix(prefix) }
+        upsertedProcesses = upsertedProcesses.filter { $0.value.appID != id }
     }
 
-    /// Starts a Surge engine session (request IDs restart with every engine start).
-    func beginSession(_ newSession: Int64) {
-        guard newSession != session else { return }
+    // MARK: Sessions
+
+    /// Starts a Surge engine session (request IDs restart with every engine start). The previous session's
+    /// requests are written and its active ones closed at the new session's start; rows of earlier sessions
+    /// still active in PostgreSQL are closed once everything queued for them is written. Returns the epoch
+    /// backfills of this session must carry.
+    @discardableResult
+    func beginSession(_ newSession: Int64, now: Date = .now) -> Int {
+        guard newSession != session else { return epoch }
+        let boundary = Date(timeIntervalSince1970: Double(newSession) / 1000)
+        if session != 0 { retireEntries(closingAt: boundary, now: now) }
+        if newSession > 0 { sessionCloses[settings.deviceID] = SessionClose(before: newSession, at: boundary) }
         session = newSession
+        clearSessionState()
+        epoch += 1
+        return epoch
+    }
+
+    var currentSession: Int64 { session }
+    var currentEpoch: Int { epoch }
+
+    /// The engine re-read Surge's start time after a `sessionCheck`. The same session releases the events held
+    /// meanwhile; a new one is begun by the stream restart that follows.
+    func confirmSession(_ startMilliseconds: Int64, now: Date = .now) {
+        guard startMilliseconds == session, holdingSince != nil else { return }
+        let events = held
+        held = []
+        holdingSince = nil
+        // Accept their IDs as this session's from now on.
+        maxSeen = nil
+        for request in events { ingest(request, backfill: false, now: now, trusted: true) }
+    }
+
+    /// Writes what the current entries still owe before they are dropped: first contacts still in their
+    /// grace period are evaluated, sources are recorded, active requests are closed (they will never be
+    /// updated again; at `boundary`, else when last seen) and changed rows are queued.
+    func retireEntries(closingAt boundary: Date?, now: Date) {
+        processContacts(now: now.addingTimeInterval(contactGrace), only: nil)
+        for id in Array(entries.keys) {
+            guard var entry = entries[id] else { continue }
+            if entry.record.state == .active {
+                entry.record.state = .completed
+                entry.record.completedAt = max(entry.record.startedAt, min(boundary ?? entry.lastSeen, now))
+                entry.finishedAt = now
+                entry.dirty = true
+                markChanged(entry.record, fresh: false)
+            }
+            recordSources(&entry, now: now, force: true)
+            if entry.dirty { enqueue(&entry, now: now) }
+            entries[id] = entry
+        }
+    }
+
+    func clearSessionState() {
         entries.removeAll()
         ignored.removeAll()
         contactQueue.removeAll()
         waitingForHost.removeAll()
         waitingForGeo.removeAll()
+        held.removeAll()
+        holdingSince = nil
+        maxSeen = nil
     }
-
-    var currentSession: Int64 { session }
 
     // MARK: Database state
 
@@ -263,27 +410,60 @@ actor CapturePipeline {
 
     // MARK: Events
 
+    /// When the current stream last delivered anything (Surge sends a speed event every second).
+    var lastStreamEventAt: Date? { lastEventAt }
+
     /// Consumes a `watch` stream until it ends.
     func consume(_ stream: AsyncThrowingStream<SurgeEvent, Error>) async throws {
+        lastEventAt = .now
+        var subscriptions = 0
         for try await event in stream {
+            let now = Date.now
+            lastEventAt = now
             switch event {
-            case .request(let request): ingest(request)
+            case .request(let request): ingest(request, now: now)
             case .speed(let speed): pending.speed = speed
             case .environmentChanged: pending.signals.append(.environmentChanged)
             case .reload: pending.signals.append(.reload)
             case .shutdown: pending.signals.append(.shutdown)
-            case .subscribed, .other: break
+            case .subscribed:
+                subscriptions += 1
+                // A second acknowledgement on one stream: the controller re-subscribed, perhaps for a new engine.
+                if subscriptions > 1 { signalSessionCheck(now: now) }
+            case .other: break
             }
         }
     }
 
-    /// Requests from `dump recent` after a (re)connect; known ones become updates.
-    func ingestBackfill(_ requests: [SurgeRequest], now: Date = .now) {
+    /// Requests from `dump recent` / `dump active` after a (re)connect; known ones become updates. Results
+    /// that arrive after the session or device changed (`epoch`) are dropped.
+    func ingestBackfill(_ requests: [SurgeRequest], epoch expected: Int? = nil, now: Date = .now) {
+        if let expected, expected != epoch { return }
         for request in requests.sorted(by: { $0.id < $1.id }) { ingest(request, backfill: true, now: now) }
+    }
+
+    /// After a (re)connect within a session: requests still active here that Surge no longer lists as active
+    /// ended while the stream was away. They are closed when last seen.
+    func reconcileActive(_ active: Set<Int64>, fetchedAt: Date, epoch expected: Int, now: Date = .now) {
+        guard expected == epoch else { return }
+        for id in Array(entries.keys) {
+            guard var entry = entries[id], entry.record.state == .active, !active.contains(id), entry.lastSeen < fetchedAt else { continue }
+            entry.record.state = .completed
+            entry.record.completedAt = max(entry.record.startedAt, entry.lastSeen)
+            entry.finishedAt = now
+            recordSources(&entry, now: now, force: true)
+            enqueue(&entry, now: now)
+            entries[id] = entry
+            markChanged(entry.record, fresh: false)
+        }
     }
 
     /// One `request` / `request-update` event.
     func ingest(_ request: SurgeRequest, backfill: Bool = false, now: Date = .now) {
+        ingest(request, backfill: backfill, now: now, trusted: false)
+    }
+
+    private func ingest(_ request: SurgeRequest, backfill: Bool, now: Date, trusted: Bool) {
         guard recording else {
             if entries[request.id] == nil {
                 if ignored.count > 100_000 { ignored.removeAll() }
@@ -292,6 +472,10 @@ actor CapturePipeline {
             return
         }
         if ignored.contains(request.id) { return }
+        if !backfill, !trusted, holdingSince != nil || looksRecycled(request, now: now) {
+            hold(request, now: now)
+            return
+        }
         let mapped = CaptureRecordMapper.record(from: request, deviceID: settings.deviceID, session: session, now: now)
         if var entry = entries[request.id] {
             update(&entry, with: mapped, request: request, now: now)
@@ -299,26 +483,68 @@ actor CapturePipeline {
         } else {
             create(mapped, request: request, backfill: backfill, now: now)
         }
+        if request.id > (maxSeen?.id ?? .min) { maxSeen = (request.id, mapped.startedAt) }
+    }
+
+    /// Request IDs start over when Surge's engine restarts. Within one session a request's start time never
+    /// changes, a lower ID never started later than a higher one, and a request that started moments ago
+    /// has an ID close to the highest one (long-lived connections with low IDs started long ago).
+    private func looksRecycled(_ request: SurgeRequest, now: Date) -> Bool {
+        guard let start = CaptureRecordMapper.date(request.startDate) else { return false }
+        if let entry = entries[request.id] {
+            return abs(start.timeIntervalSince(entry.record.startedAt)) > 5
+        }
+        guard let maxSeen, request.id < maxSeen.id else { return false }
+        if start.timeIntervalSince(maxSeen.startedAt) > 5 { return true }
+        return maxSeen.id - request.id > 1000 && request.id < maxSeen.id / 2 && now.timeIntervalSince(start) < 30
+    }
+
+    private func hold(_ request: SurgeRequest, now: Date) {
+        if holdingSince == nil {
+            holdingSince = now
+            Self.log.info("Request IDs look recycled; holding events until Surge's session is checked")
+            signalSessionCheck(now: now)
+        }
+        if held.count < 5_000 { held.append(request) }
+    }
+
+    private func signalSessionCheck(now: Date) {
+        if let last = lastSessionCheckSignal, now.timeIntervalSince(last) < 5 { return }
+        lastSessionCheckSignal = now
+        if !pending.signals.contains(.sessionCheck) { pending.signals.append(.sessionCheck) }
+    }
+
+    /// Held events nobody confirmed: ask again, and give up after a minute (the stream restart's backfill
+    /// recovers recent requests of a new session).
+    private func expireHeld(now: Date) {
+        guard let since = holdingSince else { return }
+        let age = now.timeIntervalSince(since)
+        if age > 60 {
+            Self.log.error("Dropping \(self.held.count) events held for a session check that never answered")
+            held.removeAll()
+            holdingSince = nil
+        } else if age > 10 {
+            signalSessionCheck(now: now)
+        }
     }
 
     private func create(_ mapped: RequestRecord, request: SurgeRequest, backfill: Bool, now: Date) {
-        var record = mapped
-        let chain = attributor.chain(pid: request.pid, processPath: request.processPath, startedAt: record.startedAt, inspector: processes)
-        let attribution = attributor.attribute(chain: chain, pathForStatistics: request.pathForStatistics)
-        record.chain = attribution.chain
-        record.appID = attribution.appID
-        record.bundlePath = attribution.bundlePath ?? record.bundlePath
-        queueChain(attribution)
+        var entry = Entry(record: mapped, pathForStatistics: request.pathForStatistics, sourcePort: request.sourcePort,
+                          deviceName: request.deviceName, appsVersion: attributor.appsVersion, firstSeen: now, lastQueued: now,
+                          lastSeen: now, backfilled: backfill)
+        let attribution = attribution(for: entry.record, pathForStatistics: entry.pathForStatistics, reuseChain: false)
+        entry.record.chain = attribution.chain
+        entry.record.appID = attribution.appID
+        entry.record.bundlePath = attribution.bundlePath ?? entry.record.bundlePath
+        queueChain(attribution, now: now)
 
-        var entry = Entry(record: record, pathForStatistics: request.pathForStatistics, sourcePort: request.sourcePort,
-                          appsVersion: attributor.appsVersion, lastQueued: now, backfilled: backfill)
         matchProbe(&entry)
         resolveAddress(&entry, id: request.id, now: now)
         if entry.record.state != .active { entry.finishedAt = now }
+        recordSources(&entry, now: now)
         entries[request.id] = entry
 
         buffer.add(request: entry.record)
-        addSources(for: entry, domain: true, ip: entry.record.remoteIP != nil, now: now)
         if let appID = entry.record.appID, isMonitoring(appID) {
             contactQueue[request.id] = now.addingTimeInterval(contactGrace)
         }
@@ -340,16 +566,19 @@ actor CapturePipeline {
         record.remoteAddress = mapped.remoteAddress ?? record.remoteAddress
         if !mapped.policyPath.isEmpty { record.policyPath = mapped.policyPath }
         record.rule = mapped.rule ?? record.rule
-        record.state = mapped.state
+        // A late `dump recent` snapshot must not turn a finished request back into an active one.
+        if record.state == .active || mapped.state != .active { record.state = mapped.state }
         record.inBytes = max(record.inBytes, mapped.inBytes)
         record.outBytes = max(record.outBytes, mapped.outBytes)
         record.localAddress = mapped.localAddress ?? record.localAddress
         record.interface = mapped.interface ?? record.interface
-        if !mapped.notes.isEmpty { record.notes = mapped.notes }
+        if !mapped.notes.isEmpty, mapped.notes.count >= record.notes.count { record.notes = mapped.notes }
         record.pid = mapped.pid ?? record.pid
         record.processPath = mapped.processPath ?? record.processPath
         entry.sourcePort = request.sourcePort ?? entry.sourcePort
         entry.pathForStatistics = request.pathForStatistics ?? entry.pathForStatistics
+        entry.deviceName = request.deviceName ?? entry.deviceName
+        entry.lastSeen = now
 
         let hadIP = record.remoteIP != nil
         if let ip = mapped.remoteIP, ip != record.remoteIP {
@@ -363,10 +592,8 @@ actor CapturePipeline {
         }
         matchProbe(&entry)
         resolveAddress(&entry, id: request.id, now: now)
-        if !hadIP, entry.record.remoteIP != nil {
-            addSources(for: entry, domain: false, ip: true, now: now)
-            if entry.probeMatched, let port = entry.sourcePort, let ip = entry.record.remoteIP { probes.addIP(ip, sourcePort: port) }
-        }
+        if !hadIP, entry.probeMatched, let port = entry.sourcePort, let ip = entry.record.remoteIP { probes.addIP(ip, sourcePort: port) }
+        recordSources(&entry, now: now)
 
         let finished = wasActive && entry.record.state != .active
         if finished {
@@ -386,226 +613,113 @@ actor CapturePipeline {
         entries[request.id] = entry
         if finished { processContacts(now: now, only: request.id) }
         if !hadIP, entry.record.remoteIP != nil { lateIPContact(id: request.id, now: now) }
+        if let stored = entries[request.id] { entry = stored }
     }
 
-    // MARK: Periodic work
+    // MARK: Attribution
 
-    /// Runs the periodic work until cancelled.
-    func run(interval: Duration = .milliseconds(100)) async {
-        while !Task.isCancelled {
-            await tick()
-            try? await Task.sleep(for: interval)
-        }
+    /// `true` for Tidemark's own requests (the site probe's forwarder, IP lookups).
+    func isOwn(_ record: RequestRecord, chain: [ProcessLink]? = nil) -> Bool {
+        guard let own = settings.ownExecutablePath else { return false }
+        return record.processPath == own || (chain ?? record.chain).last?.path == own
     }
 
-    /// First-contact deadlines, periodic rewrites of active requests, eviction, flushing, spooling and replay.
-    func tick(now: Date = .now) async {
-        processContacts(now: now, only: nil)
-        if now.timeIntervalSince(lastScan) >= 1 {
-            scanForRewrites(now: now)
-            lastScan = now
+    /// The request's process chain and monitored app. Tidemark's own requests never roll up to an app, even
+    /// when Tidemark was launched from inside a monitored app's process tree; they show under Tidemark.
+    private func attribution(for record: RequestRecord, pathForStatistics: String?, reuseChain: Bool) -> CaptureAttributor.Attribution {
+        let chain = reuseChain && !record.chain.isEmpty
+            ? record.chain
+            : attributor.chain(pid: record.pid, processPath: record.processPath, startedAt: record.startedAt, inspector: processes)
+        var attribution = attributor.attribute(chain: chain, pathForStatistics: pathForStatistics)
+        if isOwn(record, chain: chain) {
+            attribution.appID = nil
+            attribution.matchedIndex = nil
+            attribution.bundlePath = settings.ownBundlePath ?? attribution.bundlePath
         }
-        if now.timeIntervalSince(lastEviction) >= 5 {
-            evict(now: now)
-            lastEviction = now
-        }
-        guard !isFlushing else { return }
-        if online {
-            if buffer.shouldFlush(now: now) { await flush(now: now) }
-            if online, !spool.isEmpty, !isFlushing { await replayOldestSegment(now: now) }
-        } else if buffer.requestCount > 0, buffer.shouldFlush(now: now) {
-            spoolRows(buffer.takeRequests())
-            buffer.markFlushed(now: now)
-        }
+        return attribution
     }
 
-    /// Writes (or spools) everything queued. Waits for a flush in progress first.
-    func flushAll(now: Date = .now) async {
-        for _ in 0..<100 where isFlushing { try? await Task.sleep(for: .milliseconds(50)) }
-        processContacts(now: now.addingTimeInterval(contactGrace), only: nil)
-        for id in entries.keys {
-            guard var entry = entries[id], entry.dirty else { continue }
-            enqueue(&entry, now: now)
-            entries[id] = entry
-        }
-        if online {
-            await flush(now: now)
-        } else {
-            spoolRows(buffer.takeRequests())
+    /// Re-runs attribution for a live request and queues first contact when it newly rolls up to a monitoring app.
+    private func refreshAttribution(_ entry: inout Entry, id: Int64, now: Date) {
+        let attribution = attribution(for: entry.record, pathForStatistics: entry.pathForStatistics, reuseChain: true)
+        let newlyAttributed = attribution.appID != nil && attribution.appID != entry.record.appID
+        entry.record.chain = attribution.chain
+        entry.record.appID = attribution.appID
+        entry.record.bundlePath = attribution.bundlePath ?? entry.record.bundlePath
+        entry.appsVersion = attributor.appsVersion
+        queueChain(attribution, now: now)
+        // Traffic from before the app was monitored is history (backfill), not first contact.
+        if newlyAttributed, let appID = attribution.appID, isMonitoring(appID),
+           let app = monitored[appID], entry.record.startedAt >= app.createdAt {
+            contactQueue[id] = now.addingTimeInterval(contactGrace)
         }
     }
 
-    /// Drains the UI changes accumulated since the last call.
-    func drainUpdate() -> CaptureUIUpdate {
-        var update = pending
-        update.records = Array(changed.values)
-        update.fresh = fresh
-        update.bufferedRows = buffer.requestCount + spool.count
-        update.databaseOnline = online
-        update.lastWriteAt = lastWriteAt
-        pending = CaptureUIUpdate()
-        changed.removeAll(keepingCapacity: true)
-        fresh.removeAll(keepingCapacity: true)
-        return update
+    private func queueChain(_ attribution: CaptureAttributor.Attribution, now: Date) {
+        guard !settings.isRemote, let leaf = attribution.chain.last, let start = leaf.startTime else { return }
+        let key = CaptureAttributor.ProcessKey(pid: leaf.pid, startTime: start)
+        // Stored processes are upserted again now and then so `last_seen` (Running / Exited) stays fresh.
+        if let stored = upsertedProcesses[key], stored.appID == attribution.appID,
+           now.timeIntervalSince(stored.at) < processRetouchInterval { return }
+        var chain = attribution.chain
+        if attribution.appID != nil, let index = attribution.matchedIndex { chain = Array(chain[index...]) }
+        guard chain.allSatisfy({ $0.startTime != nil }) else { return }
+        if upsertedProcesses.count > 50_000 { upsertedProcesses.removeAll() }
+        upsertedProcesses[key] = (attribution.appID, now)
+        buffer.add(chain: chain, appID: attribution.appID)
     }
 
-    /// Rows waiting in memory and on disk.
-    var bufferedRows: Int { buffer.requestCount + spool.count }
-
-    // MARK: Lookups
-
-    /// Reads Surge's DNS cache (`dump dns`) and fills waiting requests.
-    func refreshDNSCache(now: Date = .now) async {
-        guard let cache = try? await surge.dnsCache() else { return }
-        for (domain, ips) in cache where !ips.isEmpty {
-            dnsCache[domain.lowercased()] = (ips, now.addingTimeInterval(60))
-        }
-        for host in Array(waitingForHost.keys) {
-            if let ips = dnsCache[host]?.ips { applyResolved(host: host, ips: ips, now: now) }
-        }
-        if dnsCache.count > 50_000 { dnsCache = dnsCache.filter { $0.value.expires > now } }
+    private func matchProbe(_ entry: inout Entry) {
+        guard !entry.probeMatched, let own = settings.ownExecutablePath, entry.record.processPath == own,
+              let port = entry.sourcePort, let match = probes.match(sourcePort: port) else { return }
+        entry.probeMatched = true
+        entry.record.probeSessionID = match.sessionID
+        if let ip = entry.record.remoteIP { probes.addIP(ip, sourcePort: port) }
     }
 
-    private func resolveAddress(_ entry: inout Entry, id: Int64, now: Date) {
-        let host = entry.record.host
-        if entry.record.remoteIP == nil, !host.isEmpty, !HostName.isIPAddress(host) {
-            if let cached = dnsCache[host], cached.expires > now, let ip = Self.preferredIP(cached.ips) {
-                entry.record.remoteIP = ip
-                if entry.probeMatched, let port = entry.sourcePort { probes.addIP(ip, sourcePort: port) }
-            } else if (dnsFailures[host] ?? .distantPast) <= now {
-                waitingForHost[host, default: []].insert(id)
-                if !dnsInFlight.contains(host), !dnsQueue.contains(host) {
-                    if dnsQueue.count >= 512 { dnsQueue.removeFirst() }
-                    dnsQueue.append(host)
-                }
-                pumpDNS()
-            }
-        }
-        if let ip = entry.record.remoteIP, entry.record.geo == nil {
-            if let geo = geoCache[ip] {
-                entry.record.geo = geo
-            } else if !Self.isPrivate(ip), (geoFailures[ip] ?? .distantPast) <= now {
-                waitingForGeo[ip, default: []].insert(id)
-                if !geoInFlight.contains(ip), !geoQueue.contains(ip) {
-                    if geoQueue.count >= 512 { geoQueue.removeFirst() }
-                    geoQueue.append(ip)
-                }
-                pumpGeo()
-            }
-        }
-    }
+    // MARK: Global inventory sources
 
-    private func pumpDNS() {
-        while dnsInFlight.count < maxConcurrentLookups, !dnsQueue.isEmpty {
-            let host = dnsQueue.removeFirst()
-            dnsInFlight.insert(host)
-            let surge = self.surge
-            Task {
-                let result = try? await surge.dnsLookup(host)
-                self.didLookup(host: host, result: result)
-            }
+    /// Records the request's domain and IP in the global inventory (`host_sources`) once each. Sources wait
+    /// for Surge to name the process (a later update usually does); `force` records them without one (when the
+    /// request finished or waited `sourceWait`). Backfilled requests are skipped like their inventory touches:
+    /// a previous run may already have counted them.
+    func recordSources(_ entry: inout Entry, now: Date, force: Bool = false) {
+        let record = entry.record
+        guard !entry.probeMatched, !entry.backfilled, !record.host.isEmpty else { return }
+        let wantsDomain = !entry.domainSourceRecorded && !record.isIPLiteral
+        let address = record.remoteIP ?? (record.isIPLiteral ? record.host : nil)
+        let wantsIP = !entry.ipSourceRecorded && address != nil
+        guard wantsDomain || wantsIP else { return }
+        let knownPath = record.processPath ?? record.bundlePath
+        guard knownPath != nil || force else { return }
+        let path = knownPath ?? ""
+        let title = knownPath == nil ? (entry.deviceName ?? "") : (record.chain.last?.name ?? record.processName)
+        if wantsDomain {
+            buffer.add(source: HostSourceTouch(kind: .domain, value: record.host, deviceID: settings.deviceID, sourcePath: path, sourceTitle: title,
+                                               appID: record.appID, bundlePath: record.bundlePath, seenAt: now, requestDelta: 1, geo: nil))
+            entry.domainSourceRecorded = true
         }
-    }
-
-    private func didLookup(host: String, result: SurgeDNSLookup?, now: Date = .now) {
-        dnsInFlight.remove(host)
-        if let result, !result.addresses.isEmpty {
-            let ttl = min(3600, max(60, result.expiresIn ?? 0))
-            dnsCache[host] = (result.addresses, now.addingTimeInterval(ttl))
-            applyResolved(host: host, ips: result.addresses, now: now)
-        } else {
-            dnsFailures[host] = now.addingTimeInterval(120)
-            waitingForHost[host] = nil
-        }
-        pumpDNS()
-    }
-
-    private func applyResolved(host: String, ips: [String], now: Date) {
-        guard let ids = waitingForHost.removeValue(forKey: host), let ip = Self.preferredIP(ips) else { return }
-        for id in ids {
-            guard var entry = entries[id], entry.record.remoteIP == nil else { continue }
-            entry.record.remoteIP = ip
-            entry.record.geo = geoCache[ip]
-            entry.dirty = true
-            entry.urgent = true
-            if entry.probeMatched, let port = entry.sourcePort { probes.addIP(ip, sourcePort: port) }
-            resolveAddress(&entry, id: id, now: now)
-            entries[id] = entry
-            addSources(for: entry, domain: false, ip: true, now: now)
-            markChanged(entry.record, fresh: false)
-            lateIPContact(id: id, now: now)
-        }
-    }
-
-    private func pumpGeo() {
-        while geoInFlight.count < maxConcurrentLookups, !geoQueue.isEmpty {
-            let ip = geoQueue.removeFirst()
-            geoInFlight.insert(ip)
-            let surge = self.surge
-            let database = self.database
-            let useDatabase = online
-            Task {
-                let geo = await Self.lookupGeo(ip: ip, surge: surge, database: database, useDatabase: useDatabase)
-                self.didLookupGeo(ip: ip, geo: geo)
-            }
-        }
-    }
-
-    /// GeoIP from the shared `ip_info` cache, else from Surge (and saved for every Mac).
-    private static func lookupGeo(ip: String, surge: any SurgeClient, database: any TidemarkDatabase, useDatabase: Bool) async -> GeoInfo? {
-        if useDatabase, let cached = try? await database.ipInfo(ip) { return cached }
-        guard let result = try? await surge.geoIP(ip) else { return nil }
-        let geo = GeoInfo(countryCode: result.country, asn: result.asn, organization: result.organization)
-        if useDatabase { try? await database.saveIPInfo(ip, geo: geo) }
-        return geo
-    }
-
-    private func didLookupGeo(ip: String, geo: GeoInfo?, now: Date = .now) {
-        geoInFlight.remove(ip)
-        let ids = waitingForGeo.removeValue(forKey: ip) ?? []
-        if let geo {
-            if geoCache.count > 50_000 { geoCache.removeAll(keepingCapacity: true) }
-            geoCache[ip] = geo
-            for id in ids {
-                guard var entry = entries[id], entry.record.remoteIP == ip, entry.record.geo == nil else { continue }
-                entry.record.geo = geo
-                entry.dirty = true
-                entry.urgent = true
-                entries[id] = entry
-                markChanged(entry.record, fresh: false)
-            }
-        } else {
-            geoFailures[ip] = now.addingTimeInterval(600)
-        }
-        pumpGeo()
-    }
-
-    /// Prefers an IPv4 address.
-    static func preferredIP(_ ips: [String]) -> String? {
-        ips.first(where: HostName.isIPv4) ?? ips.first
-    }
-
-    /// Loopback, link-local, private, CGNAT and Surge's fake-IP ranges carry no GeoIP data.
-    static func isPrivate(_ ip: String) -> Bool {
-        if ip.contains(":") {
-            let lower = ip.lowercased()
-            return lower == "::1" || lower.hasPrefix("fe80") || lower.hasPrefix("fc") || lower.hasPrefix("fd")
-        }
-        let parts = ip.split(separator: ".").compactMap { Int($0) }
-        guard parts.count == 4 else { return false }
-        switch (parts[0], parts[1]) {
-        case (10, _), (127, _), (0, _), (169, 254), (192, 168): return true
-        case (172, 16...31), (198, 18...19), (100, 64...127): return true
-        default: return false
+        if wantsIP, let address {
+            buffer.add(source: HostSourceTouch(kind: .ip, value: address, deviceID: settings.deviceID, sourcePath: path, sourceTitle: title,
+                                               appID: record.appID, bundlePath: record.bundlePath, seenAt: now, requestDelta: 1, geo: record.geo))
+            entry.ipSourceRecorded = true
         }
     }
 
     // MARK: First contact
 
-    private func isMonitoring(_ appID: AppID) -> Bool { monitored[appID] != nil && !paused.contains(appID) }
+    func isMonitoring(_ appID: AppID) -> Bool { monitored[appID] != nil && !paused.contains(appID) }
+
+    private func isAwaitingInventory(_ appID: AppID, now: Date) -> Bool {
+        guard let deadline = awaitingInventory[appID] else { return false }
+        if deadline > now { return true }
+        awaitingInventory[appID] = nil
+        Self.log.error("Inventory of a new app did not load in time; detecting its first contacts anyway")
+        return false
+    }
 
     /// Evaluates queued requests whose remote IP and GeoIP data are known (or whose grace period ran out).
-    private func processContacts(now: Date, only id: Int64?) {
+    func processContacts(now: Date, only id: Int64?) {
         let ids = id.map { [$0] } ?? Array(contactQueue.keys)
         for id in ids {
             guard let deadline = contactQueue[id] else { continue }
@@ -614,7 +728,7 @@ actor CapturePipeline {
                 continue
             }
             let record = entry.record
-            let awaiting = record.appID.map { awaitingInventory.contains($0) } ?? false
+            let awaiting = record.appID.map { isAwaitingInventory($0, now: now) } ?? false
             guard knownLoaded, !awaiting else {
                 // Without the inventory every host would look new; skip requests that waited too long.
                 if now.timeIntervalSince(deadline) > 60 { contactQueue[id] = nil }
@@ -628,31 +742,139 @@ actor CapturePipeline {
             }
             guard ipReady || now >= deadline else { continue }
             contactQueue[id] = nil
-            evaluateContact(record: record, includeDomain: true, touch: !entry.backfilled)
+            evaluateContact(id: id, includeDomain: true)
         }
     }
 
     /// The IP of a request whose first contact was already evaluated became known later.
-    private func lateIPContact(id: Int64, now: Date) {
+    func lateIPContact(id: Int64, now: Date) {
         guard contactQueue[id] == nil, knownLoaded, let entry = entries[id], let appID = entry.record.appID, isMonitoring(appID) else { return }
-        evaluateContact(record: entry.record, includeDomain: false, touch: !entry.backfilled)
+        evaluateContact(id: id, includeDomain: false)
     }
 
-    private func evaluateContact(record: RequestRecord, includeDomain: Bool, touch: Bool) {
-        guard recording, let appID = record.appID, let app = monitored[appID], !paused.contains(appID) else { return }
+    private func evaluateContact(id: Int64, includeDomain: Bool) {
+        guard var entry = entries[id] else { return }
+        let record = entry.record
+        guard recording, !isOwn(record), let appID = record.appID, let app = monitored[appID], !paused.contains(appID) else { return }
         // A late IP only adds IP information; its domain was already evaluated (and touched) with the request.
         if !includeDomain, !record.isIPLiteral, !known.containsDomain(record.host, appID: appID) { return }
         var contact = CaptureFirstContactDetector.evaluate(record: record, app: app, known: &known, classifier: classifier, mutes: mutes)
-        if !touch { contact.touches.removeAll() } else if !includeDomain { contact.touches.removeAll { $0.kind == .domain } }
+        if entry.backfilled { contact.touches.removeAll() } else if !includeDomain { contact.touches.removeAll { $0.kind == .domain } }
+        if !includeDomain, entry.alertDrafted {
+            // At most one alert per request, however late its IP resolved: the domain alert covered it.
+            contact.alert = nil
+            contact.fallback = nil
+        }
+        if contact.alert != nil {
+            entry.alertDrafted = true
+            entries[id] = entry
+        }
         for host in contact.hosts { hostOrigins["\(appID.uuidString)|\(host.id)"] = record.key }
         if hostOrigins.count > 20_000 { hostOrigins.removeAll() }
         buffer.add(contact)
         if !contact.hosts.isEmpty { pending.inventoryChanged.insert(appID) }
     }
 
-    // MARK: Writes
+    // MARK: Periodic work
 
-    private func enqueue(_ entry: inout Entry, now: Date) {
+    /// Runs the periodic work until cancelled. Writes run beside it, so a slow database never stalls first
+    /// contact deadlines, rewrites or eviction.
+    func run(interval: Duration = .milliseconds(100)) async {
+        while !Task.isCancelled {
+            await tick(now: .now, waitForWrites: false)
+            try? await Task.sleep(for: interval)
+        }
+    }
+
+    /// First-contact deadlines, periodic rewrites of active requests, eviction, flushing, spooling and replay.
+    /// `waitForWrites` returns only after this round's database writes finished (tests).
+    func tick(now: Date = .now, waitForWrites: Bool = true) async {
+        processContacts(now: now, only: nil)
+        if now.timeIntervalSince(lastScan) >= 1 {
+            scanForRewrites(now: now)
+            lastScan = now
+        }
+        if now.timeIntervalSince(lastEviction) >= 5 {
+            evict(now: now)
+            lastEviction = now
+        }
+        expireHeld(now: now)
+        if isFlushing {
+            // A write is taking long: new rows go to disk instead of piling up in memory.
+            if let started = flushStartedAt, now.timeIntervalSince(started) > 5, buffer.requestCount > 0, buffer.shouldFlush(now: now) {
+                spoolRows(buffer.takeRequests())
+                buffer.markFlushed(now: now)
+            }
+            return
+        }
+        if online {
+            guard buffer.shouldFlush(now: now) || !spool.isEmpty || !sessionCloses.isEmpty || !auxiliaryRestored
+                || shouldSaveSnapshot(now: now) else { return }
+            isFlushing = true
+            flushStartedAt = now
+            let cycle = Task { await self.writeCycle(now: now) }
+            if waitForWrites { await cycle.value }
+        } else if buffer.requestCount > 0, buffer.shouldFlush(now: now) {
+            spoolRows(buffer.takeRequests())
+            buffer.markFlushed(now: now)
+        }
+    }
+
+    /// Writes (or spools) everything queued. Waits briefly for a flush in progress; when that flush is stuck
+    /// its rows and the queue go to the spool instead. `final` (quitting) also closes active requests,
+    /// keeps unwritten first-contact work on disk and saves the shared state snapshot.
+    func flushAll(now: Date = .now, final: Bool = false) async {
+        for _ in 0..<(final ? 20 : 100) where isFlushing { try? await Task.sleep(for: .milliseconds(50)) }
+        if final {
+            retireEntries(closingAt: nil, now: now)
+        } else {
+            processContacts(now: now.addingTimeInterval(contactGrace), only: nil)
+            for id in Array(entries.keys) {
+                guard var entry = entries[id], entry.dirty else { continue }
+                enqueue(&entry, now: now)
+                entries[id] = entry
+            }
+        }
+        if isFlushing {
+            spoolRows(inFlightRequests + buffer.takeRequests())
+        } else if online {
+            isFlushing = true
+            flushStartedAt = now
+            await flushBatch(now: now, budget: final ? finalFlushBudget : flushBudget)
+            isFlushing = false
+            flushStartedAt = nil
+        } else {
+            spoolRows(buffer.takeRequests())
+        }
+        if final {
+            sidecar.saveAuxiliary(buffer.takeAuxiliary())
+            saveSnapshot(now: now)
+        }
+    }
+
+    /// Drains the UI changes accumulated since the last call.
+    func drainUpdate() -> CaptureUIUpdate {
+        var update = pending
+        update.records = Array(changed.values)
+        update.fresh = fresh
+        update.bufferedRows = offlineBacklog
+        update.databaseOnline = online
+        update.lastWriteAt = lastWriteAt
+        pending = CaptureUIUpdate()
+        changed.removeAll(keepingCapacity: true)
+        fresh.removeAll(keepingCapacity: true)
+        return update
+    }
+
+    /// Rows waiting because PostgreSQL is unreachable: the spool, plus the queue while offline.
+    var offlineBacklog: Int { spool.count + (online ? 0 : buffer.requestCount) }
+
+    /// Same as `offlineBacklog`.
+    var bufferedRows: Int { offlineBacklog }
+
+    // MARK: Rewrites and eviction
+
+    func enqueue(_ entry: inout Entry, now: Date) {
         buffer.add(request: entry.record)
         entry.lastQueued = now
         entry.dirty = false
@@ -660,14 +882,27 @@ actor CapturePipeline {
     }
 
     private func scanForRewrites(now: Date) {
-        for (id, entry) in entries where entry.dirty {
-            let quiet = now.timeIntervalSince(entry.lastQueued)
-            let due = entry.record.state != .active || quiet >= activeRewriteInterval || (entry.urgent && quiet >= urgentRewriteDelay)
-            guard due else { continue }
+        var updates: [(Int64, Entry)] = []
+        for (id, entry) in entries {
             var updated = entry
-            enqueue(&updated, now: now)
-            entries[id] = updated
+            var touched = false
+            let sourcesPending = !entry.domainSourceRecorded || !entry.ipSourceRecorded
+            if sourcesPending, !entry.backfilled, !entry.probeMatched,
+               entry.finishedAt != nil || now.timeIntervalSince(entry.firstSeen) >= sourceWait {
+                recordSources(&updated, now: now, force: true)
+                touched = updated.domainSourceRecorded != entry.domainSourceRecorded || updated.ipSourceRecorded != entry.ipSourceRecorded
+            }
+            if updated.dirty {
+                let quiet = now.timeIntervalSince(updated.lastQueued)
+                let due = updated.record.state != .active || quiet >= activeRewriteInterval || (updated.urgent && quiet >= urgentRewriteDelay)
+                if due {
+                    enqueue(&updated, now: now)
+                    touched = true
+                }
+            }
+            if touched { updates.append((id, updated)) }
         }
+        for (id, entry) in updates { entries[id] = entry }
     }
 
     private func evict(now: Date) {
@@ -677,187 +912,29 @@ actor CapturePipeline {
         }
         if entries.count > 20_000 {
             let oldest = entries.sorted { $0.value.record.startedAt < $1.value.record.startedAt }.prefix(entries.count - 20_000)
-            for (id, _) in oldest { entries[id] = nil }
+            for (id, entry) in oldest {
+                if entry.dirty { buffer.add(request: entry.record) }
+                entries[id] = nil
+                contactQueue[id] = nil
+            }
+        }
+        // Lookups whose requests are gone have nobody to fill in.
+        waitingForHost = waitingForHost.compactMapValues { ids in
+            let alive = ids.filter { entries[$0] != nil }
+            return alive.isEmpty ? nil : alive
+        }
+        waitingForGeo = waitingForGeo.compactMapValues { ids in
+            let alive = ids.filter { entries[$0] != nil }
+            return alive.isEmpty ? nil : alive
         }
         dnsFailures = dnsFailures.filter { $0.value > now }
         geoFailures = geoFailures.filter { $0.value > now }
-    }
-
-    private func queueChain(_ attribution: CaptureAttributor.Attribution) {
-        guard !settings.isRemote, let leaf = attribution.chain.last, let start = leaf.startTime else { return }
-        let key = CaptureAttributor.ProcessKey(pid: leaf.pid, startTime: start)
-        if let stored = upsertedProcesses[key], stored == attribution.appID { return }
-        var chain = attribution.chain
-        if attribution.appID != nil, let index = attribution.matchedIndex { chain = Array(chain[index...]) }
-        guard chain.allSatisfy({ $0.startTime != nil }) else { return }
-        if upsertedProcesses.count > 50_000 { upsertedProcesses.removeAll() }
-        upsertedProcesses[key] = attribution.appID
-        buffer.add(chain: chain, appID: attribution.appID)
-    }
-
-    private func addSources(for entry: Entry, domain: Bool, ip: Bool, now: Date) {
-        let record = entry.record
-        guard !entry.probeMatched, !record.host.isEmpty else { return }
-        let path = record.processPath ?? record.bundlePath ?? "unknown"
-        let title = record.chain.last?.name ?? record.processName
-        if domain, !record.isIPLiteral {
-            buffer.add(source: HostSourceTouch(kind: .domain, value: record.host, deviceID: settings.deviceID, sourcePath: path, sourceTitle: title,
-                                               appID: record.appID, bundlePath: record.bundlePath, seenAt: now, requestDelta: 1, geo: nil))
-        }
-        if ip, let address = record.remoteIP ?? (record.isIPLiteral ? record.host : nil) {
-            buffer.add(source: HostSourceTouch(kind: .ip, value: address, deviceID: settings.deviceID, sourcePath: path, sourceTitle: title,
-                                               appID: record.appID, bundlePath: record.bundlePath, seenAt: now, requestDelta: 1, geo: record.geo))
-        }
-    }
-
-    private func matchProbe(_ entry: inout Entry) {
-        guard !entry.probeMatched, let own = settings.ownExecutablePath, entry.record.processPath == own,
-              let port = entry.sourcePort, let match = probes.match(sourcePort: port) else { return }
-        entry.probeMatched = true
-        entry.record.probeSessionID = match.sessionID
-        if let ip = entry.record.remoteIP { probes.addIP(ip, sourcePort: port) }
-    }
-
-    private func flush(now: Date) async {
-        isFlushing = true
-        defer { isFlushing = false }
-        var batch = buffer.takeAll(now: now)
-        // Keep request order: while older rows wait on disk, newer ones queue behind them.
-        if !spool.isEmpty, !batch.requests.isEmpty {
-            spoolRows(batch.requests)
-            batch.requests = []
-        }
-        guard !batch.isEmpty else { return }
-        do {
-            while let write = batch.chains.first {
-                _ = try await database.upsertProcessChain(deviceID: settings.deviceID, chain: write.chain, appID: write.appID)
-                batch.chains.removeFirst()
-            }
-            if !batch.requests.isEmpty {
-                let ids = try await database.upsertRequests(batch.requests)
-                didWrite(batch.requests, ids: ids, now: now)
-                batch.requests = []
-            }
-            if !batch.newHosts.isEmpty {
-                let winners = try await database.insertAppHosts(batch.newHosts)
-                batch.alerts.append(contentsOf: confirm(winners: winners, drafts: batch.drafts, now: now))
-                batch.newHosts = []
-                batch.drafts = []
-            } else if !batch.drafts.isEmpty {
-                batch.drafts = []
-            }
-            if !batch.touches.isEmpty {
-                try await database.touchAppHosts(batch.touches)
-                batch.touches = []
-            }
-            if !batch.sources.isEmpty {
-                try await database.touchHostSources(batch.sources)
-                batch.sources = []
-            }
-            if !batch.alerts.isEmpty {
-                let inserted = try await database.insertAlerts(batch.alerts)
-                pending.alerts.append(contentsOf: inserted)
-                batch.alerts = []
-            }
-        } catch {
-            if !batch.requests.isEmpty {
-                spoolRows(batch.requests)
-                batch.requests = []
-            }
-            buffer.restore(batch)
-            goOffline(error)
-        }
-    }
-
-    /// Stores row IDs and write times back into live rows.
-    private func didWrite(_ rows: [RequestRecord], ids: [RequestKey: Int64], now: Date) {
-        var firstWrites = 0
-        for row in rows {
-            if row.rowID == nil { firstWrites += 1 }
-            guard row.key.session == session, var entry = entries[row.key.surgeID], entry.record.key == row.key else { continue }
-            let rowID = ids[row.key] ?? entry.record.rowID
-            guard rowID != entry.record.rowID || entry.record.writtenAt == nil else {
-                entry.record.writtenAt = now
-                entries[row.key.surgeID] = entry
-                continue
-            }
-            entry.record.rowID = rowID
-            entry.record.writtenAt = now
-            entries[row.key.surgeID] = entry
-            markChanged(entry.record, fresh: false)
-        }
-        pending.rowsWritten += firstWrites
-        lastWriteAt = now
-    }
-
-    /// Turns drafts whose inventory entry won the cross-Mac race into alerts and marks their requests NEW.
-    private func confirm(winners: [AppHost], drafts: [CaptureAlertDraft], now: Date) -> [AlertItem] {
-        var alerts: [AlertItem] = []
-        let won = Set(winners.map { "\($0.appID.uuidString)|\($0.id)" })
-        for key in won {
-            guard let origin = hostOrigins.removeValue(forKey: key), origin.session == session,
-                  var entry = entries[origin.surgeID], !entry.record.isNew else { continue }
-            entry.record.isNew = true
-            entry.dirty = true
-            entry.urgent = true
-            entries[origin.surgeID] = entry
-            markChanged(entry.record, fresh: false)
-        }
-        var seen: Set<String> = []
-        for draft in drafts {
-            let key = "\(draft.appID.uuidString)|\(draft.hostID)"
-            guard won.contains(key), seen.insert(key).inserted else { continue }
-            let rowID = draft.requestKey.session == session ? entries[draft.requestKey.surgeID]?.record.rowID : nil
-            alerts.append(draft.item(deviceID: settings.deviceID, requestRowID: rowID, createdAt: now))
-        }
-        return alerts
-    }
-
-    private func replayOldestSegment(now: Date) async {
-        isFlushing = true
-        defer { isFlushing = false }
-        guard let segment = spool.oldestSegment() else { return }
-        let chunkSize = max(100, min(1000, settings.batchRows))
-        var start = 0
-        while start < segment.rows.count {
-            let chunk = Array(segment.rows[start..<min(start + chunkSize, segment.rows.count)])
-            do {
-                let ids = try await database.upsertRequests(chunk)
-                didWrite(chunk, ids: ids, now: now)
-            } catch DatabaseError.query(let message) {
-                // A row the server refuses must not block the spool: write the rest one by one.
-                Self.log.error("Replay batch rejected: \(message, privacy: .public)")
-                for row in chunk {
-                    if let ids = try? await database.upsertRequests([row]) { didWrite([row], ids: ids, now: now) }
-                }
-            } catch {
-                goOffline(error)
-                return
-            }
-            start += chunkSize
-        }
-        spool.removeSegment(segment.id)
-    }
-
-    private func spoolRows(_ rows: [RequestRecord]) {
-        guard !rows.isEmpty else { return }
-        do {
-            try spool.append(rows)
-        } catch {
-            Self.log.error("Could not spool \(rows.count) rows: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
-    private func goOffline(_ error: any Error) {
-        guard online else { return }
-        online = false
-        pending.databaseFailure = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        Self.log.error("PostgreSQL write failed: \(error.localizedDescription, privacy: .public)")
+        awaitingInventory = awaitingInventory.filter { $0.value > now }
     }
 
     // MARK: UI
 
-    private func markChanged(_ record: RequestRecord, fresh isFresh: Bool) {
+    func markChanged(_ record: RequestRecord, fresh isFresh: Bool) {
         changed[record.key] = record
         if isFresh { fresh.insert(record.key) }
     }

@@ -69,6 +69,68 @@ struct CaptureSpoolTests {
         #expect(ids == [4, 5, 6, 7, 8])
     }
 
+    @Test func trimsWholeSegmentsWithoutRewritingFiles() throws {
+        let temp = CaptureTempDirectory()
+        var spool = CaptureSpool(directory: temp.url, limit: 100, segmentSize: 50)
+        try spool.append(rows(1...150))
+        let kept = spool.count
+        #expect(kept == 100)
+        var ids: [Int64] = []
+        while let segment = spool.oldestSegment() {
+            ids += segment.rows.map(\.key.surgeID)
+            spool.removeSegment(segment.id)
+        }
+        #expect(ids == Array(51...150))
+    }
+
+    @Test func skipsAnUnreadableSegment() throws {
+        let temp = CaptureTempDirectory()
+        var spool = CaptureSpool(directory: temp.url, limit: 1000, segmentSize: 3)
+        try spool.append(rows(1...6))
+        let first = temp.url.appending(path: "000001.jsonl")
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: first.path(percentEncoded: false))
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: temp.url.appending(path: "000001.unreadable").path(percentEncoded: false)) }
+
+        let opened = spool.openOldestSegment()
+        let segment = try #require(opened)
+        #expect(CaptureSpool.decode(segment.lines[...]).map(\.key.surgeID) == [4, 5, 6])
+        let left = spool.count
+        #expect(left == 3)
+        #expect(FileManager.default.fileExists(atPath: temp.url.appending(path: "000001.unreadable").path(percentEncoded: false)), "kept aside")
+    }
+
+    @Test func keepsRejectedRowsAside() throws {
+        let temp = CaptureTempDirectory()
+        var spool = CaptureSpool(directory: temp.url, limit: 1000)
+        spool.quarantine(rows(1...2))
+        spool.quarantine(rows(3...3))
+        let text = try String(contentsOf: spool.quarantineURL, encoding: .utf8)
+        #expect(text.split(separator: "\n").count == 3)
+        let empty = spool.isEmpty
+        #expect(empty, "rejected rows are not replayed")
+    }
+
+    @Test func savesSharedStateAndFirstContactWork() throws {
+        let temp = CaptureTempDirectory()
+        let sidecar = CaptureSidecar(directory: temp.url)
+        let app = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
+        sidecar.saveSnapshot(CaptureStateSnapshot(savedAt: .distantPast, apps: [app], mutes: ["*.example.com"], known: [app.id: ["domain:a.com"]]))
+        let snapshot = try #require(sidecar.loadSnapshot())
+        #expect(snapshot.apps == [app] && snapshot.mutes == ["*.example.com"] && snapshot.known == [app.id: ["domain:a.com"]])
+
+        var batch = CaptureWriteBuffer.Batch()
+        batch.newHosts = [AppHost(appID: app.id, kind: .domain, value: "a.com", site: "a.com", firstSeen: .distantPast, lastSeen: .distantPast,
+                                  requestCount: 1, processName: "node", policy: nil, geo: nil, isDirect: false, hosts: [], firstDeviceID: device)]
+        batch.sources = [HostSourceTouch(kind: .domain, value: "a.com", deviceID: device, sourcePath: "/usr/bin/curl", sourceTitle: "curl",
+                                         appID: app.id, bundlePath: nil, seenAt: .distantPast, requestDelta: 1, geo: nil)]
+        sidecar.saveAuxiliary(batch)
+        sidecar.saveAuxiliary(batch)
+        let restored = try #require(sidecar.takeAuxiliary())
+        #expect(restored.newHosts.count == 2 && restored.newHosts.first?.firstDeviceID == device)
+        #expect(restored.sources.first?.sourcePath == "/usr/bin/curl")
+        #expect(sidecar.takeAuxiliary() == nil, "taken once")
+    }
+
     @Test func appendsDuringReplayGoToANewSegment() throws {
         let temp = CaptureTempDirectory()
         var spool = CaptureSpool(directory: temp.url, limit: 100, segmentSize: 50)

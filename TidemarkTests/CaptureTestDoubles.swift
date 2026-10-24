@@ -127,28 +127,52 @@ final class CaptureFakeSurge: SurgeClient {
         var httpPort = 6152
         var startTime: Double = 1_792_000_000
         var recent: [SurgeRequest] = []
+        var active: [SurgeRequest] = []
         var dnsLookups: [String] = []
         var externalIPCalls: [String] = []
+        /// `events()` stays open without delivering anything until the consumer is cancelled.
+        var silentStream = false
+        var eventsCalls = 0
+        var statusCalls = 0
+        /// Open silent streams; `emit(_:)` delivers to them.
+        var streams: [AsyncThrowingStream<SurgeEvent, Error>.Continuation] = []
     }
 
     let endpoint: SurgeEndpoint
     let state = Mutex(State())
 
-    init(remote: String? = nil) {
-        endpoint = SurgeEndpoint(cliPath: "/usr/bin/false", remote: remote, password: nil)
+    init(remote: String? = nil, cliPath: String = "/usr/bin/false") {
+        endpoint = SurgeEndpoint(cliPath: cliPath, remote: remote, password: nil)
     }
 
     func update(_ body: (inout State) -> Void) { state.withLock { body(&$0) } }
     var snapshot: State { state.withLock { $0 } }
 
-    func events() -> AsyncThrowingStream<SurgeEvent, Error> { AsyncThrowingStream { $0.finish() } }
+    func events() -> AsyncThrowingStream<SurgeEvent, Error> {
+        let silent = state.withLock { s -> Bool in
+            s.eventsCalls += 1
+            return s.silentStream
+        }
+        guard silent else { return AsyncThrowingStream { $0.finish() } }
+        let (stream, continuation) = AsyncThrowingStream<SurgeEvent, Error>.makeStream()
+        state.withLock { $0.streams.append(continuation) }
+        return stream
+    }
+    /// Delivers an event to every open silent stream.
+    func emit(_ event: SurgeEvent) {
+        for continuation in snapshot.streams { continuation.yield(event) }
+    }
     func status() async throws -> SurgeStatus {
-        SurgeStatus(version: "6.10.0", build: nil, profile: nil, mode: nil, globalPolicy: nil, deviceName: nil, deviceIdentifier: nil,
-                    controllerProtocol: 25, startTime: snapshot.startTime, uptime: nil, features: nil)
+        let start = state.withLock { s -> Double in
+            s.statusCalls += 1
+            return s.startTime
+        }
+        return SurgeStatus(version: "6.10.0", build: nil, profile: nil, mode: nil, globalPolicy: nil, deviceName: nil, deviceIdentifier: nil,
+                           controllerProtocol: 25, startTime: start, uptime: nil, features: nil)
     }
     func environment() async throws -> SurgeEnvironment { snapshot.environment }
     func recentRequests() async throws -> [SurgeRequest] { snapshot.recent }
-    func activeRequests() async throws -> [SurgeRequest] { [] }
+    func activeRequests() async throws -> [SurgeRequest] { snapshot.active }
     func dnsLookup(_ domain: String) async throws -> SurgeDNSLookup {
         let ips = state.withLock { s -> [String]? in
             s.dnsLookups.append(domain)
@@ -183,9 +207,20 @@ final class CaptureFakeSurge: SurgeClient {
 }
 
 /// In-memory database that records what the engine writes. `failing` makes every write throw
-/// `DatabaseError.unreachable`.
+/// `DatabaseError.unreachable`; `refusingEverything` makes request writes throw `DatabaseError.query`;
+/// `enforcesForeignKeys` refuses rows that name an app missing from `appList`, like PostgreSQL's foreign keys.
 actor CaptureFakeDatabase: TidemarkDatabase {
     var failing = false
+    var refusingEverything = false
+    var enforcesForeignKeys = false
+    /// Request rows with these hosts are always refused (`DatabaseError.query`).
+    var refusedHosts: Set<String> = []
+    /// Request writes hang until cancelled (a black-holed connection).
+    var stallingRequests = false
+    var closedSessions: [(deviceID: DeviceID, before: Int64, at: Date)] = []
+    var knownHostsCalls = 0
+    /// Returned by `alerts(after:excluding:)` (alerts other Macs wrote).
+    var otherMacAlerts: [AlertItem] = []
     var chains: [(chain: [ProcessLink], appID: AppID?)] = []
     /// Every request row written, in order (spool replays included).
     var writes: [RequestRecord] = []
@@ -205,11 +240,28 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     private var nextID: Int64 = 1
 
     func setFailing(_ on: Bool) { failing = on }
+    func setRefusingEverything(_ on: Bool) { refusingEverything = on }
+    func setEnforcesForeignKeys(_ on: Bool) { enforcesForeignKeys = on }
+    func setRefusedHosts(_ hosts: Set<String>) { refusedHosts = hosts }
+    func setStallingRequests(_ on: Bool) { stallingRequests = on }
+    func setApps(_ apps: [MonitoredApp]) { appList = apps }
+    func setMutes(_ patterns: [String]) { mutesList = patterns }
+    func setOtherMacAlerts(_ alerts: [AlertItem]) { otherMacAlerts = alerts }
     func setKnown(_ value: [AppID: Set<String>]) { known = value }
+    /// Pretends a row was written before (e.g. by an earlier run).
+    func preinsertRow(_ row: RequestRecord) {
+        rowIDs[row.key] = newID()
+        rows[row.key] = row
+    }
     /// Pretends another Mac already inserted this inventory entry.
     func preinsert(_ host: AppHost) { appHosts["\(host.appID.uuidString)|\(host.id)"] = host }
 
     private func check() throws { if failing { throw DatabaseError.unreachable("test") } }
+    /// The foreign key `app_id → apps(id)`.
+    private func checkApp(_ appID: AppID?) throws {
+        guard enforcesForeignKeys, let appID, !appList.contains(where: { $0.id == appID }) else { return }
+        throw DatabaseError.query("insert or update violates foreign key constraint (app \(appID))")
+    }
     private func newID() -> Int64 {
         defer { nextID += 1 }
         return nextID
@@ -239,16 +291,43 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func backfill(appID: AppID, bundlePath: String) async throws -> Int64 { 0 }
 
     func upsertRequests(_ rows: [RequestRecord]) async throws -> [RequestKey: Int64] {
+        try await upsertRequestsCountingInserts(rows).ids
+    }
+    func upsertRequestsCountingInserts(_ rows: [RequestRecord]) async throws -> RequestUpsertResult {
         try check()
-        var result: [RequestKey: Int64] = [:]
+        if stallingRequests {
+            try await Task.sleep(for: .seconds(3600))
+            throw CancellationError()
+        }
+        if refusingEverything { throw DatabaseError.query("could not extend file: No space left on device") }
         for row in rows {
+            if refusedHosts.contains(row.host) { throw DatabaseError.query("value too long for \(row.host)") }
+            try checkApp(row.appID)
+        }
+        var result: [RequestKey: Int64] = [:]
+        var inserted = 0
+        for row in rows {
+            if rowIDs[row.key] == nil { inserted += 1 }
             let id = rowIDs[row.key] ?? newID()
             rowIDs[row.key] = id
             self.rows[row.key] = row
             writes.append(row)
             result[row.key] = id
         }
-        return result
+        return RequestUpsertResult(ids: result, inserted: inserted)
+    }
+    func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64 {
+        try check()
+        closedSessions.append((deviceID, session, date))
+        var closed: Int64 = 0
+        for (key, row) in rows where key.deviceID == deviceID && key.session < session && row.state == .active {
+            var done = row
+            done.state = .completed
+            done.completedAt = done.completedAt ?? date
+            rows[key] = done
+            closed += 1
+        }
+        return closed
     }
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage { RequestPage(rows: [], totalCount: 0, elapsed: .zero) }
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram { Histogram(start: .now, end: .now, counts: []) }
@@ -260,14 +339,20 @@ actor CaptureFakeDatabase: TidemarkDatabase {
 
     func upsertProcessChain(deviceID: DeviceID, chain: [ProcessLink], appID: AppID?) async throws -> Int64? {
         try check()
+        try checkApp(appID)
         chains.append((chain, appID))
         return newID()
     }
     func processTree(appID: AppID, scope: DeviceScope) async throws -> [ProcessNode] { [] }
 
-    func knownHosts() async throws -> [AppID: Set<String>] { try check(); return known }
+    func knownHosts() async throws -> [AppID: Set<String>] {
+        try check()
+        knownHostsCalls += 1
+        return known
+    }
     func insertAppHosts(_ hosts: [AppHost]) async throws -> [AppHost] {
         try check()
+        for host in hosts { try checkApp(host.appID) }
         var won: [AppHost] = []
         for host in hosts {
             let key = "\(host.appID.uuidString)|\(host.id)"
@@ -277,9 +362,17 @@ actor CaptureFakeDatabase: TidemarkDatabase {
         }
         return won
     }
-    func touchAppHosts(_ hosts: [AppHost]) async throws { try check(); touches.append(contentsOf: hosts) }
+    func touchAppHosts(_ hosts: [AppHost]) async throws {
+        try check()
+        // Unknown entries are ignored, like the UPDATE … FROM (VALUES …) join.
+        touches.append(contentsOf: hosts.filter { host in !enforcesForeignKeys || appList.contains { $0.id == host.appID } })
+    }
     func appHosts(_ appID: AppID, scope: DeviceScope) async throws -> [AppHost] { [] }
-    func touchHostSources(_ sources: [HostSourceTouch]) async throws { try check(); self.sources.append(contentsOf: sources) }
+    func touchHostSources(_ sources: [HostSourceTouch]) async throws {
+        try check()
+        for source in sources { try checkApp(source.appID) }
+        self.sources.append(contentsOf: sources)
+    }
     func inventory(kind: HostKind?, search: String, scope: DeviceScope) async throws -> [InventoryEntry] { [] }
 
     func ipInfo(_ ip: String) async throws -> GeoInfo? { ipInfoCache[ip] }
@@ -287,6 +380,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
 
     func insertAlerts(_ alerts: [AlertItem]) async throws -> [AlertItem] {
         try check()
+        for alert in alerts { try checkApp(alert.appID) }
         let inserted = alerts.map { alert -> AlertItem in
             var a = alert
             a.id = newID()
@@ -296,7 +390,9 @@ actor CaptureFakeDatabase: TidemarkDatabase {
         return inserted
     }
     func alerts(filter: AlertFilter, appID: AppID?, scope: DeviceScope, limit: Int) async throws -> [AlertItem] { alertsInserted }
-    func alerts(after id: Int64, excluding: DeviceID?) async throws -> [AlertItem] { [] }
+    func alerts(after id: Int64, excluding: DeviceID?) async throws -> [AlertItem] {
+        otherMacAlerts.filter { $0.id > id && $0.deviceID != excluding }
+    }
     func unreadAlertCount(scope: DeviceScope) async throws -> Int { alertsInserted.filter(\.isUnread).count }
     func markAlertsRead(_ ids: [Int64]) async throws {}
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws {}
