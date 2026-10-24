@@ -429,7 +429,9 @@ final class CaptureEngine {
                     await pipeline.ingestBackfill((recentRequests ?? []) + (activeRequests ?? []), epoch: epoch)
                     // Requests that ended while the stream was away get no completion event.
                     if let activeRequests {
-                        await pipeline.reconcileActive(Set(activeRequests.map(\.id)), fetchedAt: fetchedAt, epoch: epoch)
+                        let ids = Set(activeRequests.map(\.id))
+                        await pipeline.reconcileActive(ids, fetchedAt: fetchedAt, epoch: epoch)
+                        await pipeline.closeVanished(ids, fetchedAt: fetchedAt, epoch: epoch)
                     }
                 }
                 defer { backfill.cancel() }

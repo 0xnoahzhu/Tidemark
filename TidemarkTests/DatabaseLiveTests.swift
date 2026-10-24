@@ -1169,6 +1169,27 @@ struct DatabaseLiveTests {
 
     // MARK: - Queries
 
+    @Test func closingRequestsThatEndedWhileTidemarkWasAway() async throws {
+        try await withTestDatabase { db in
+            let mac = Fixture.device("MacBook Pro")
+            try await db.upsertDevice(mac)
+            var late = Fixture.request(device: mac.id, id: 4)
+            late.startedAt = Fixture.now.addingTimeInterval(10)
+            var otherSession = Fixture.request(device: mac.id, id: 5)
+            otherSession.key.session = Fixture.session - 60_000
+            try await db.upsertRequests([
+                Fixture.request(device: mac.id, id: 1), Fixture.request(device: mac.id, id: 2),
+                Fixture.request(device: mac.id, id: 3), late, otherSession,
+            ])
+            // Surge still lists 1; 4 started after the listing; 5 belongs to another session.
+            let listedAt = Fixture.now
+            #expect(try await db.closeVanishedRequests(deviceID: mac.id, session: Fixture.session, keeping: [1],
+                                                       startedBefore: listedAt, at: listedAt) == 2)
+            let states = Dictionary(uniqueKeysWithValues: try await db.queryRequests(RequestQuery(range: .all)).rows.map { ($0.key.surgeID, $0.state) })
+            #expect(states == [1: .active, 2: .completed, 3: .completed, 4: .active, 5: .active])
+        }
+    }
+
     @Test func explicitIntervalsAndKeysetPaging() async throws {
         try await withTestDatabase { db in
             let mac = Fixture.device("MacBook Pro")

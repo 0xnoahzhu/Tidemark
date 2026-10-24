@@ -462,6 +462,15 @@ actor CapturePipeline {
         }
     }
 
+    /// Closes this session's rows the database still holds as active although Surge no longer lists them
+    /// (connections that ended while Tidemark was not running). Best effort: a failure leaves them for the
+    /// next reconnect.
+    func closeVanished(_ active: Set<Int64>, fetchedAt: Date, epoch expected: Int) async {
+        guard expected == epoch, online, session != 0 else { return }
+        _ = try? await database.closeVanishedRequests(deviceID: settings.deviceID, session: session,
+                                                      keeping: Array(active), startedBefore: fetchedAt, at: fetchedAt)
+    }
+
     /// One `request` / `request-update` event.
     func ingest(_ request: SurgeRequest, backfill: Bool = false, now: Date = .now) {
         ingest(request, backfill: backfill, now: now, trusted: false)

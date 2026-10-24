@@ -119,6 +119,20 @@ extension PostgresDatabase {
         }
     }
 
+    func closeVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date, at date: Date) async throws -> Int64 {
+        try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
+            try await connection.query("""
+                WITH closed AS (
+                    UPDATE requests SET state = 'completed', completed_at = COALESCE(completed_at, \(date)), updated_at = now()
+                    WHERE device_id = \(deviceID) AND surge_session = \(session) AND state = 'active'
+                      AND started_at < \(startedBefore) AND NOT (surge_id = ANY(\(surgeIDs)))
+                    RETURNING 1
+                )
+                SELECT count(*) AS n FROM closed
+                """, logger: Self.logger).collect().first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
+        }
+    }
+
     /// Statement timeout of maintenance transactions on large tables (retention, backfill, deleting an app).
     static let maintenanceTimeout = "10min"
 

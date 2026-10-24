@@ -139,6 +139,11 @@ protocol TidemarkDatabase: Sendable {
     /// Marks `deviceID`'s rows that are still `active` from Surge sessions before `session` as completed at
     /// `date`: Surge restarted, so they will never be updated again. Returns the rows changed.
     func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64
+    /// Marks `deviceID`'s rows of `session` that are still `active` but that Surge no longer lists as active
+    /// (`keeping` holds the IDs `dump active` returned) completed at `date`. Rows that started at or after
+    /// `startedBefore` are left alone: they may be newer than the listing. Closes connections that ended
+    /// while Tidemark was not running. Returns the rows changed.
+    func closeVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date, at date: Date) async throws -> Int64
 
     // Processes
     /// Upserts by `(device_id, pid, start_time)`; links parents in chain order. Returns the leaf row ID.
@@ -205,6 +210,8 @@ extension TidemarkDatabase {
     }
 
     func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64 { 0 }
+
+    func closeVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date, at date: Date) async throws -> Int64 { 0 }
 }
 
 /// One `(host or IP, source)` observation for the global inventory (`host_sources`).
