@@ -294,6 +294,12 @@ struct RequestsCSVTests {
         let record = F.record(id: 1, bundle: "/Applications/Spotify.app")
         #expect(RequestsCSV.appName(for: record, names: [:]) == "Spotify")
         #expect(RequestsCSV.appName(for: F.record(id: 2), names: [:]) == nil)
+        // The same display name as the table's App column, trailing slash or not.
+        let finder = "/System/Library/CoreServices/Finder.app"
+        #expect(RequestsCSV.appName(for: F.record(id: 3, bundle: finder + "/"), names: [:]) == AppNaming.displayName(forBundlePath: finder))
+        #expect(RequestsCSV.appName(for: F.record(id: 4, bundle: finder), names: [:])?.hasSuffix(".app") == false)
+        // A monitored app keeps its own name.
+        #expect(RequestsCSV.appName(for: F.record(id: 5, appID: F.cursor.id, bundle: finder), names: [F.cursor.id: "Cursor"]) == "Cursor")
     }
 
     @Test func streamsEveryPageToDisk() async throws {

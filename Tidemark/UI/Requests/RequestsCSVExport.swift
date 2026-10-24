@@ -40,11 +40,11 @@ enum RequestsCSV {
         return fields.map(escape).joined(separator: ",") + "\r\n"
     }
 
-    /// The monitored app's name, else the name of the top-most bundle (as in the table's App column).
+    /// The monitored app's name, else the display name of the top-most bundle (as in the table's App column).
     static func appName(for record: RequestRecord, names: [AppID: String]) -> String? {
         if let id = record.appID, let name = names[id] { return name }
         guard let bundle = record.bundlePath, !bundle.isEmpty else { return nil }
-        return URL(fileURLWithPath: bundle).deletingPathExtension().lastPathComponent
+        return AppNaming.displayName(forBundlePath: bundle)
     }
 
     /// Quotes a field when it contains a comma, quote or line break, doubling embedded quotes.

@@ -274,9 +274,27 @@ struct UIChromeTests {
         }
         #expect(AddAppCandidates.normalized("/Applications/Slack.app/") == "/Applications/Slack.app")
         #expect(AddAppCandidates.normalized("/") == "/")
-        let finder = AddAppCandidates.candidate(path: "/System/Library/CoreServices/Finder.app", pastRequests: 2)
-        #expect(finder.name == "Finder")
+        let finderPath = "/System/Library/CoreServices/Finder.app"
+        let finder = AddAppCandidates.candidate(path: finderPath, pastRequests: 2)
+        // Finder's display name, the one the Requests table and the sidebar use ("访达" on a Chinese system).
+        #expect(finder.name == AppNaming.displayName(forBundlePath: finderPath))
+        #expect(!finder.name.isEmpty && !finder.name.hasSuffix(".app"))
         #expect(finder.bundleID == "com.apple.finder")
+        #expect(finder.pastRequests == 2)
+    }
+
+    /// Running apps are listed under their bundle's display name, not the process's ("Code" for Visual Studio
+    /// Code), and sorted by it.
+    @Test func addAppCandidatesUseTheBundleDisplayName() {
+        let running = [
+            AppCandidate(name: "Code", path: "/Applications/Visual Studio Code (Tidemark Test).app", bundleID: "com.microsoft.VSCode", pastRequests: 12),
+            AppCandidate(name: "Zed", path: "/Applications/Alpha Editor (Tidemark Test).app", bundleID: nil, pastRequests: 0),
+        ]
+        let named = AddAppCandidates.named(running)
+        #expect(named.map(\.name) == ["Alpha Editor (Tidemark Test)", "Visual Studio Code (Tidemark Test)"])
+        #expect(named.map(\.pastRequests) == [0, 12])
+        #expect(named.last?.bundleID == "com.microsoft.VSCode")
+        #expect(named.first?.path == "/Applications/Alpha Editor (Tidemark Test).app")
     }
 
     // MARK: Localization

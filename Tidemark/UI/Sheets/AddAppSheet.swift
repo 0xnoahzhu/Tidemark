@@ -151,7 +151,7 @@ struct AddAppSheet: View {
     // MARK: Actions
 
     private func load() async {
-        var list = await model.capture.monitorCandidates()
+        var list = AddAppCandidates.named(await model.capture.monitorCandidates())
         if let preselect = model.nav.addAppPreselect, !preselect.isEmpty {
             let path = AddAppCandidates.normalized(preselect)
             if !list.contains(where: { $0.path == path }) {
@@ -270,14 +270,22 @@ enum AddAppCandidates {
         path.count > 1 && path.hasSuffix("/") ? String(path.dropLast()) : path
     }
 
-    /// A candidate for a bundle chosen by hand (or preselected), named after its display name.
+    /// A candidate for a bundle chosen by hand (or preselected), named like every other screen names it.
     nonisolated static func candidate(path: String, pastRequests: Int64) -> AppCandidate {
-        let url = URL(fileURLWithPath: path)
-        let bundle = Bundle(url: url)
-        let name = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-            ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
-            ?? url.deletingPathExtension().lastPathComponent
-        return AppCandidate(name: name, path: path, bundleID: bundle?.bundleIdentifier, pastRequests: pastRequests)
+        let bundle = Bundle(url: URL(fileURLWithPath: path))
+        return AppCandidate(name: AppNaming.displayName(forBundlePath: path), path: path, bundleID: bundle?.bundleIdentifier, pastRequests: pastRequests)
+    }
+
+    /// Running apps renamed to their bundle's display name ("Visual Studio Code", not the process's "Code"), so
+    /// the sheet uses the name the Requests table showed, sorted by that name.
+    nonisolated static func named(_ candidates: [AppCandidate]) -> [AppCandidate] {
+        candidates
+            .map { candidate in
+                var renamed = candidate
+                renamed.name = AppNaming.displayName(forBundlePath: candidate.path)
+                return renamed
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     static func identity(for candidate: AppCandidate) -> AppIdentity {
