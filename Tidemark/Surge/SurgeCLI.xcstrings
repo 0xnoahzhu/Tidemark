@@ -1,0 +1,56 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Enhanced mode · rule-based" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "增强模式 · 规则分流" } }
+      }
+    },
+    "Enhanced mode · global proxy" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "增强模式 · 全局代理" } }
+      }
+    },
+    "Enhanced mode · direct" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "增强模式 · 直连" } }
+      }
+    },
+    "System proxy · rule-based" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统代理 · 规则分流" } }
+      }
+    },
+    "System proxy · global proxy" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统代理 · 全局代理" } }
+      }
+    },
+    "System proxy · direct" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统代理 · 直连" } }
+      }
+    },
+    "Rule-based" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "规则分流" } }
+      }
+    },
+    "Global proxy" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全局代理" } }
+      }
+    },
+    "Direct" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "直连" } }
+      }
+    },
+    "Wired" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有线" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}
