@@ -137,15 +137,17 @@ extension PostgresDatabase {
     func saveEgressSamples(_ samples: [EgressSample], deviceID: DeviceID) async throws {
         guard !samples.isEmpty else { return }
         var inserts: [PostgresQuery] = []
-        for chunk in Self.chunks(samples, bindsPerItem: 9) {
-            var sql = SQL("INSERT INTO egress_checks (device_id, checked_at, policy_path, ip, location, network, latency_ms, is_current, error) VALUES ")
+        for chunk in Self.chunks(samples, bindsPerItem: 11) {
+            var sql = SQL("""
+                INSERT INTO egress_checks (device_id, checked_at, policy_path, ip, location, network, latency_ms, is_current, error, network_type, has_ipv6) VALUES
+                """)
             for (index, sample) in chunk.enumerated() {
-                if index > 0 { sql.append(", ") }
+                sql.append(index > 0 ? ", " : " ")
                 let values = [
                     sql.bind(deviceID) + "::uuid", sql.bind(sample.checkedAt) + "::timestamptz", sql.bind(sample.policyPath) + "::text[]",
                     sql.bind(Self.inetText(sample.ip)) + "::inet", sql.bind(sample.location) + "::text", sql.bind(sample.network) + "::text",
                     sql.bind(sample.latencyMs.map { Int32(clamping: $0) }) + "::int4", sql.bind(sample.isCurrent) + "::bool",
-                    sql.bind(sample.error) + "::text",
+                    sql.bind(sample.error) + "::text", sql.bind(sample.networkType) + "::text", sql.bind(sample.hasIPv6) + "::bool",
                 ]
                 sql.append("(" + values.joined(separator: ", ") + ")")
             }
@@ -173,6 +175,7 @@ extension PostgresDatabase {
                 SELECT policy_path FROM recent WHERE is_current ORDER BY checked_at DESC, id DESC LIMIT 1
             )
             SELECT l.policy_path, host(l.ip) AS ip, l.location, l.network, l.latency_ms, l.checked_at, l.error,
+                   l.network_type, l.has_ipv6,
                    COALESCE(l.policy_path = (SELECT policy_path FROM chosen), false) AS is_current
             FROM latest l
             ORDER BY is_current DESC, l.policy_path
@@ -186,7 +189,9 @@ extension PostgresDatabase {
                 latencyMs: try read("latency_ms", as: Int?.self),
                 isCurrent: try read("is_current"),
                 checkedAt: try read("checked_at"),
-                error: try read("error")
+                error: try read("error"),
+                networkType: try read("network_type"),
+                hasIPv6: try read("has_ipv6")
             )
         }
     }
