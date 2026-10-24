@@ -14,19 +14,28 @@ struct PolicyChip: View {
         }
     }
 
+    /// The group hops stay readable; when space runs out the final policy is shortened from its start
+    /// (`AI › …RackNerd-Hysteria2`), so both the group and the end of the policy name remain visible.
     private var chip: some View {
         let tint = Theme.tint(Theme.policyHue(policyPath))
-        return Text(policyPath.joined(separator: " › "))
-            .font(.system(size: 11, weight: .medium))
-            .lineLimit(1)
-            .truncationMode(policyPath.count > 1 ? .middle : .tail)
-            .padding(.horizontal, 6)
-            .frame(height: 18)
-            .background(tint.background, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-            .foregroundStyle(tint.foreground)
-            .frame(maxWidth: maxWidth, alignment: .leading)
-            .fixedSize(horizontal: maxWidth == nil, vertical: true)
-            .help(policyPath.joined(separator: " › "))
+        return HStack(spacing: 0) {
+            if policyPath.count > 1 {
+                Text(policyPath.dropLast().joined(separator: " › ") + " › ")
+                    .lineLimit(1)
+                    .layoutPriority(1)
+            }
+            Text(policyPath.last ?? "")
+                .lineLimit(1)
+                .truncationMode(.head)
+        }
+        .font(.system(size: 11, weight: .medium))
+        .padding(.horizontal, 6)
+        .frame(height: 18)
+        .background(tint.background, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .foregroundStyle(tint.foreground)
+        .frame(maxWidth: maxWidth, alignment: .leading)
+        .fixedSize(horizontal: maxWidth == nil, vertical: true)
+        .help(policyPath.joined(separator: " › "))
     }
 }
 

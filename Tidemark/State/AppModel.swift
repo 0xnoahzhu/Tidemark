@@ -50,7 +50,7 @@ final class AppModel {
             return AppIdentity(name: app.name, bundlePath: app.path, letter: app.tileLetter, hue: app.tileHue, isMonitored: catalog.isMonitoring(app.id), appID: app.id)
         }
         if let bundle = record.bundlePath, !bundle.isEmpty {
-            let name = URL(fileURLWithPath: bundle).deletingPathExtension().lastPathComponent
+            let name = AppNaming.displayName(forBundlePath: bundle)
             return AppIdentity(name: name, bundlePath: bundle, letter: String(name.prefix(1)), hue: nil, isMonitored: false, appID: nil)
         }
         let name = record.chain.first?.name ?? record.processName
