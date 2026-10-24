@@ -1,0 +1,91 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%1$@ connected straight to %2$@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 直接连接了 %2$@" } }
+      }
+    },
+    "%1$@ connected to %2$@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 连接了 %2$@" } }
+      }
+    },
+    "%1$@ contacted %2$@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 访问了 %2$@" } }
+      }
+    },
+    "%1$@ reached a new site, %2$@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 访问了新站点 %2$@" } }
+      }
+    },
+    "Connected · PostgreSQL %@ · %lld ms" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已连接 · PostgreSQL %@ · %lld ms" } }
+      }
+    },
+    "First host %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "首个主机 %@" } }
+      }
+    },
+    "Found · controller connected · streaming" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已找到 · 控制器已连接 · 正在订阅" } }
+      }
+    },
+    "Mute Host" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "静音此主机" } }
+      }
+    },
+    "No hostname" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有域名" } }
+      }
+    },
+    "Remote · controller connected · streaming" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "远程 · 控制器已连接 · 正在订阅" } }
+      }
+    },
+    "Surge is shutting down" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surge 正在退出" } }
+      }
+    },
+    "Surge stopped streaming" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surge 已停止推送" } }
+      }
+    },
+    "Unknown app" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知 App" } }
+      }
+    },
+    "via %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "经由 %@" } }
+      }
+    },
+    "View" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看" } }
+      }
+    },
+    "watching requests" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在订阅请求" } }
+      }
+    },
+    "…and %lld more: %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "…还有 %lld 项：%@" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}
