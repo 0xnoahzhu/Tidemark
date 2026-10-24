@@ -54,8 +54,8 @@ struct AppDetailView: View {
         }
         .background(Theme.bg)
         // One search field for every tab: attaching `.searchable` to the swapped tab views left a stale
-        // second search item in the window toolbar.
-        .searchable(text: searchText, prompt: Text(searchPrompt))
+        // second search item in the window toolbar. Placed like the Requests page's field.
+        .searchable(text: searchText, placement: .toolbar, prompt: Text(searchPrompt))
         .navigationTitle(app.name)
         .navigationSubtitle(app.path)
         .toolbar {
