@@ -36,7 +36,11 @@ final class ProbeProxyServer: Sendable {
                 listener.onStateUpdate { listener, state in
                     switch state {
                     case .ready:
-                        if let port = listener.port?.rawValue { ready.resume(returning: port) }
+                        if let port = listener.port?.rawValue {
+                            ready.resume(returning: port)
+                        } else {
+                            ready.resume(throwing: NWError.posix(.EADDRNOTAVAIL))
+                        }
                     case .failed(let error):
                         ready.resume(throwing: error)
                     case .cancelled:
