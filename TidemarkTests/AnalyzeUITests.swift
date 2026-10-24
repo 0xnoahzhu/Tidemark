@@ -118,6 +118,39 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(summary.visibleIPCount(selectedHost: "api2.cursor.sh") == 1)
         #expect(summary.visibleIPCount(selectedHost: nil) == 2)
     }
+
+    @Test func headlineMentionsDirectIPsOnlyWhenThereAreSome() {
+        let now = Date()
+        let resolved = host("104.18.19.125", kind: .ip, hosts: ["api2.cursor.sh"], now: now)
+        let none = AppDetailInventorySummary(hosts: [host("api2.cursor.sh", now: now), resolved], search: "", now: now, site: naiveSite)
+        #expect(!none.headline.contains("(") && !none.headline.contains("（"))
+        let some = AppDetailInventorySummary(hosts: [resolved, host("149.154.175.60", kind: .ip, direct: true, now: now)],
+                                             search: "", now: now, site: naiveSite)
+        #expect(some.headline.contains("(") || some.headline.contains("（"))
+        #expect(AppDetailInventorySummary().groups.isEmpty)
+    }
+
+    @Test func listsWholeHostNamesThenACount() {
+        #expect(AppDetailInventoryFormat.domains(["api.anthropic.com", "claude.ai"]) == "api.anthropic.com, claude.ai")
+        #expect(AppDetailInventoryFormat.domains(["a.com", "b.com", "c.com", "d.com", "e.com"]) == "a.com, b.com, c.com +2")
+        let geo = GeoInfo(countryCode: "us", asn: 399358, organization: "Anthropic, PBC")
+        #expect(AppDetailInventoryFormat.fullGeo(geo) == "US · AS399358 Anthropic, PBC")
+        #expect(AppDetailInventoryFormat.fullGeo(GeoInfo(countryCode: nil, asn: nil, organization: nil)) == "")
+    }
+}
+
+@Suite @MainActor struct AppDetailStatsTests {
+    @Test func catalogCountersOnlyDescribeTheSidebarScope() {
+        let mac = UUID()
+        let catalog = AppStats(domains: 0, requests: 0)
+        let loaded = AppStats(domains: 12, requests: 340)
+        // The app isn't on the selected Mac: the page shows every Mac, the catalog only that Mac.
+        #expect(AppDetailView.displayedStats(catalog: catalog, loaded: loaded, pageScope: .all, sidebarScope: .device(mac)) == loaded)
+        #expect(AppDetailView.displayedStats(catalog: catalog, loaded: nil, pageScope: .all, sidebarScope: .device(mac)) == AppStats())
+        // Same scope: the catalog wins, the page's own query fills in until it arrives.
+        #expect(AppDetailView.displayedStats(catalog: catalog, loaded: loaded, pageScope: .device(mac), sidebarScope: .device(mac)) == catalog)
+        #expect(AppDetailView.displayedStats(catalog: nil, loaded: loaded, pageScope: .all, sidebarScope: .all) == loaded)
+    }
 }
 
 @Suite @MainActor struct AppDetailRequestTests {
@@ -171,10 +204,54 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
                 == "…/MacOS/WeChatAppEx Helper")
     }
 
+    @Test func showsTheInnermostBundleOfNestedHelpers() {
+        let wechat = "/Applications/WeChat.app"
+        let helper = "/Applications/WeChat.app/Contents/MacOS/WeChatAppEx.app/Contents/Frameworks/WeChatAppEx Framework.framework/Versions/C/Helpers/WeChatAppEx Helper.app/Contents/MacOS/WeChatAppEx Helper"
+        #expect(AppDetailProcessPath.display(helper, depth: 2, appPath: wechat) == "…/Helpers/WeChatAppEx Helper.app")
+        #expect(AppDetailProcessPath.display("/Applications/WeChat.app/Contents/MacOS/WeChatAppEx.app/Contents/MacOS/WeChatAppEx", depth: 1, appPath: wechat)
+                == "…/MacOS/WeChatAppEx.app")
+        #expect(AppDetailProcessPath.display("/Applications/Cursor.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Helpers/chrome_crashpad_handler",
+                                             depth: 1, appPath: "/Applications/Cursor.app") == "…/Helpers/chrome_crashpad_handler")
+    }
+
     @Test func abbreviatesTheHomeFolder() {
         #expect(AppDetailProcessPath.display("/Users/you/Library/node/bin/node", depth: 1, appPath: "/Applications/Raycast.app", home: "/Users/you")
                 == "~/Library/node/bin/node")
         #expect(AppDetailProcessPath.display("/usr/bin/git", depth: 2, appPath: "/Applications/Cursor.app", home: "/Users/you") == "/usr/bin/git")
+    }
+}
+
+@Suite @MainActor struct AppDetailProcessTreeTests {
+    private func node(_ name: String, depth: Int, pid: Int32 = 1, device: DeviceID? = nil, running: Bool = false) -> ProcessNode {
+        ProcessNode(id: "\(name)-\(depth)", name: name, pid: pid, startTime: Date(timeIntervalSince1970: 1_000), path: "/x/\(name)",
+                    depth: depth, domainCount: 0, requestCount: 0, isRunning: running, deviceID: device)
+    }
+
+    @Test func checksThisMacsProcessesLiveInAnyScope() {
+        let thisMac = UUID(), otherMac = UUID()
+        let live: (Int32, Date) -> Bool = { pid, _ in pid == 42 }
+        // This Mac's process: libproc decides, even when the page shows every Mac.
+        #expect(AppDetailProcessTree.isRunning(node("node", depth: 1, pid: 42, device: thisMac), thisDeviceID: thisMac,
+                                               pageShowsOnlyThisMac: false, check: live))
+        #expect(!AppDetailProcessTree.isRunning(node("node", depth: 1, pid: 7, device: thisMac, running: true), thisDeviceID: thisMac,
+                                                pageShowsOnlyThisMac: false, check: live))
+        // Another Mac's process keeps its stored state.
+        #expect(AppDetailProcessTree.isRunning(node("node", depth: 1, pid: 7, device: otherMac, running: true), thisDeviceID: thisMac,
+                                               pageShowsOnlyThisMac: true, check: live))
+        // No Mac recorded: checked only when the page shows this Mac alone.
+        #expect(AppDetailProcessTree.isRunning(node("node", depth: 1, pid: 42), thisDeviceID: thisMac, pageShowsOnlyThisMac: true, check: live))
+        #expect(!AppDetailProcessTree.isRunning(node("node", depth: 1, pid: 42), thisDeviceID: thisMac, pageShowsOnlyThisMac: false, check: live))
+    }
+
+    @Test func filtersKeepingParents() {
+        let nodes = [
+            node("Cursor", depth: 0), node("Cursor Helper (Plugin)", depth: 1), node("node", depth: 2),
+            node("Cursor Helper (Renderer)", depth: 1), node("git", depth: 1),
+        ]
+        #expect(AppDetailProcessTree.filter(nodes, query: "").count == 5)
+        #expect(AppDetailProcessTree.filter(nodes, query: " NODE ").map(\.name) == ["Cursor", "Cursor Helper (Plugin)", "node"])
+        #expect(AppDetailProcessTree.filter(nodes, query: "renderer").map(\.name) == ["Cursor", "Cursor Helper (Renderer)"])
+        #expect(AppDetailProcessTree.filter(nodes, query: "zsh").isEmpty)
     }
 }
 

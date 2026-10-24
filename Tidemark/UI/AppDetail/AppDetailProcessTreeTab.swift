@@ -6,6 +6,8 @@ struct AppDetailProcessTreeTab: View {
     @Environment(AppModel.self) private var model
     var app: MonitoredApp
     var absent: Bool
+    /// Text of the page's search field: shows matching processes with their parents.
+    var search: String = ""
 
     @State private var nodes: [ProcessNode] = []
     @State private var loaded = false
@@ -13,6 +15,7 @@ struct AppDetailProcessTreeTab: View {
     private static let columns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 200), .fixed(70), .fixed(80), .fixed(84)]
 
     var body: some View {
+        let shown = AppDetailProcessTree.filter(nodes, query: search)
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text(AnalyzeFormat.emphasized(
@@ -36,14 +39,14 @@ struct AppDetailProcessTreeTab: View {
                     .padding(.horizontal, 14)
                     .frame(height: 28)
 
-                    if nodes.isEmpty {
-                        Text(loaded ? tr("No processes recorded yet.", "AppDetail") : tr("Loading…", "AppDetail"))
+                    if shown.isEmpty {
+                        Text(emptyText)
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.ink3)
                             .frame(maxWidth: .infinity, minHeight: 60)
                             .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
                     }
-                    ForEach(nodes) { node in
+                    ForEach(shown) { node in
                         row(node)
                     }
                 }
@@ -60,8 +63,16 @@ struct AppDetailProcessTreeTab: View {
         }
     }
 
+    private var emptyText: String {
+        if !loaded { return tr("Loading…", "AppDetail") }
+        if nodes.isEmpty { return tr("No processes recorded yet.", "AppDetail") }
+        return tr("No processes match.", "AppDetail")
+    }
+
     private func row(_ node: ProcessNode) -> some View {
-        let running = isRunning(node)
+        let running = AppDetailProcessTree.isRunning(node, thisDeviceID: model.devices.thisDeviceID,
+                                                     pageShowsOnlyThisMac: pageShowsOnlyThisMac,
+                                                     check: model.processes.isRunning(pid:startTime:))
         return AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
             HStack(spacing: 7) {
                 if node.depth > 0 {
@@ -112,12 +123,9 @@ struct AppDetailProcessTreeTab: View {
             .fixedSize()
     }
 
-    /// Process trees are aggregated across Macs; only when the page shows this Mac can libproc confirm
-    /// that the stored PID and start time still name a live process.
-    private func isRunning(_ node: ProcessNode) -> Bool {
-        let thisMacOnly = scope.deviceID == model.devices.thisDeviceID || model.devices.devices.count <= 1
-        guard thisMacOnly, let start = node.startTime else { return node.isRunning }
-        return model.processes.isRunning(pid: node.pid, startTime: start)
+    /// Nodes without a Mac (older rows) can still be checked when the page shows only this Mac.
+    private var pageShowsOnlyThisMac: Bool {
+        scope.deviceID == model.devices.thisDeviceID || model.devices.devices.count <= 1
     }
 
     private var scope: DeviceScope { absent ? .all : model.devices.scope }
@@ -138,18 +146,53 @@ struct AppDetailProcessTreeTab: View {
     }
 }
 
+/// Running state and filtering of process tree rows (pure, so it can be tested).
+enum AppDetailProcessTree {
+    /// libproc can only confirm processes of this Mac: a node whose latest PID ran here is checked live
+    /// (the stored PID and start time must still name a running process) in any scope; other Macs' nodes
+    /// keep the state stored with them.
+    static func isRunning(_ node: ProcessNode, thisDeviceID: DeviceID, pageShowsOnlyThisMac: Bool,
+                          check: (Int32, Date) -> Bool) -> Bool {
+        let onThisMac = node.deviceID.map { $0 == thisDeviceID } ?? pageShowsOnlyThisMac
+        guard onThisMac, let start = node.startTime else { return node.isRunning }
+        return check(node.pid, start)
+    }
+
+    /// Nodes whose name, path or PID contains `query`, with their ancestors so they stay in the tree.
+    /// `nodes` are in tree order (each parent before its children, `depth` counting from the app).
+    static func filter(_ nodes: [ProcessNode], query: String) -> [ProcessNode] {
+        let query = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return nodes }
+        var keep = Set<Int>()
+        var ancestors: [Int] = []
+        for (index, node) in nodes.enumerated() {
+            while let last = ancestors.last, nodes[last].depth >= node.depth { ancestors.removeLast() }
+            let matches = node.name.lowercased().contains(query)
+                || (node.path?.lowercased().contains(query) ?? false)
+                || String(node.pid).contains(query)
+            if matches {
+                keep.insert(index)
+                keep.formUnion(ancestors)
+            }
+            ancestors.append(index)
+        }
+        return nodes.indices.filter(keep.contains).map { nodes[$0] }
+    }
+}
+
 /// Shortens executable paths for the process tree, like the design: helpers inside the app's bundle
-/// read `…/Frameworks/Cursor Helper (Renderer).app`, the home folder reads `~`.
+/// read `…/Frameworks/Cursor Helper (Renderer).app` (the innermost bundle and its folder, however deeply
+/// it is nested), the home folder reads `~`.
 enum AppDetailProcessPath {
     static func display(_ path: String, depth: Int, appPath: String, home: String = NSHomeDirectory()) -> String {
         let root = appPath.hasSuffix("/") ? String(appPath.dropLast()) : appPath
         let contents = root + "/Contents/"
         if depth > 0, path.hasPrefix(contents) {
             var relative = String(path.dropFirst(contents.count))
-            if let nested = relative.range(of: ".app/Contents/MacOS/") {
-                relative = String(relative[..<nested.lowerBound]) + ".app"
+            if let innermost = relative.range(of: ".app/Contents/MacOS/", options: .backwards) {
+                relative = String(relative[..<innermost.lowerBound]) + ".app"
             }
-            return "…/" + relative
+            return "…/" + relative.split(separator: "/").suffix(2).joined(separator: "/")
         }
         if !home.isEmpty, path.hasPrefix(home + "/") {
             return "~/" + path.dropFirst(home.count + 1)

@@ -9,25 +9,25 @@ struct AppDetailInventoryTab: View {
     var absent: Bool
 
     @State private var hosts: [AppHost] = []
-    @State private var loaded = false
-    @State private var hovered: String?
+    /// The app and scope `hosts` were last loaded for.
+    @State private var loadedKey: LoadKey?
+    /// Groups and counts of `hosts`, recomputed when they or the search change (not on every hover).
+    @State private var summary = AppDetailInventorySummary()
     @State private var exportDocument: AnalyzeCSVDocument?
     @State private var isExporting = false
     @State private var exportError: (any Error)?
 
-    private static let domainColumns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 150), .fixed(104), .fixed(70), .fixed(64)]
-    private static let ipColumns: [AnalyzeColumnsLayout.Column] = [.fixed(150), .flexible(weight: 1, min: 90), .fixed(56)]
+    fileprivate static let domainColumns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 150), .fixed(104), .fixed(70), .fixed(64)]
+    fileprivate static let ipColumns: [AnalyzeColumnsLayout.Column] = [.fixed(150), .flexible(weight: 1, min: 90), .fixed(56)]
 
     var body: some View {
-        @Bindable var nav = model.nav
-        let summary = AppDetailInventorySummary(hosts: hosts, search: nav.appInventorySearch,
-                                                site: { model.classifier.site(for: $0) })
+        let key = LoadKey(appID: app.id, scope: absent ? .all : model.devices.scope)
         Group {
-            if loaded && hosts.isEmpty {
+            if loadedKey == key && hosts.isEmpty {
                 waitingState
             } else {
                 VStack(spacing: 0) {
-                    summaryLine(summary)
+                    summaryLine
                     Text(trf("Every domain and IP %@ has used, each listed once. The first time a new one appears you get an alert, and it stays marked NEW for 24 hours.", "AppDetail", app.name))
                         .font(.system(size: 11.5))
                         .foregroundStyle(Theme.ink2)
@@ -38,15 +38,14 @@ struct AppDetailInventoryTab: View {
                         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
                     GeometryReader { geometry in
                         HStack(spacing: 0) {
-                            domainsPane(summary).frame(width: geometry.size.width * 1.4 / 2.4)
+                            domainsPane.frame(width: geometry.size.width * 1.4 / 2.4)
                             Rectangle().fill(Theme.line).frame(width: 0.5)
-                            ipsPane(summary).frame(maxWidth: .infinity)
+                            ipsPane.frame(maxWidth: .infinity)
                         }
                     }
                 }
             }
         }
-        .searchable(text: $nav.appInventorySearch, prompt: Text(tr("Search", "AppDetail")))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(tr("Export CSV", "AppDetail"), action: export)
@@ -62,14 +61,15 @@ struct AppDetailInventoryTab: View {
         .alert(error: $exportError) {
             Button(tr("OK", "AppDetail")) {}
         }
-        .task(id: LoadKey(appID: app.id, scope: absent ? .all : model.devices.scope)) {
-            await refresh(scope: absent ? .all : model.devices.scope)
+        .task(id: key) {
+            await refresh(key)
         }
+        .onChange(of: model.nav.appInventorySearch) { recompute() }
     }
 
     // MARK: Header
 
-    private func summaryLine(_ summary: AppDetailInventorySummary) -> some View {
+    private var summaryLine: some View {
         HStack(spacing: 12) {
             Text(summary.headline)
                 .font(.system(size: 12, weight: .semibold))
@@ -104,8 +104,9 @@ struct AppDetailInventoryTab: View {
 
     // MARK: Domains
 
-    private func domainsPane(_ summary: AppDetailInventorySummary) -> some View {
-        VStack(spacing: 0) {
+    private var domainsPane: some View {
+        let selected = summary.selectedHost(model.nav.appSelectedHost)
+        return VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(tr("Domains", "AppDetail")).font(.system(size: 12.5, weight: .bold))
                 Text(trf("%1$@ in %2$@", "AppDetail",
@@ -118,19 +119,25 @@ struct AppDetailInventoryTab: View {
             .padding(.horizontal, 16)
             .padding(.top, 10)
             .padding(.bottom, 6)
-            AnalyzeHeaderRow(columns: Self.domainColumns, height: 26, horizontalPadding: 16) {
-                Text(tr("Site · host", "AppDetail"))
-                Text(tr("First seen", "AppDetail"))
-                Text(tr("Last seen", "AppDetail"))
-                Text(tr("Requests", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
-            }
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(summary.groups) { group in
-                        siteRow(group)
-                        ForEach(group.hosts) { host in
-                            domainRow(host, selected: summary.selectedHost(model.nav.appSelectedHost) == host.value)
+                // The column header is pinned inside the scroll view so it keeps the rows' width when an
+                // always-visible scroller takes room.
+                LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
+                    Section {
+                        ForEach(summary.groups) { group in
+                            siteRow(group)
+                            ForEach(group.hosts) { host in
+                                AppDetailDomainRow(host: host, selected: selected == host.value)
+                            }
                         }
+                    } header: {
+                        AnalyzeHeaderRow(columns: Self.domainColumns, height: 26, horizontalPadding: 16) {
+                            Text(tr("Site · host", "AppDetail"))
+                            Text(tr("First seen", "AppDetail"))
+                            Text(tr("Last seen", "AppDetail"))
+                            Text(tr("Requests", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                        .background(Theme.bg)
                     }
                 }
                 .padding(.bottom, 10)
@@ -159,52 +166,9 @@ struct AppDetailInventoryTab: View {
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
 
-    private func domainRow(_ host: AppHost, selected: Bool) -> some View {
-        let muteState = AnalyzeMuteState(host.value, alerts: model.alerts)
-        return AnalyzeColumnsLayout(columns: Self.domainColumns) {
-            HStack(spacing: 7) {
-                Text(verbatim: "└").font(Theme.mono(11)).foregroundStyle(Theme.ink3)
-                Text(host.value).lineLimit(1).truncationMode(.middle)
-                if host.isNew() { TagBadge(text: tr("NEW", "AppDetail"), style: .new) }
-                if muteState != .unmuted { TagBadge(text: tr("MUTED", "AppDetail")) }
-                Spacer(minLength: 0)
-                if hovered == host.id { AnalyzeMuteButton(value: host.value) }
-            }
-            .padding(.leading, 12)
-            Text(AnalyzeFormat.seen(host.firstSeen)).foregroundStyle(Theme.ink2).lineLimit(1)
-            Text(AnalyzeFormat.seen(host.lastSeen, timeOnlyToday: true)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
-            Text(Fmt.count(host.requestCount)).font(Theme.mono(11)).frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .font(.system(size: 12))
-        .padding(.horizontal, 16)
-        .frame(height: 28)
-        .background(selected ? Theme.accentTint : .clear)
-        .contentShape(Rectangle())
-        .onHover { inside in hovered = inside ? host.id : (hovered == host.id ? nil : hovered) }
-        .onTapGesture {
-            withAnimation(.easeOut(duration: 0.2)) {
-                model.nav.appSelectedHost = model.nav.appSelectedHost == host.value ? nil : host.value
-            }
-        }
-        .contextMenu { hostMenu(host.value, state: muteState) }
-        .help(host.processName.map { trf("First reached by %@", "AppDetail", $0) } ?? host.value)
-    }
-
-    @ViewBuilder
-    private func hostMenu(_ value: String, state: AnalyzeMuteState) -> some View {
-        Button(tr("Copy", "AppDetail")) {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(value, forType: .string)
-        }
-        Button(AnalyzeMuteButton.title(state)) {
-            Task { await AnalyzeMuteButton.toggle(value, state: state, model: model) }
-        }
-        .disabled(state == .mutedByRule)
-    }
-
     // MARK: IPs
 
-    private func ipsPane(_ summary: AppDetailInventorySummary) -> some View {
+    private var ipsPane: some View {
         @Bindable var nav = model.nav
         let selected = summary.selectedHost(nav.appSelectedHost)
         let shown = summary.visibleIPCount(selectedHost: selected)
@@ -248,30 +212,34 @@ struct AppDetailInventoryTab: View {
             .padding(.horizontal, 16)
             .padding(.top, 10)
             .padding(.bottom, 6)
-            AnalyzeHeaderRow(columns: Self.ipColumns, height: 26, horizontalPadding: 16) {
-                Text(verbatim: "IP")
-                Text(tr("Network · domains", "AppDetail"))
-                Text(tr("Requests", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
-            }
             ScrollView {
-                LazyVStack(spacing: 0) {
-                    if nav.appIPFilter != .resolved {
-                        ipGroupHeader(tr("Direct", "AppDetail"), count: summary.directIPs.count,
-                                      note: tr("reached by IP, no hostname", "AppDetail"))
-                        ForEach(summary.directIPs) { ipRow($0, selectedHost: selected) }
-                        if summary.directIPs.isEmpty {
-                            Text(tr("Nothing reached by IP alone.", "AppDetail"))
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(Theme.ink3)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
+                LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
+                    Section {
+                        if nav.appIPFilter != .resolved {
+                            ipGroupHeader(tr("Direct", "AppDetail"), count: summary.directIPs.count,
+                                          note: tr("reached by IP, no hostname", "AppDetail"))
+                            ForEach(summary.directIPs) { AppDetailIPRow(ip: $0, selectedHost: selected) }
+                            if summary.directIPs.isEmpty {
+                                Text(tr("Nothing reached by IP alone.", "AppDetail"))
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(Theme.ink3)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                            }
                         }
-                    }
-                    if nav.appIPFilter != .direct {
-                        ipGroupHeader(tr("Resolved from domains", "AppDetail"), count: summary.resolvedIPs.count,
-                                      note: tr("the domains on the left resolved to these", "AppDetail"))
-                        ForEach(summary.resolvedIPs) { ipRow($0, selectedHost: selected) }
+                        if nav.appIPFilter != .direct {
+                            ipGroupHeader(tr("Resolved from domains", "AppDetail"), count: summary.resolvedIPs.count,
+                                          note: tr("the domains on the left resolved to these", "AppDetail"))
+                            ForEach(summary.resolvedIPs) { AppDetailIPRow(ip: $0, selectedHost: selected) }
+                        }
+                    } header: {
+                        AnalyzeHeaderRow(columns: Self.ipColumns, height: 26, horizontalPadding: 16) {
+                            Text(verbatim: "IP")
+                            Text(tr("Network · domains", "AppDetail"))
+                            Text(tr("Requests", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                        .background(Theme.bg)
                     }
                 }
             }
@@ -305,29 +273,135 @@ struct AppDetailInventoryTab: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
 
-    private func ipRow(_ ip: AppHost, selectedHost: String?) -> some View {
+    // MARK: Loading and export
+
+    private struct LoadKey: Hashable {
+        var appID: AppID
+        var scope: DeviceScope
+    }
+
+    private func refresh(_ key: LoadKey) async {
+        if loadedKey != key, !hosts.isEmpty {
+            // Another app or scope: don't show the previous list while the new one loads.
+            hosts = []
+            recompute()
+        }
+        while !Task.isCancelled {
+            do {
+                let fresh = try await model.database.appHosts(key.appID, scope: key.scope)
+                if Task.isCancelled { return }
+                hosts = fresh
+                // Also refreshes the NEW marks, which expire with time.
+                recompute()
+            } catch {
+                // Keep the last list; the sidebar footer reports database problems.
+            }
+            loadedKey = key
+            try? await Task.sleep(for: .seconds(10))
+        }
+    }
+
+    private func recompute() {
+        summary = AppDetailInventorySummary(hosts: hosts, search: model.nav.appInventorySearch,
+                                            site: { model.classifier.site(for: $0) })
+    }
+
+    private func export() {
+        exportDocument = AnalyzeCSVDocument(text: AnalyzeCSV.appHosts(hosts, mutes: model.alerts.mutes))
+        isExporting = true
+    }
+
+    /// Copy and Mute / Unmute for a domain or IP row. The model is passed in because context menus are
+    /// hosted by AppKit.
+    @MainActor @ViewBuilder
+    fileprivate static func hostMenu(_ value: String, state: AnalyzeMuteState, model: AppModel) -> some View {
+        Button(tr("Copy", "AppDetail")) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
+        }
+        Button(AnalyzeMuteButton.title(state)) {
+            Task { await AnalyzeMuteButton.toggle(value, state: state, model: model) }
+        }
+        .disabled(state == .mutedByRule)
+    }
+}
+
+/// A domain under its site; keeps its own hover state so hovering doesn't rebuild the whole tab.
+private struct AppDetailDomainRow: View {
+    @Environment(AppModel.self) private var model
+    var host: AppHost
+    var selected: Bool
+
+    @State private var hovered = false
+
+    var body: some View {
+        let muteState = AnalyzeMuteState(host.value, alerts: model.alerts)
+        AnalyzeColumnsLayout(columns: AppDetailInventoryTab.domainColumns) {
+            HStack(spacing: 7) {
+                Text(verbatim: "└").font(Theme.mono(11)).foregroundStyle(Theme.ink3)
+                Text(host.value).lineLimit(1).truncationMode(.middle)
+                if host.isNew() { TagBadge(text: tr("NEW", "AppDetail"), style: .new) }
+                if muteState != .unmuted { TagBadge(text: tr("MUTED", "AppDetail")) }
+                Spacer(minLength: 0)
+                if hovered { AnalyzeMuteButton(value: host.value) }
+            }
+            .padding(.leading, 12)
+            Text(AnalyzeFormat.seen(host.firstSeen)).foregroundStyle(Theme.ink2).lineLimit(1)
+            Text(AnalyzeFormat.seen(host.lastSeen, timeOnlyToday: true)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
+            Text(Fmt.count(host.requestCount)).font(Theme.mono(11)).frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 16)
+        .frame(height: 28)
+        .background(selected ? Theme.accentTint : .clear)
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .onTapGesture {
+            withAnimation(.easeOut(duration: 0.2)) {
+                model.nav.appSelectedHost = model.nav.appSelectedHost == host.value ? nil : host.value
+            }
+        }
+        .contextMenu { AppDetailInventoryTab.hostMenu(host.value, state: muteState, model: model) }
+        .help(host.processName.map { trf("First reached by %@", "AppDetail", $0) } ?? host.value)
+    }
+}
+
+/// An IP with its network and the domains that resolved to it; dimmed when another domain is selected.
+private struct AppDetailIPRow: View {
+    @Environment(AppModel.self) private var model
+    var ip: AppHost
+    var selectedHost: String?
+
+    @State private var hovered = false
+
+    var body: some View {
         let highlighted = selectedHost.map { ip.hosts.contains($0) } ?? false
         let dimmed = selectedHost != nil && !highlighted
         let muteState = AnalyzeMuteState(ip.value, alerts: model.alerts)
-        return AnalyzeColumnsLayout(columns: Self.ipColumns) {
+        AnalyzeColumnsLayout(columns: AppDetailInventoryTab.ipColumns) {
             HStack(spacing: 6) {
                 Text(ip.value).font(Theme.mono(11.5)).lineLimit(1).textSelection(.enabled)
                 if ip.isNew() { TagBadge(text: tr("NEW", "AppDetail"), style: .new) }
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text(ip.geo?.display ?? "—").foregroundStyle(Theme.ink2).lineLimit(1)
+                Text(ip.geo?.display ?? "—")
+                    .foregroundStyle(Theme.ink2)
+                    .lineLimit(1)
+                    .help(ip.geo.map(AppDetailInventoryFormat.fullGeo) ?? "")
                 HStack(spacing: 5) {
                     if ip.isDirect { TagBadge(text: tr("BY IP", "AppDetail")) }
                     if muteState != .unmuted { TagBadge(text: tr("MUTED", "AppDetail")) }
-                    Text(ip.hosts.isEmpty ? tr("No hostname · connected by IP", "AppDetail") : ip.hosts.joined(separator: ", "))
+                    // Whole host names, cut at the end: a cut in the middle invents names that don't exist.
+                    Text(ip.hosts.isEmpty ? tr("No hostname · connected by IP", "AppDetail") : AppDetailInventoryFormat.domains(ip.hosts))
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.ink3)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                        .truncationMode(.tail)
+                        .help(ip.hosts.joined(separator: "\n"))
                 }
             }
             .overlay(alignment: .trailing) {
-                if hovered == ip.id { AnalyzeMuteButton(value: ip.value) }
+                if hovered { AnalyzeMuteButton(value: ip.value) }
             }
             Text(Fmt.count(ip.requestCount)).font(Theme.mono(11)).frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -339,34 +413,26 @@ struct AppDetailInventoryTab: View {
         .opacity(dimmed ? 0.35 : 1)
         .animation(.easeOut(duration: 0.2), value: dimmed)
         .contentShape(Rectangle())
-        .onHover { inside in hovered = inside ? ip.id : (hovered == ip.id ? nil : hovered) }
-        .contextMenu { hostMenu(ip.value, state: muteState) }
+        .onHover { hovered = $0 }
+        .contextMenu { AppDetailInventoryTab.hostMenu(ip.value, state: muteState, model: model) }
+    }
+}
+
+/// Text helpers of the "Domains & IPs" tab.
+enum AppDetailInventoryFormat {
+    /// `api.anthropic.com, claude.ai +2`: the first hosts in full, then how many more there are.
+    static func domains(_ hosts: [String], limit: Int = 3) -> String {
+        let head = hosts.prefix(limit).joined(separator: ", ")
+        return hosts.count > limit ? "\(head) +\(hosts.count - limit)" : head
     }
 
-    // MARK: Loading and export
-
-    private struct LoadKey: Hashable {
-        var appID: AppID
-        var scope: DeviceScope
-    }
-
-    private func refresh(scope: DeviceScope) async {
-        while !Task.isCancelled {
-            do {
-                let fresh = try await model.database.appHosts(app.id, scope: scope)
-                if Task.isCancelled { return }
-                hosts = fresh
-            } catch {
-                // Keep the last list; the sidebar footer reports database problems.
-            }
-            loaded = true
-            try? await Task.sleep(for: .seconds(10))
-        }
-    }
-
-    private func export() {
-        exportDocument = AnalyzeCSVDocument(text: AnalyzeCSV.appHosts(hosts, mutes: model.alerts.mutes))
-        isExporting = true
+    /// `US · AS399358 Anthropic, PBC`: like `GeoInfo.display`, with the organization's full name.
+    static func fullGeo(_ geo: GeoInfo) -> String {
+        var parts: [String] = []
+        if let country = geo.countryCode, !country.isEmpty { parts.append(country.uppercased()) }
+        let network = [geo.asn.map { "AS\($0)" }, geo.organization].compactMap { $0 }.filter { !$0.isEmpty }
+        if !network.isEmpty { parts.append(network.joined(separator: " ")) }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -393,6 +459,9 @@ struct AppDetailInventorySummary {
     var directIPs: [AppHost] = []
     var resolvedIPs: [AppHost] = []
     private var domainValues: Set<String> = []
+
+    /// No hosts.
+    init() {}
 
     init(hosts: [AppHost], search: String, now: Date = .now, site: (String) -> String) {
         let domains = hosts.filter { $0.kind == .domain }
@@ -439,7 +508,7 @@ struct AppDetailInventorySummary {
         resolvedIPs = visibleIPs.filter { !$0.isDirect }
     }
 
-    /// `11 domains · 6 sites · 9 IPs (1 by IP only)`
+    /// `11 domains · 6 sites · 9 IPs (1 by IP only)`; the clause is left out when no IP was reached directly.
     @MainActor
     var headline: String {
         let base = [
@@ -447,6 +516,7 @@ struct AppDetailInventorySummary {
             trn("%lld site", "%lld sites", siteCount, "AppDetail"),
             trn("%lld IP", "%lld IPs", ipCount, "AppDetail"),
         ].joined(separator: " · ")
+        guard directIPCount > 0 else { return base }
         return trf("%1$@ (%2$lld by IP only)", "AppDetail", base, directIPCount)
     }
 

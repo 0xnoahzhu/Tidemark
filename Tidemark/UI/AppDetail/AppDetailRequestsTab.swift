@@ -5,6 +5,8 @@ import SwiftUI
 /// and timing.
 struct AppDetailRequestsTab: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.systemPrefersReducedResourceUsage) private var reducedResources
     var app: MonitoredApp
     /// Requests stored for the app (header counter).
     var storedCount: Int64
@@ -15,49 +17,68 @@ struct AppDetailRequestsTab: View {
     @State private var history: [RequestRecord] = []
     @State private var historyLoaded = false
     @State private var historyFailure: String?
+    /// Bumped once fresh rows have aged out, so their tint fades even when nothing new arrives.
+    @State private var freshTick = 0
 
     static let columns: [AnalyzeColumnsLayout.Column] = [
         .fixed(104), .flexible(weight: 1, min: 120), .flexible(weight: 1.5, min: 150), .fixed(118), .fixed(104), .fixed(62),
     ]
 
     var body: some View {
-        @Bindable var nav = model.nav
+        let nav = model.nav
         let live = nav.appRequestsLive
         let rows = live ? liveRows() : history
+        let _ = freshTick
+        let now = Date.now
 
         VStack(spacing: 0) {
             statusLine(live: live)
-            AnalyzeHeaderRow(columns: Self.columns) {
-                Text(tr("Time", "AppDetail"))
-                Text(tr("Process", "AppDetail"))
-                Text(tr("Host", "AppDetail"))
-                Text(tr("Remote IP", "AppDetail"))
-                Text(tr("Policy", "AppDetail"))
-                Text(tr("Size", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
-            }
             if rows.isEmpty {
+                header
                 emptyMessage(live: live)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(rows.enumerated()), id: \.element.key) { index, record in
-                            row(record, index: index, history: !live)
-                            if expanded == record.key {
-                                AppDetailRequestCard(record: record, app: app)
-                                    .padding(.horizontal, 14)
-                                    .padding(.top, 2)
-                                    .padding(.bottom, 8)
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    // The header scrolls with the rows (pinned), so both get the same width when the scroll
+                    // view reserves room for an always-visible scroller.
+                    LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
+                        Section {
+                            ForEach(Array(rows.enumerated()), id: \.element.key) { index, record in
+                                row(record, index: index, history: !live, now: now)
+                                if expanded == record.key {
+                                    AppDetailRequestCard(record: record, app: app)
+                                        .padding(.horizontal, 14)
+                                        .padding(.top, 2)
+                                        .padding(.bottom, 8)
+                                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+                                }
                             }
+                        } header: {
+                            header.background(Theme.bg)
                         }
                     }
                 }
             }
         }
-        .searchable(text: $nav.appRequestSearch, prompt: Text(tr("Filter host, IP, process", "AppDetail")))
         .task(id: HistoryKey(appID: app.id, live: live, search: nav.appRequestSearch, scope: scope)) {
             guard !live else { return }
             await loadHistory()
+        }
+        .task(id: live ? rows.first?.key : nil) {
+            guard live, let newest = rows.first, RequestsPresentation.isFresh(newest, now: .now) else { return }
+            let remaining = RequestsPresentation.freshInterval - Date.now.timeIntervalSince(newest.startedAt)
+            try? await Task.sleep(for: .seconds(max(0.05, remaining + 0.05)))
+            if !Task.isCancelled { freshTick &+= 1 }
+        }
+    }
+
+    private var header: some View {
+        AnalyzeHeaderRow(columns: Self.columns) {
+            Text(tr("Time", "AppDetail"))
+            Text(tr("Process", "AppDetail"))
+            Text(tr("Host", "AppDetail"))
+            Text(tr("Remote IP", "AppDetail"))
+            Text(tr("Policy", "AppDetail"))
+            Text(tr("Size", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 
@@ -67,7 +88,7 @@ struct AppDetailRequestsTab: View {
         @Bindable var nav = model.nav
         return HStack(spacing: 10) {
             if model.live.recording {
-                StatusDot(color: Theme.recording, size: 7, pulsing: true)
+                StatusDot(color: Theme.recording, size: 7, pulsing: !reduceMotion && !reducedResources)
             }
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(Fmt.rate(rate(at: context.date)))
@@ -127,9 +148,9 @@ struct AppDetailRequestsTab: View {
             || record.processName.lowercased().contains(query)
     }
 
-    private func row(_ record: RequestRecord, index: Int, history: Bool) -> some View {
+    private func row(_ record: RequestRecord, index: Int, history: Bool, now: Date) -> some View {
         let isExpanded = expanded == record.key
-        let isFresh = !history && Date.now.timeIntervalSince(record.startedAt) < 1.4
+        let isFresh = !history && RequestsPresentation.isFresh(record, now: now)
         let background: Color = isExpanded ? Theme.accentTint : isFresh ? Theme.fresh : index.isMultiple(of: 2) ? .clear : Theme.zebra
         return AppDetailRequestRow(record: record, history: history, showsDevice: showsDevice)
             .padding(.horizontal, 20)
@@ -138,7 +159,7 @@ struct AppDetailRequestsTab: View {
             .animation(.easeOut(duration: 0.9), value: isFresh)
             .contentShape(Rectangle())
             .onTapGesture {
-                withAnimation(.snappy(duration: 0.2)) { expanded = isExpanded ? nil : record.key }
+                withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { expanded = isExpanded ? nil : record.key }
             }
     }
 

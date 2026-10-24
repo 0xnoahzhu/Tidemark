@@ -381,6 +381,16 @@
         }
       }
     },
+    "Filter processes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "筛选进程"
+          }
+        }
+      }
+    },
     "First reached by %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -587,6 +597,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有域名，直接用 IP 连接"
+          }
+        }
+      }
+    },
+    "No processes match." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有匹配的进程。"
           }
         }
       }
