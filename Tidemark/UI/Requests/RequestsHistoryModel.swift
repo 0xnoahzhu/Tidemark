@@ -27,6 +27,7 @@ final class RequestsHistoryModel {
         var first = query
         first.limit = Self.pageSize
         first.offset = 0
+        first.before = nil
         self.query = first
         isLoading = true
         defer { isLoading = false }

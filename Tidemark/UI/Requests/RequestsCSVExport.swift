@@ -66,7 +66,9 @@ struct RequestsCSVSnapshot: Sendable {
 }
 
 /// The current History query as a document for `fileExporter`. Rows are streamed from PostgreSQL in pages
-/// of `RequestsCSV.pageSize` while the file is written, so exports of any size never sit in memory.
+/// of `RequestsCSV.pageSize` while the file is written, so exports of any size never sit in memory. Pages
+/// follow a keyset cursor (`RequestQuery.before`) rather than an offset, so rows recorded while the export
+/// runs neither shift pages (duplicating rows) nor make it skip any.
 final class RequestsCSVDocument: WritableDocument {
     static var writableContentTypes: [UTType] { [.commaSeparatedText] }
 
@@ -95,10 +97,13 @@ struct RequestsCSVWriter: DocumentWriter {
         var query = snapshot.query
         query.limit = RequestsCSV.pageSize
         query.offset = 0
+        query.before = nil
 
         let first = try await snapshot.database.queryRequests(query)
-        let total = Int(clamping: first.totalCount)
-        let manager = progress.start(totalCount: max(total, first.rows.count))
+        // The total can be an estimate for very large results: progress never runs past it and is
+        // completed when the last page is written.
+        let total = max(Int(clamping: first.totalCount), first.rows.count)
+        let manager = progress.start(totalCount: total)
 
         FileManager.default.createFile(atPath: destination.path, contents: nil)
         let handle = try FileHandle(forWritingTo: destination)
@@ -106,6 +111,7 @@ struct RequestsCSVWriter: DocumentWriter {
         try handle.write(contentsOf: Data(RequestsCSV.header.utf8))
 
         var page = first.rows
+        var reported = 0
         while !page.isEmpty {
             try Task.checkCancellation()
             var chunk = ""
@@ -115,11 +121,38 @@ struct RequestsCSVWriter: DocumentWriter {
                 chunk += RequestsCSV.line(for: record, appName: app, deviceName: snapshot.deviceNames[record.deviceID])
             }
             try handle.write(contentsOf: Data(chunk.utf8))
-            manager.complete(count: page.count)
+            let step = min(page.count, total - reported)
+            manager.complete(count: step)
+            reported += step
 
-            query.offset += page.count
-            guard page.count == query.limit, Int64(query.offset) < first.totalCount else { break }
-            page = try await snapshot.database.queryRequests(query).rows
+            guard let fetched = try await nextPage(after: page, query: &query, database: snapshot.database) else { break }
+            page = fetched
         }
+        if reported < total { manager.complete(count: total - reported) }
+    }
+
+    /// The page after `page` in newest-first order, or nil at the end. A full page continues from its last
+    /// row; rows that are not strictly older than that cursor are dropped, so a database that ignored the
+    /// cursor can never make the export loop or repeat rows.
+    private func nextPage(after page: [RequestRecord], query: inout RequestQuery, database: any TidemarkDatabase) async throws -> [RequestRecord]? {
+        guard page.count == query.limit, let cursor = RequestsCSV.cursor(after: page) else { return nil }
+        query.before = cursor
+        let next = try await database.queryRequests(query).rows.filter { RequestsCSV.isOlder($0, than: cursor) }
+        return next.isEmpty ? nil : next
+    }
+}
+
+extension RequestsCSV {
+    /// Keyset cursor at the last (oldest) row of a newest-first page; nil when that row has no row ID.
+    static func cursor(after page: [RequestRecord]) -> RequestCursor? {
+        guard let last = page.last, let rowID = last.rowID else { return nil }
+        return RequestCursor(startedAt: last.startedAt, rowID: rowID)
+    }
+
+    /// `true` if `record` comes after `cursor` in the `(started_at, id)` newest-first order.
+    static func isOlder(_ record: RequestRecord, than cursor: RequestCursor) -> Bool {
+        if record.startedAt != cursor.startedAt { return record.startedAt < cursor.startedAt }
+        guard let rowID = record.rowID else { return false }
+        return rowID < cursor.rowID
     }
 }

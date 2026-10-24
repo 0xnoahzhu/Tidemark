@@ -12,10 +12,14 @@ struct ShellDemoDatabase: TidemarkDatabase {
     private let base = OfflineDatabase()
 
     init(rows: [RequestRecord], appNames: [AppID: String] = [:]) {
-        self.rows = rows.sorted { $0.startedAt > $1.startedAt }
+        // Newest first by `(started_at, id)`, the order the real database pages in.
+        self.rows = rows.sorted { a, b in
+            a.startedAt != b.startedAt ? a.startedAt > b.startedAt : (a.rowID ?? 0) > (b.rowID ?? 0)
+        }
         self.appNames = appNames
     }
 
+    /// Rows matching every filter of `query` except its paging (`offset`, `limit`, `before`).
     func matching(_ query: RequestQuery, now: Date = .now) -> [RequestRecord] {
         let lower = query.range.lowerBound(now: now)
         let needle = query.search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -41,7 +45,13 @@ struct ShellDemoDatabase: TidemarkDatabase {
     // Requests
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage {
         let all = matching(query)
-        let page = Array(all.dropFirst(query.offset).prefix(query.limit))
+        var remaining = all[...]
+        if let cursor = query.before {
+            remaining = remaining.drop { !RequestsCSV.isOlder($0, than: cursor) }
+        } else {
+            remaining = remaining.dropFirst(query.offset)
+        }
+        let page = Array(remaining.prefix(query.limit))
         return RequestPage(rows: page, totalCount: Int64(all.count), elapsed: .milliseconds(3))
     }
 

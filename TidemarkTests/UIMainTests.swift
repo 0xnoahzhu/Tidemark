@@ -288,6 +288,84 @@ struct RequestsCSVTests {
         #expect(lines.first.map(String.init) == RequestsCSV.columns.joined(separator: ","))
         #expect(manager.fractionCompleted == 1)
     }
+
+    @Test func ordersRowsByKeysetCursor() {
+        let t = Date(timeIntervalSince1970: 1_000)
+        let cursor = RequestCursor(startedAt: t, rowID: 50)
+        #expect(RequestsCSV.isOlder(F.record(id: 49, startedAt: t), than: cursor))
+        #expect(!RequestsCSV.isOlder(F.record(id: 50, startedAt: t), than: cursor))
+        #expect(!RequestsCSV.isOlder(F.record(id: 10, startedAt: t.addingTimeInterval(1)), than: cursor))
+        #expect(RequestsCSV.isOlder(F.record(id: 99, startedAt: t.addingTimeInterval(-1)), than: cursor))
+        #expect(RequestsCSV.cursor(after: [F.record(id: 7, startedAt: t), F.record(id: 3, startedAt: t)]) == RequestCursor(startedAt: t, rowID: 3))
+        #expect(RequestsCSV.cursor(after: []) == nil)
+    }
+
+    /// Rows recorded while the export runs land on top of the newest-first order; offset paging would shift
+    /// and repeat rows, the keyset cursor neither repeats nor skips any.
+    @Test func keepsPagesStableWhileRowsArrive() async throws {
+        let base = Date.now.addingTimeInterval(-1_800)
+        let original = (0..<12_000).map { F.record(id: Int64($0), startedAt: base.addingTimeInterval(Double($0) * 0.1)) }
+        let store = RequestsGrowingStore(rows: original, nextID: 100_000)
+        let database = RequestsStubDatabase(query: { query in
+            await store.addNewRows(250)
+            return try await ShellDemoDatabase(rows: store.rows).queryRequests(query)
+        })
+        var query = RequestQuery()
+        query.range = .lastHour
+        let ids = try await exportedRowIDs(query: query, database: database)
+
+        #expect(ids.count == Set(ids).count, "no row is written twice")
+        #expect(Set(original.compactMap(\.rowID)).isSubset(of: Set(ids)), "every row that existed is written")
+        #expect(await store.queries > 1)
+    }
+
+    /// A database that ignored the cursor would hand back the first page forever; the export stops instead.
+    @Test func stopsWhenTheCursorIsIgnored() async throws {
+        let base = Date.now.addingTimeInterval(-600)
+        let rows = (0..<6_000).map { F.record(id: Int64($0), startedAt: base.addingTimeInterval(Double($0) * 0.05)) }
+        let database = RequestsStubDatabase(query: { query in
+            var first = query
+            first.before = nil
+            return try await ShellDemoDatabase(rows: rows).queryRequests(first)
+        })
+        var query = RequestQuery()
+        query.range = .lastHour
+        let ids = try await exportedRowIDs(query: query, database: database)
+        #expect(ids.count == RequestsCSV.pageSize)
+        #expect(ids.count == Set(ids).count)
+    }
+
+    private func exportedRowIDs(query: RequestQuery, database: any TidemarkDatabase) async throws -> [Int64] {
+        let snapshot = RequestsCSVSnapshot(query: query, database: database, appNames: [:], deviceNames: [:])
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tidemark-export-\(UUID().uuidString).csv")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let manager = ProgressManager(totalCount: 1)
+        try await RequestsCSVWriter().write(snapshot: snapshot, to: url, previous: nil, progress: manager.subprogress(assigningCount: 1))
+        #expect(manager.fractionCompleted == 1)
+        let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\r\n").dropFirst()
+        return lines.compactMap { line in line.split(separator: ",", omittingEmptySubsequences: false).last.flatMap { Int64($0) } }
+    }
+}
+
+/// Request rows that keep growing at the top, like a live database during an export.
+private actor RequestsGrowingStore {
+    private(set) var rows: [RequestRecord]
+    private(set) var queries = 0
+    private var nextID: Int64
+
+    init(rows: [RequestRecord], nextID: Int64) {
+        self.rows = rows
+        self.nextID = nextID
+    }
+
+    func addNewRows(_ count: Int) {
+        queries += 1
+        let now = Date.now
+        for i in 0..<count {
+            rows.append(UIMainFixtures.record(id: nextID, startedAt: now.addingTimeInterval(Double(i) * 0.001)))
+            nextID += 1
+        }
+    }
 }
 
 @MainActor
@@ -317,7 +395,7 @@ struct RequestsHistoryModelTests {
 
     @Test func reportsErrors() async {
         let history = RequestsHistoryModel()
-        await history.load(RequestQuery(), database: RequestsFailingDatabase())
+        await history.load(RequestQuery(), database: RequestsStubDatabase())
         #expect(history.errorMessage != nil)
         #expect(history.rows.isEmpty)
     }
@@ -334,10 +412,13 @@ struct RequestsHistoryModelTests {
     }
 }
 
-/// A database whose request queries always fail.
-private struct RequestsFailingDatabase: TidemarkDatabase {
-    func queryRequests(_ query: RequestQuery) async throws -> RequestPage { throw DatabaseError.unreachable("connection refused") }
-    func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram { throw DatabaseError.unreachable("connection refused") }
+/// A database whose request queries are answered by closures; by default they fail.
+private struct RequestsStubDatabase: TidemarkDatabase {
+    var query: @Sendable (RequestQuery) async throws -> RequestPage = { _ in throw DatabaseError.unreachable("connection refused") }
+    var buckets: @Sendable (RequestQuery, Int) async throws -> Histogram = { _, _ in throw DatabaseError.unreachable("connection refused") }
+
+    func queryRequests(_ query: RequestQuery) async throws -> RequestPage { try await self.query(query) }
+    func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram { try await self.buckets(query, buckets) }
 
     func connect() async throws {}
     func migrate() async throws -> Int { 0 }
