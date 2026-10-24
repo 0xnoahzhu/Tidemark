@@ -1,1 +1,23 @@
 # Tidemark
+
+Tidemark keeps every request [Surge](https://nssurge.com) handles in PostgreSQL, rolls each request up to
+the app that caused it (through the process tree), and alerts you the first time a monitored app reaches a
+new domain or IP.
+
+* Live request log with process chain, policy, rule, remote IP and timing for every connection
+* Per-app inventories of domains and IPs, with NEW markers and macOS notifications on first contact
+* Site Probe: open a URL in an isolated browser and record every host it touches
+* Egress IP per Surge policy, with a change log
+* Several Macs can share one database
+
+Requires macOS 27, Surge Mac 6.10+ (`surge-cli`), and PostgreSQL 14+.
+
+## Build
+
+```bash
+brew install xcodegen
+xcodegen generate
+open Tidemark.xcodeproj
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it works.
