@@ -389,6 +389,48 @@ struct EgressMonitorTests {
         #expect(model.egress.current?.hasIPv6 == true)
     }
 
+    /// Only Surge saying the IPv6 address can't be reached means "No IPv6"; anything else stays unknown and
+    /// is not kept, so the next check asks again.
+    @Test func keepsIPv6UnknownWhenTheProbeFailsForAnotherReason() async {
+        let surge = autoTestSurge()
+        surge.update { $0.ipv6Failure = .timedOut(command: "http probe") }
+        let model = makeModel(surge: surge)
+        let monitor = makeMonitor(model)
+        await monitor.checkAll()
+        #expect(model.egress.current?.ip != nil)
+        #expect(model.egress.current?.hasIPv6 == nil)
+
+        surge.update { $0.ipv6Failure = .commandFailed(command: "http probe", message: "Policy does not exist.") }
+        await monitor.checkAll()
+        #expect(surge.snapshot.httpProbes.count == 2, "an unknown answer is not cached")
+        #expect(model.egress.current?.hasIPv6 == nil)
+
+        surge.update { $0.ipv6Failure = .commandFailed(command: "http probe", message: "HTTP request timeout") }
+        await monitor.checkAll()
+        #expect(model.egress.current?.hasIPv6 == false, "Surge gave up on the IPv6 address through the policy")
+        await monitor.checkAll()
+        #expect(surge.snapshot.httpProbes.count == 3, "a definite answer is cached")
+    }
+
+    @Test func tellsNoRouteFromOtherProbeFailures() async {
+        #expect(EgressMonitor.meansNoIPv6("No outgoing interface"))
+        #expect(EgressMonitor.meansNoIPv6("HTTP request timeout"))
+        #expect(EgressMonitor.meansNoIPv6("connect: Network is unreachable"))
+        #expect(!EgressMonitor.meansNoIPv6("Policy does not exist."))
+        #expect(!EgressMonitor.meansNoIPv6("exit status 1"))
+
+        let surge = EgressFakeSurge()
+        surge.update { s in
+            s.ipv6Targets = ["v6"]
+            s.httpProbeDelay = .milliseconds(500)
+        }
+        #expect(await EgressMonitor.reachesIPv6(through: "v6", surge: surge) == true)
+        #expect(await EgressMonitor.reachesIPv6(through: "v4-only", surge: surge) == false)
+        #expect(await EgressMonitor.reachesIPv6(through: nil, surge: surge) == nil)
+        #expect(await EgressMonitor.reachesIPv6(through: "v6", surge: surge, timeout: .milliseconds(50)) == nil,
+                "Tidemark's own deadline is not an answer")
+    }
+
     @Test func asksTheIPInfoServiceOnlyWhenOnAndOnlyForPublicEgressIPs() async {
         let surge = autoTestSurge()
         surge.update { s in

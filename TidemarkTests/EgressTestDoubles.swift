@@ -21,6 +21,10 @@ final class EgressFakeSurge: SurgeClientDetails {
         var listener: SurgeHTTPListener? = SurgeHTTPListener(interface: "0.0.0.0", port: 6152)
         /// Policies (targets) through which the IPv6 probe succeeds.
         var ipv6Targets: Set<String> = []
+        /// How the IPv6 probe fails through the other policies.
+        var ipv6Failure = SurgeError.commandFailed(command: "http probe", message: "No outgoing interface")
+        /// How long `http probe` takes.
+        var httpProbeDelay: Duration = .zero
         /// How long `test-policy-external-ip` takes.
         var externalIPDelay: Duration = .zero
         var externalIPCalls: [String] = []
@@ -56,11 +60,12 @@ final class EgressFakeSurge: SurgeClientDetails {
         }
     }
     func httpProbe(url: String, policy: String?) async throws -> SurgeHTTPProbe {
-        let reachable = state.withLock { s in
+        let (reachable, failure, delay) = state.withLock { s in
             s.httpProbes.append(policy ?? "")
-            return s.ipv6Targets.contains(policy ?? "")
+            return (s.ipv6Targets.contains(policy ?? ""), s.ipv6Failure, s.httpProbeDelay)
         }
-        guard reachable else { throw SurgeError.commandFailed(command: "http probe", message: "No outgoing interface") }
+        if delay > .zero { try await Task.sleep(for: delay) }
+        guard reachable else { throw failure }
         return SurgeHTTPProbe(method: "HEAD", status: 301, durationMs: 120, policy: policy, rule: nil, url: url, headers: [])
     }
     func policyGroups() async throws -> [SurgePolicyGroup] { snapshot.groups }

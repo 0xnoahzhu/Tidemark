@@ -270,6 +270,15 @@ final class EgressMonitor: EgressActions {
     /// service is on, only public addresses) and tests whether the current egress reaches IPv6.
     private func annotate(_ samples: [EgressSample], plan: EgressPlanner.Plan, surge: any SurgeClient, now: Date) async -> [EgressSample] {
         var samples = samples
+        // Surge takes about 15 s to give up on a policy without IPv6, so the test runs alongside the lookups.
+        let ipv6Test: (index: Int, key: String, target: String)? = samples.firstIndex(where: \.isCurrent).flatMap { index in
+            guard samples[index].ip != nil, samples[index].hasIPv6 == nil, let key = ipv6Key(samples[index], plan: plan),
+                  let target = target(of: samples[index], plan: plan) else { return nil }
+            return (index, key, target)
+        }
+        let ipv6Target = ipv6Test?.target
+        async let ipv6 = Self.reachesIPv6(through: ipv6Target, surge: surge)
+
         if model.preferences.ipInfoService == .proxycheck {
             let missing = Set(samples.compactMap(\.ip).filter { ip in
                 guard EgressIPInfo.isPublic(ip) else { return false }
@@ -288,30 +297,41 @@ final class EgressMonitor: EgressActions {
                 if let ip = samples[index].ip, let cached = networkTypes[ip] { samples[index].networkType = cached.kind }
             }
         }
-        if let index = samples.firstIndex(where: \.isCurrent), samples[index].ip != nil, samples[index].hasIPv6 == nil,
-           let key = ipv6Key(samples[index], plan: plan), let target = target(of: samples[index], plan: plan) {
-            let reachable = await Self.reachesIPv6(through: target, surge: surge)
-            if let reachable {
-                ipv6Results[key] = (reachable, now)
-                samples[index].hasIPv6 = reachable
-            }
+        // Only a definite answer is kept (an hour, either way); an unknown one is asked again next check.
+        if let ipv6Test, let reachable = await ipv6 {
+            ipv6Results[ipv6Test.key] = (reachable, now)
+            samples[ipv6Test.index].hasIPv6 = reachable
         }
         return samples
     }
 
-    /// Whether a HEAD request to an IPv6 literal gets through `target`: nil when Surge could not be asked.
-    /// The IPv4 egress through the same policy was just measured, so a failure means no IPv6.
-    nonisolated static func reachesIPv6(through target: String, surge: any SurgeClient) async -> Bool? {
+    /// Longer than Surge's own deadline for an `http probe` (about 15 s), whose "HTTP request timeout" is the
+    /// answer for a proxy that can't reach IPv6.
+    nonisolated static let ipv6ProbeTimeout: Duration = .seconds(25)
+
+    /// Whether a HEAD request to an IPv6 literal gets through `target` (a policy name or `POLICY::` line hash;
+    /// surge-cli's `http probe` takes both). nil when it is unknown: no target, Surge could not be asked, the
+    /// probe outlived `timeout`, or Surge failed for another reason (an unknown policy, say).
+    nonisolated static func reachesIPv6(through target: String?, surge: any SurgeClient,
+                                        timeout: Duration = ipv6ProbeTimeout) async -> Bool? {
+        guard let target else { return nil }
         do {
-            _ = try await CaptureTimeout.run(.seconds(10)) { try await surge.httpProbe(url: ipv6ProbeURL, policy: target) }
+            _ = try await CaptureTimeout.run(timeout) { try await surge.httpProbe(url: ipv6ProbeURL, policy: target) }
             return true
-        } catch SurgeError.cliNotFound, SurgeError.decoding {
-            return nil
-        } catch is CancellationError {
-            return nil
+        } catch SurgeError.commandFailed(_, let message) {
+            return meansNoIPv6(message) ? false : nil
         } catch {
-            return false
+            return nil
         }
+    }
+
+    /// Surge's failures for an IPv6 destination the policy has no route to: `No outgoing interface` (DIRECT
+    /// on an IPv4-only network), `HTTP request timeout` (a proxy that drops IPv6; its IPv4 egress was just
+    /// measured), an unreachable network or host.
+    nonisolated static func meansNoIPv6(_ message: String) -> Bool {
+        let text = message.lowercased()
+        return ["no outgoing interface", "http request timeout", "network is unreachable", "no route to host",
+                "host is unreachable", "address family not supported"].contains { text.contains($0) }
     }
 
     /// Answers stay fresh for a day, failures for an hour.
