@@ -21,7 +21,7 @@ struct SettingsDatabasePane: View {
             writingSection
         }
         .formStyle(.grouped)
-        .frame(width: SettingsLayout.width, height: 640)
+        .frame(width: SettingsLayout.width, height: SettingsDatabaseFormat.paneHeight(macCount: model.devices.devices.count))
         .onAppear(perform: load)
         .onChange(of: model.devices.thisDevice?.name) { _, name in
             if nameDraft.isEmpty, let name { nameDraft = name }
@@ -317,6 +317,13 @@ private struct SettingsDeviceRow: View {
 enum SettingsDatabaseFormat {
     /// Days to keep requests: 0 = forever.
     static let retentionPresets = [0, 365, 90, 30, 7]
+
+    /// Pane height that opens with every row visible, the three-line table list included: one Mac fits in
+    /// 700 pt and each further Mac adds a row, up to a height that still fits a 13-inch display (the form
+    /// scrolls beyond that).
+    nonisolated static func paneHeight(macCount: Int) -> CGFloat {
+        min(700 + 44 * CGFloat(max(macCount - 1, 0)), 800)
+    }
 
     static func retentionLabel(_ days: Int) -> String {
         switch days {

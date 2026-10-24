@@ -87,37 +87,47 @@ struct SettingsGeneralPane: View {
 
     // MARK: Rows
 
+    // The segmented pickers put their label in LabeledContent and size only the control to fit, so they end
+    // at the row's trailing edge like the slider, the menus and the switch (a fixed-size Picker shrinks the
+    // whole row, label included, and stops short of the edge).
+
     private var showInPicker: some View {
-        Picker(tr("Show in", "Settings"), selection: Binding(
-            get: { model.preferences.showIn },
-            set: { value in
-                model.preferences.showIn = value
-                AppBootstrap.applyActivationPolicy(value)
-                // Changing the activation policy can deactivate the app; keep Settings in front.
-                Task { @MainActor in NSApp.activate() }
+        LabeledContent(tr("Show in", "Settings")) {
+            Picker(tr("Show in", "Settings"), selection: Binding(
+                get: { model.preferences.showIn },
+                set: { value in
+                    model.preferences.showIn = value
+                    AppBootstrap.applyActivationPolicy(value)
+                    // Changing the activation policy can deactivate the app; keep Settings in front.
+                    Task { @MainActor in NSApp.activate() }
+                }
+            )) {
+                Text(tr("Menu Bar & Dock", "Settings")).tag(Preferences.ShowIn.menuBarAndDock)
+                Text(tr("Menu Bar Only", "Settings")).tag(Preferences.ShowIn.menuBarOnly)
             }
-        )) {
-            Text(tr("Menu Bar & Dock", "Settings")).tag(Preferences.ShowIn.menuBarAndDock)
-            Text(tr("Menu Bar Only", "Settings")).tag(Preferences.ShowIn.menuBarOnly)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
         }
-        .pickerStyle(.segmented)
-        .fixedSize()
     }
 
     private var appearancePicker: some View {
-        Picker(tr("Appearance", "Settings"), selection: Binding(
-            get: { model.preferences.appearance },
-            set: { value in
-                model.preferences.appearance = value
-                AppBootstrap.applyAppearance(value)
+        LabeledContent(tr("Appearance", "Settings")) {
+            Picker(tr("Appearance", "Settings"), selection: Binding(
+                get: { model.preferences.appearance },
+                set: { value in
+                    model.preferences.appearance = value
+                    AppBootstrap.applyAppearance(value)
+                }
+            )) {
+                Text(tr("System", "Settings")).tag(Preferences.Appearance.system)
+                Text(tr("Light", "Settings")).tag(Preferences.Appearance.light)
+                Text(tr("Dark", "Settings")).tag(Preferences.Appearance.dark)
             }
-        )) {
-            Text(tr("System", "Settings")).tag(Preferences.Appearance.system)
-            Text(tr("Light", "Settings")).tag(Preferences.Appearance.light)
-            Text(tr("Dark", "Settings")).tag(Preferences.Appearance.dark)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
         }
-        .pickerStyle(.segmented)
-        .fixedSize()
     }
 
     private var glassSlider: some View {
@@ -162,6 +172,7 @@ struct SettingsGeneralPane: View {
         }
     }
 
+    /// A form menu row like the IP info service: not fixed-size, so its pop-up ends at the trailing edge.
     private var languagePicker: some View {
         Picker(tr("Language", "Settings"), selection: Binding(
             get: { model.preferences.language },
@@ -176,7 +187,6 @@ struct SettingsGeneralPane: View {
             Text(verbatim: "简体中文").tag(Preferences.Language.chinese)
         }
         .pickerStyle(.menu)
-        .fixedSize()
     }
 
     // MARK: Login item

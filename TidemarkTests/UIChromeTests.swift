@@ -263,6 +263,16 @@ struct UIChromeTests {
         }
     }
 
+    /// The Database pane opens with the three-line table list in view: one Mac (or none yet) fits 700 pt,
+    /// each further Mac adds a row, and the pane stops growing at a height a 13-inch display still shows.
+    @Test func databasePaneGrowsWithTheMacs() {
+        #expect(SettingsDatabaseFormat.paneHeight(macCount: 0) == 700)
+        #expect(SettingsDatabaseFormat.paneHeight(macCount: 1) == 700)
+        #expect(SettingsDatabaseFormat.paneHeight(macCount: 2) == 744)
+        #expect(SettingsDatabaseFormat.paneHeight(macCount: 3) == 788)
+        #expect(SettingsDatabaseFormat.paneHeight(macCount: 12) == 800)
+    }
+
     @Test func addAppLabels() {
         withLanguage(.english) {
             #expect(AddAppCandidates.backfillLabel(0) == "Nothing recorded yet")
