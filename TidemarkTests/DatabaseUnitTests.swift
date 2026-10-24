@@ -1,4 +1,5 @@
 import Foundation
+import NIOCore
 import Testing
 @testable import Tidemark
 
@@ -19,19 +20,53 @@ struct DatabaseUnitTests {
         #expect(minimal.port == 5432)
         #expect(minimal.password == nil)
         #expect(minimal.database == nil)
-        #expect(minimal.tls == .disable)
+        #expect(minimal.rootCertificatePath == nil)
         #expect(!minimal.username.isEmpty)
 
         let socket = try PostgresConnectionURL("postgres://me@/tidemark?host=/tmp")
         #expect(socket.socketPath == "/tmp/.s.PGSQL.5432")
+        #expect(socket.tls == .disable)
 
         #expect(try PostgresConnectionURL("postgres://h/d?sslmode=require").tls == .require)
         #expect(try PostgresConnectionURL("postgres://h/d?sslmode=prefer").tls == .prefer)
         #expect(try PostgresConnectionURL("postgres://h/d?sslmode=allow").tls == .disable)
+        #expect(try PostgresConnectionURL("postgres://h/d?sslmode=disable").tls == .disable)
+    }
+
+    @Test func defaultsToTLSWhenTrafficLeavesTheMac() throws {
+        // libpq's `prefer`: TLS whenever the server offers it…
+        for url in ["postgres://db.local", "postgres://10.1.2.52:5455/tidemark", "postgres://[2001:db8::5]/t", "postgres://db.example.com/t"] {
+            #expect(try PostgresConnectionURL(url).tls == .prefer, "\(url)")
+        }
+        // …except on this Mac, where nothing crosses the network.
+        for url in ["postgres://localhost/t", "postgres://127.0.0.1:15455/t", "postgres://[::1]/t", "postgres://u@/t?host=/tmp", "postgres:///t"] {
+            #expect(try PostgresConnectionURL(url).tls == .disable, "\(url)")
+        }
+    }
+
+    @Test func honoursLibpqQueryParameters() throws {
+        let url = try PostgresConnectionURL("postgresql://db.local?user=tide&password=p%40ss&dbname=tidemark&port=5433&application_name=x")
+        #expect(url.username == "tide")
+        #expect(url.password == "p@ss")
+        #expect(url.database == "tidemark")
+        #expect(url.port == 5433)
+        // The URL's own parts win over query parameters.
+        let both = try PostgresConnectionURL("postgresql://me:mine@db.local:6000/main?user=tide&password=other&dbname=x&port=1")
+        #expect(both.username == "me" && both.password == "mine" && both.database == "main" && both.port == 6000)
+        #expect(throws: DatabaseError.self) { try PostgresConnectionURL("postgres://h/d?port=abc") }
+
+        // A private CA: `require` with a root certificate verifies the chain, as in libpq.
+        let privateCA = try PostgresConnectionURL("postgres://db.local/t?sslmode=require&sslrootcert=/etc/ssl/tidemark-ca.pem")
+        #expect(privateCA.tls == .verifyCA)
+        #expect(privateCA.rootCertificatePath == "/etc/ssl/tidemark-ca.pem")
+        #expect(try PostgresConnectionURL("postgres://db.local/t?sslmode=verify-full&sslrootcert=/ca.pem").tls == .verifyFull)
+        let system = try PostgresConnectionURL("postgres://db.example.com/t?sslrootcert=system")
+        #expect(system.tls == .verifyFull && system.rootCertificatePath == nil)
     }
 
     @Test func rejectsInvalidURLsWithoutLeakingPasswords() {
-        for url in ["mysql://u:secret@h/d", "postgres://u:secret@h/d?sslmode=bogus", "postgres://u:secret@h:99999/d", "not a url"] {
+        for url in ["mysql://u:secret@h/d", "postgres://u:secret@h/d?sslmode=bogus", "postgres://u:secret@h:99999/d", "not a url",
+                    "postgres://h/d?password=secret&sslmode=bogus"] {
             #expect(throws: DatabaseError.self) { try PostgresConnectionURL(url) }
             do {
                 _ = try PostgresConnectionURL(url)
@@ -39,6 +74,56 @@ struct DatabaseUnitTests {
                 #expect(!error.localizedDescription.contains("secret"))
             }
         }
+        #expect(!PostgresConnectionURL.redact("postgres://h/d?password=secret").contains("secret"))
+    }
+
+    @Test func classifiesServerErrorsByWhetherARetryCanSucceed() {
+        // May succeed later: keep the data and retry.
+        for state in ["08006", "08P01", "28P01", "3D000", "3F000", "53100", "53200", "53300", "57014", "57P01", "57P03", "58030",
+                      "40001", "40P01", "25006", "25P03", "55P03", "55006", "42501", "XX000", "F0000", "72000"] {
+            #expect(PostgresDatabase.isTransient(sqlState: state), "\(state)")
+        }
+        // The statement or its data is wrong: retrying the same rows fails again.
+        for state in ["22001", "22P02", "23503", "23505", "23514", "42601", "42703", "42P01", "54000", "40002", "25001", "0A000", "55000", ""] {
+            #expect(!PostgresDatabase.isTransient(sqlState: state), "\(state)")
+        }
+    }
+
+    @Test func mapsClientSideErrors() {
+        #expect(PostgresDatabase.map(CancellationError()) is CancellationError)
+        #expect(PostgresDatabase.map(DatabaseError.query("x")) as? DatabaseError == .query("x"))
+        #expect(PostgresDatabase.map(IOError(errnoCode: ECONNRESET, reason: "read")) as? DatabaseError == .unreachable("Connection reset by peer"))
+        let encoding = EncodingError.invalidValue(Double.nan, .init(codingPath: [], debugDescription: "NaN"))
+        guard case .query = PostgresDatabase.map(encoding) as? DatabaseError else {
+            Issue.record("An encoding failure is the data's fault")
+            return
+        }
+        struct Unknown: Error {}
+        guard case .unreachable = PostgresDatabase.map(Unknown()) as? DatabaseError else {
+            Issue.record("Unknown failures keep the data")
+            return
+        }
+    }
+
+    @Test func requestQueryTimeWindow() {
+        let now = Date(timeIntervalSince1970: 1_761_300_000)
+        let day = PostgresDatabase.TimeWindow(RequestQuery(range: .last24Hours), now: now)
+        #expect(day.lower == now.addingTimeInterval(-86_400) && day.upper == nil)
+        #expect(PostgresDatabase.TimeWindow(RequestQuery(range: .all), now: now) == .init(lower: nil, upper: nil))
+        // A dragged interval overrides the range.
+        let dragged = DateInterval(start: now.addingTimeInterval(-600), end: now.addingTimeInterval(-300))
+        let window = PostgresDatabase.TimeWindow(RequestQuery(range: .lastHour, interval: dragged), now: now)
+        #expect(window.lower == dragged.start && window.upper == dragged.end)
+    }
+
+    @Test func poolsCarrySessionLimits() {
+        let main = Dictionary(uniqueKeysWithValues: PostgresDatabase.SessionLimits.main.parameters)
+        let writer = Dictionary(uniqueKeysWithValues: PostgresDatabase.SessionLimits.writer.parameters)
+        for limits in [main, writer] {
+            #expect(Set(limits.keys) == ["statement_timeout", "lock_timeout", "idle_in_transaction_session_timeout"])
+        }
+        #expect(writer["lock_timeout"] == "5s")
+        #expect(PostgresDatabase.mainPoolSize + PostgresDatabase.writerPoolSize == 8)
     }
 
     @Test func invalidURLSurfacesOnConnect() async {
@@ -93,14 +178,31 @@ struct DatabaseUnitTests {
         #expect(statements[4] == "SELECT $1::int")
     }
 
-    @Test func schemaMigrationsSplitIntoSingleStatements() {
+    @Test func schemaMigrationsSplitIntoSingleStatements() throws {
+        #expect(Schema.migrations.map(\.version) == Array(1...Schema.latestVersion))
         for migration in Schema.migrations {
-            let statements = Schema.statements(in: migration.sql)
-            #expect(statements.count > 10)
-            #expect(statements.allSatisfy { !$0.isEmpty })
-            #expect(statements.first == "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
+            #expect(Schema.statements(in: migration.sql).allSatisfy { !$0.isEmpty })
         }
+        let v1 = Schema.statements(in: Schema.migrations[0].sql)
+        #expect(v1.count > 10)
+        #expect(v1.first == "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
         #expect(Schema.statements(in: Schema.bootstrap).count == 1)
+
+        // From v2 on a migration may run again after an interruption: every statement is idempotent,
+        // and indexes on the request log are built concurrently.
+        let v2 = try #require(Schema.migrations.first { $0.version == 2 })
+        let statements = Schema.statements(in: v2.sql)
+        #expect(statements.count == 4)
+        for statement in statements {
+            #expect(statement.contains("IF NOT EXISTS") || statement.contains("SET (fillfactor"), "\(statement)")
+            #expect(!statement.uppercased().contains("CREATE INDEX") && !statement.uppercased().contains("DROP INDEX"), "\(statement)")
+        }
+        #expect(v2.requiresVersion == 1)
+        #expect(v2.concurrentSteps.contains(.dropIndex(name: "requests_updated_idx")))
+        #expect(v2.concurrentSteps.contains { step in
+            if case .createIndex(let name, "requests", let definition) = step { return name == "requests_search_trgm_idx" && definition.contains(Schema.requestSearchText) }
+            return false
+        })
     }
 
     @Test func escapesLikePatternsAndBundlePaths() {

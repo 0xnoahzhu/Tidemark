@@ -29,6 +29,52 @@ struct DatabaseLiveTests {
             }
             #expect(!tables.contains("schema_migrations"))
             #expect(try await db.mutes() == ["*.apple.com", "*.icloud.com", "*.mzstatic.com"])
+            let requires = try await db.rows("SELECT version, requires_version FROM schema_migrations ORDER BY version").map { row in
+                let read = PostgresRowReader(row)
+                return "\(try read("version", as: Int.self)):\(try read("requires_version", as: Int?.self).map(String.init) ?? "-")"
+            }
+            #expect(requires == ["1:-", "2:1"])
+        }
+    }
+
+    @Test func poolsRunWithSessionLimits() async throws {
+        try await withTestDatabase { db in
+            func settings(on pool: PostgresDatabase.Pool) async throws -> [String] {
+                try await db.withConnection(on: pool) { connection in
+                    var values: [String] = []
+                    for name in ["statement_timeout", "lock_timeout", "idle_in_transaction_session_timeout", "application_name"] {
+                        let rows = try await connection.query(PostgresQuery(unsafeSQL: "SHOW \(name)"), logger: PostgresDatabase.logger).collect()
+                        values.append(try rows.first.map { try $0.makeRandomAccess()[0].decode(String.self) } ?? "")
+                    }
+                    return values
+                }
+            }
+            // The migration's session settings were reset before its connection went back to the pool.
+            for _ in 0..<PostgresDatabase.mainPoolSize {
+                #expect(try await settings(on: .main) == ["30s", "10s", "1min", "Tidemark"])
+            }
+            #expect(try await settings(on: .writer) == ["1min", "5s", "30s", "Tidemark writer"])
+
+            // A transaction can lift the statement timeout for itself only.
+            let lifted = try await db.withTransaction(statementTimeout: "10min") { connection in
+                try await connection.query("SHOW statement_timeout", logger: PostgresDatabase.logger).collect().first
+                    .map { try $0.makeRandomAccess()[0].decode(String.self) }
+            }
+            #expect(lifted == "10min")
+            #expect(try await settings(on: .main).first == "30s")
+
+            // A statement over its time limit is reported as unreachable (retry later), not as bad data.
+            do {
+                try await db.withTransaction(statementTimeout: "50ms") { connection in
+                    _ = try await connection.query("SELECT pg_sleep(1)", logger: PostgresDatabase.logger).collect()
+                }
+                Issue.record("pg_sleep outlived its statement timeout")
+            } catch let error as DatabaseError {
+                guard case .unreachable = error else {
+                    Issue.record("Expected .unreachable, got \(error)")
+                    return
+                }
+            }
         }
     }
 
@@ -495,6 +541,7 @@ struct DatabaseLiveTests {
             let remoteNode = try #require(tree.first { $0.name == "git-remote-https" })
             #expect(remoteNode.requestCount == 2 && remoteNode.domainCount == 1)
             #expect(Set(tree.map(\.id)).count == tree.count)
+            #expect(tree.allSatisfy { $0.deviceID == device.id })
 
             #expect(try await db.processTree(appID: app.id, scope: .device(UUID())).isEmpty)
             let stats = try await db.appStats(app.id, scope: .device(device.id))
@@ -518,10 +565,15 @@ struct DatabaseLiveTests {
             ip.isDirect = false
             ip.hosts = ["registry-1.docker.io"]
             ip.geo = GeoInfo(countryCode: "US", asn: 13335, organization: "Cloudflare, Inc.")
-            let domain = Fixture.host(app: app.id, "registry-1.docker.io")
+            ip.firstDeviceID = UUID()  // not a registered Mac: stored as NULL instead of failing
+            var domain = Fixture.host(app: app.id, "registry-1.docker.io")
+            domain.firstDeviceID = mini.id
             let created = try await db.insertAppHosts([domain, ip, domain])
             #expect(created.map(\.value) == ["registry-1.docker.io", "104.16.98.215"])
             #expect(try await db.insertAppHosts([domain]).isEmpty)
+            let stored = try await db.appHosts(app.id, scope: .all)
+            #expect(stored.first { $0.value == "registry-1.docker.io" }?.firstDeviceID == mini.id)
+            #expect(stored.first { $0.kind == .ip }?.firstDeviceID == nil)
 
             // Two Macs racing on the same first contact: exactly one wins.
             let racer = Fixture.host(app: app.id, "auth.docker.io")
@@ -680,9 +732,13 @@ struct DatabaseLiveTests {
             #expect(domain.requestCount == 2)
             #expect(domain.policy == "AI › JP")
             #expect(domain.firstSeen < Fixture.now.addingTimeInterval(-86_400 * 2))
+            #expect(domain.firstDeviceID == nil)  // the existing entry is older than any request: its first Mac stays
             let shared = try #require(hosts.first { $0.kind == .ip && $0.value == "104.18.1.1" })
             #expect(shared.hosts == ["api.x.ai"])
             #expect(!shared.isDirect)
+            #expect(shared.firstDeviceID == device.id)
+            #expect(shared.processName == "Grok")
+            #expect(shared.policy == "AI › JP")
             let literal = try #require(hosts.first { $0.kind == .ip && $0.value == "149.154.175.60" })
             #expect(literal.isDirect)
             #expect(hosts.count == 3)
@@ -842,7 +898,8 @@ struct DatabaseLiveTests {
             ], deviceID: mac.id)
             try await db.saveEgressSamples([
                 EgressSample(policyPath: ["DIRECT"], ip: "203.0.113.7", location: "Hong Kong", network: "AS4760 HKT", latencyMs: 9, isCurrent: false, checkedAt: Fixture.now, error: nil),
-                EgressSample(policyPath: ["AI", "US-West"], ip: "2001:db8::42", location: "Los Angeles, US", network: "AS9009 M247", latencyMs: 160, isCurrent: true, checkedAt: Fixture.now, error: nil),
+                EgressSample(policyPath: ["AI", "US-West"], ip: "2001:db8::42", location: "Los Angeles, US", network: "AS9009 M247", latencyMs: 160, isCurrent: true,
+                             checkedAt: Fixture.now, error: nil, networkType: "hosting", hasIPv6: true),
             ], deviceID: mac.id)
             try await db.saveEgressSamples([
                 EgressSample(policyPath: ["DIRECT"], ip: "192.0.2.1", location: nil, network: nil, latencyMs: 3, isCurrent: true, checkedAt: Fixture.now, error: nil),
@@ -852,7 +909,9 @@ struct DatabaseLiveTests {
             #expect(latest.map(\.policyPath) == [["AI", "US-West"], ["DIRECT"]])
             #expect(latest.map(\.isCurrent) == [true, false])
             #expect(latest[0].ip == "2001:db8::42" && latest[0].latencyMs == 160 && latest[0].error == nil)
+            #expect(latest[0].networkType == "hosting" && latest[0].hasIPv6 == true)
             #expect(latest[1].latencyMs == 9)
+            #expect(latest[1].networkType == nil && latest[1].hasIPv6 == nil)
             #expect(try await db.latestEgress(deviceID: UUID()).isEmpty)
 
             try await db.insertEgressChange(EgressChange(id: 0, changedAt: earlier, ip: "203.0.113.7", policyPath: ["DIRECT"], reason: "Surge restarted"), deviceID: mac.id)
@@ -868,10 +927,346 @@ struct DatabaseLiveTests {
         }
     }
 
+    // MARK: - Migrations
+
+    @Test func upgradeFromV1KeepsDataAndRetunesIndexes() async throws {
+        try await withTestDatabase(upTo: 1) { db in
+            #expect(try await db.schemaVersion() == 1)
+            #expect(try await indexes(db)["requests_updated_idx"] == true)
+
+            // Rows a v1 build wrote.
+            let mac = Fixture.device("MacBook Pro")
+            try await db.upsertDevice(mac)
+            let app = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            try await db.insertApp(app)
+            var rows: [RequestRecord] = []
+            for index in 0..<50 {
+                var row = Fixture.request(device: mac.id, id: Int64(index), host: "svc\(index).cursor.sh")
+                row.startedAt = Fixture.now.addingTimeInterval(-Double(index) * 60)
+                row.appID = index.isMultiple(of: 2) ? app.id : nil
+                row.remoteIP = "104.18.0.\(index)"
+                row.chain = [ProcessLink(name: "Cursor Helper", pid: 851, path: "/Applications/Cursor.app/Contents/MacOS/Cursor Helper", startTime: Fixture.now)]
+                rows.append(row)
+            }
+            let ids = try await db.upsertRequests(rows)
+            _ = try await db.insertAppHosts([Fixture.host(app: app.id, "svc0.cursor.sh")])
+            let alert = try #require(try await db.insertAlerts([Fixture.alert(device: mac.id, app: app.id, value: "svc0.cursor.sh")]).first)
+            try await db.touchHostSources([Fixture.source(.domain, "svc0.cursor.sh", device: mac.id, app: app.id)])
+            try await db.execute("""
+                INSERT INTO egress_checks (device_id, checked_at, policy_path, ip, is_current)
+                VALUES (\(mac.id), \(Fixture.now), \(["DIRECT"]), '203.0.113.7', true)
+                """)
+
+            #expect(try await db.migrate() == 2)
+            #expect(try await db.schemaVersion() == 2)
+
+            // Every row survived.
+            let page = try await db.queryRequests(RequestQuery(range: .all, limit: 100))
+            #expect(page.rows.count == 50 && page.totalCount == 50)
+            #expect(Dictionary(uniqueKeysWithValues: page.rows.map { ($0.key, $0.rowID) }) == ids.mapValues { Optional($0) })
+            let first = try #require(page.rows.first { $0.key.surgeID == 0 })
+            #expect(first.appID == app.id && first.remoteIP == "104.18.0.0" && first.chain.count == 1)
+            #expect(try await db.devices().first?.rowCount == 50)
+            #expect(try await db.appHosts(app.id, scope: .all).map(\.value) == ["svc0.cursor.sh"])
+            #expect(try await db.alerts(filter: .all, appID: nil, scope: .all, limit: 10).map(\.id) == [alert.id])
+            #expect(try await db.inventory(kind: nil, search: "", scope: .all).map(\.value) == ["svc0.cursor.sh"])
+            let egress = try #require(try await db.latestEgress(deviceID: mac.id).first)
+            #expect(egress.ip == "203.0.113.7" && egress.networkType == nil && egress.hasIPv6 == nil)
+
+            // The indexes were retuned, concurrently and validly.
+            let upgraded = try await indexes(db)
+            for name in ["requests_updated_brin_idx", "requests_search_trgm_idx", "requests_started_idx", "requests_app_started_idx", "host_sources_value_trgm_idx"] {
+                #expect(upgraded[name] == true, "\(name)")
+            }
+            for name in ["requests_updated_idx", "requests_host_idx", "requests_host_trgm_idx", "requests_remote_ip_idx", "host_sources_last_seen_idx"] {
+                #expect(upgraded[name] == nil, "\(name)")
+            }
+            let options = try await db.rows("""
+                SELECT array_to_string(c.reloptions, ',') AS options FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = \(db.schema) AND c.relname = 'requests'
+                """).first.map { try PostgresRowReader($0)("options", as: String?.self) }
+            #expect(options == "fillfactor=80")
+
+            // Writes and searches work on the upgraded schema.
+            try await db.saveEgressSamples([
+                EgressSample(policyPath: ["DIRECT"], ip: "203.0.113.8", location: nil, network: nil, latencyMs: 4, isCurrent: true,
+                             checkedAt: Fixture.now.addingTimeInterval(60), error: nil, networkType: "residential", hasIPv6: false),
+            ], deviceID: mac.id)
+            let checked = try #require(try await db.latestEgress(deviceID: mac.id).first)
+            #expect(checked.networkType == "residential" && checked.hasIPv6 == false)
+            #expect(try await db.queryRequests(RequestQuery(range: .all, search: "SVC4")).totalCount == 11)
+            #expect(try await db.queryRequests(RequestQuery(range: .all, search: "104.18.0.7")).rows.map(\.key.surgeID) == [7])
+
+            // An upgrade interrupted after its index steps (version not recorded) simply runs again.
+            try await db.execute("DELETE FROM schema_migrations WHERE version = 2")
+            #expect(try await db.migrate() == 2)
+            #expect(try await indexes(db) == upgraded)
+        }
+    }
+
+    @Test func newerSchemaStopsThisBuildOnlyWhenItMust() async throws {
+        try await withTestDatabase { db in
+            // A later migration that this build can keep writing to.
+            let compatible = Schema.latestVersion + 1
+            try await db.execute("INSERT INTO schema_migrations (version, name, requires_version) VALUES (\(compatible), 'compatible', 1)")
+            #expect(try await db.migrate() == compatible)
+
+            // One that requires a newer writer.
+            let breaking = Schema.latestVersion + 2
+            try await db.execute("INSERT INTO schema_migrations (version, name, requires_version) VALUES (\(breaking), 'breaking', \(breaking))")
+            do {
+                try await db.migrate()
+                Issue.record("migrate() accepted a schema this build cannot write to")
+            } catch let error as DatabaseError {
+                guard case .unreachable(let message) = error else {
+                    Issue.record("Expected .unreachable, got \(error)")
+                    return
+                }
+                #expect(message.contains("Update Tidemark"))
+            }
+        }
+    }
+
+    @Test func migrationWaitsForAnotherMacsMigration() async throws {
+        try await withTestDatabase { db in
+            let waited = try await db.withConnection { connection in
+                // This connection plays another Mac that is migrating.
+                _ = try await connection.query("SELECT pg_advisory_lock(\(PostgresDatabase.migrationLockKey))", logger: PostgresDatabase.logger).collect()
+                let clock = ContinuousClock()
+                let start = clock.now
+                let migration = Task { () throws -> Duration in
+                    let version = try await db.migrate()
+                    #expect(version == Schema.latestVersion)
+                    return start.duration(to: clock.now)
+                }
+                try await Task.sleep(for: .milliseconds(700))
+                _ = try await connection.query("SELECT pg_advisory_unlock(\(PostgresDatabase.migrationLockKey))", logger: PostgresDatabase.logger).collect()
+                return try await migration.value
+            }
+            #expect(waited >= .milliseconds(600))
+        }
+    }
+
+    // MARK: - Write path robustness
+
+    @Test func writesForADeletedAppKeepTheirData() async throws {
+        try await withTestDatabase { db in
+            let mac = Fixture.device("MacBook Pro")
+            try await db.upsertDevice(mac)
+            let kept = Fixture.app("Raycast", path: "/Applications/Raycast.app")
+            let gone = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            try await db.insertApp(kept)
+            try await db.insertApp(gone)
+            // Another Mac deletes the app while this one still attributes requests to it.
+            try await db.deleteApp(gone.id)
+
+            let link = ProcessLink(name: "Cursor", pid: 812, path: "/Applications/Cursor.app/Contents/MacOS/Cursor", startTime: Fixture.now)
+            let processID = try #require(try await db.upsertProcessChain(deviceID: mac.id, chain: [link], appID: gone.id))
+            var request = Fixture.request(device: mac.id, id: 1, host: "api2.cursor.sh")
+            request.appID = gone.id
+            request.chain = [link]
+            var other = Fixture.request(device: mac.id, id: 2, host: "raycast.com")
+            other.appID = kept.id
+            #expect(try await db.upsertRequests([request, other]).count == 2)
+            let rows = try await db.queryRequests(RequestQuery(range: .all)).rows
+            #expect(rows.first { $0.key.surgeID == 1 }?.appID == nil)
+            #expect(rows.first { $0.key.surgeID == 2 }?.appID == kept.id)
+            let processApp = try #require(try await db.rows("SELECT app_id FROM processes WHERE id = \(processID)").first)
+            #expect(try PostgresRowReader(processApp)("app_id", as: UUID?.self) == nil)
+
+            let created = try await db.insertAppHosts([Fixture.host(app: gone.id, "api2.cursor.sh"), Fixture.host(app: kept.id, "raycast.com")])
+            #expect(created.map(\.appID) == [kept.id])
+            try await db.touchAppHosts([Fixture.host(app: gone.id, "api2.cursor.sh")])
+            try await db.touchHostSources([Fixture.source(.domain, "api2.cursor.sh", device: mac.id, app: gone.id)])
+            #expect(try await db.inventory(kind: nil, search: "api2", scope: .all).first?.sources.map(\.appID) == [nil])
+            let alerts = try await db.insertAlerts([
+                Fixture.alert(device: mac.id, app: gone.id, value: "api2.cursor.sh"),
+                Fixture.alert(device: mac.id, app: kept.id, value: "raycast.com"),
+            ])
+            #expect(alerts.map(\.appID) == [kept.id])
+            try await db.setInstalled(appID: gone.id, deviceID: mac.id, installed: true)
+            #expect(try await db.installs().isEmpty)
+        }
+    }
+
+    @Test func alertsRetriedAfterALostReplyAreStoredOnce() async throws {
+        try await withTestDatabase { db in
+            let mac = Fixture.device("MacBook Pro")
+            try await db.upsertDevice(mac)
+            let app = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            try await db.insertApp(app)
+            let requestID = try #require(try await db.upsertRequests([Fixture.request(device: mac.id, id: 1)]).values.first)
+
+            var alert = Fixture.alert(device: mac.id, app: app.id, value: "api2.cursor.sh")
+            alert.requestRowID = requestID
+            let first = try await db.insertAlerts([alert, alert])
+            #expect(first.count == 1)
+            // The same batch again (its commit's reply was lost): same row, no second notification.
+            #expect(try await db.insertAlerts([alert]).map(\.id) == first.map(\.id))
+            var later = alert
+            later.createdAt = alert.createdAt.addingTimeInterval(1)
+            let mixed = try await db.insertAlerts([later, alert])
+            #expect(mixed.count == 2 && mixed[1].id == first[0].id && mixed[0].id != first[0].id)
+            #expect(try await db.alerts(filter: .all, appID: nil, scope: .all, limit: 10).count == 2)
+
+            // A request row removed in the meantime is unlinked instead of failing the insert.
+            var orphan = Fixture.alert(device: mac.id, app: app.id, value: "x.cursor.sh")
+            orphan.requestRowID = requestID + 1_000
+            let stored = try #require(try await db.insertAlerts([orphan]).first)
+            let listed = try await db.alerts(filter: .all, appID: nil, scope: .all, limit: 10)
+            #expect(listed.contains { $0.id == stored.id && $0.requestRowID == nil })
+        }
+    }
+
+    @Test func countingUpsertsAndClosingAnEndedSession() async throws {
+        try await withTestDatabase { db in
+            let mac = Fixture.device("MacBook Pro")
+            let mini = Fixture.device("Mac mini")
+            try await db.upsertDevice(mac)
+            try await db.upsertDevice(mini)
+            let old = Fixture.session
+            let new = Fixture.session + 60_000
+            func request(_ device: DeviceID, _ session: Int64, _ id: Int64, _ state: RequestState = .active) -> RequestRecord {
+                var row = Fixture.request(device: device, id: id)
+                row.key.session = session
+                row.state = state
+                return row
+            }
+
+            let first = try await db.upsertRequestsCountingInserts([request(mac.id, old, 1), request(mac.id, old, 2), request(mini.id, old, 1)])
+            #expect(first.inserted == 3 && first.ids.count == 3)
+            var completed = request(mac.id, old, 3, .completed)
+            completed.completedAt = Fixture.now.addingTimeInterval(-0.5)
+            let second = try await db.upsertRequestsCountingInserts([request(mac.id, old, 1), completed, request(mac.id, new, 1)])
+            #expect(second.inserted == 2 && second.ids.count == 3)
+            #expect(second.ids[RequestKey(deviceID: mac.id, session: old, surgeID: 1)] == first.ids[RequestKey(deviceID: mac.id, session: old, surgeID: 1)])
+            #expect(try await db.devices().first { $0.id == mac.id }?.rowCount == 4)
+
+            let cursor = try #require(try await db.requestsWritten(after: .distantPast, excluding: nil, limit: 10).compactMap(\.writtenAt).max())
+            try await Task.sleep(for: .milliseconds(20))
+            // Surge restarted: the old session's active rows will never be updated again.
+            let restart = Fixture.now.addingTimeInterval(30)
+            #expect(try await db.closeActiveRequests(deviceID: mac.id, before: new, at: restart) == 2)
+            #expect(try await db.closeActiveRequests(deviceID: mac.id, before: new, at: restart) == 0)
+
+            let rows = try await db.queryRequests(RequestQuery(range: .all)).rows
+            func row(_ device: DeviceID, _ session: Int64, _ id: Int64) -> RequestRecord? {
+                rows.first { $0.key == RequestKey(deviceID: device, session: session, surgeID: id) }
+            }
+            for id: Int64 in [1, 2] {
+                let closed = try #require(row(mac.id, old, id))
+                #expect(closed.state == .completed)
+                #expect(Fixture.close(try #require(closed.completedAt), restart))
+            }
+            #expect(Fixture.close(try #require(row(mac.id, old, 3)?.completedAt), try #require(completed.completedAt)))
+            #expect(row(mac.id, new, 1)?.state == .active)
+            #expect(row(mini.id, old, 1)?.state == .active)
+            // Other Macs pick the change up through their updated_at poll.
+            let polled = try await db.requestsWritten(after: cursor, excluding: nil, limit: 10)
+            #expect(Set(polled.map(\.key)) == [RequestKey(deviceID: mac.id, session: old, surgeID: 1), RequestKey(deviceID: mac.id, session: old, surgeID: 2)])
+        }
+    }
+
+    // MARK: - Queries
+
+    @Test func explicitIntervalsAndKeysetPaging() async throws {
+        try await withTestDatabase { db in
+            let mac = Fixture.device("MacBook Pro")
+            try await db.upsertDevice(mac)
+            var rows: [RequestRecord] = []
+            for index in 0..<40 {
+                var row = Fixture.request(device: mac.id, id: Int64(index), host: "h\(index).example.com")
+                // Pairs share a start time, so paging must break ties by row ID.
+                row.startedAt = Fixture.now.addingTimeInterval(-Double(index / 2) * 60)
+                rows.append(row)
+            }
+            try await db.upsertRequests(rows)
+
+            // An explicit interval overrides the range, inclusive at both ends.
+            let window = DateInterval(start: Fixture.now.addingTimeInterval(-10 * 60), end: Fixture.now.addingTimeInterval(-5 * 60))
+            let inWindow = try await db.queryRequests(RequestQuery(range: .lastHour, interval: window))
+            #expect(inWindow.totalCount == 12)
+            // Rows 10…21 start between 5 and 10 minutes ago; 10/11 and 20/21 sit exactly on the ends.
+            #expect(Set(inWindow.rows.map(\.key.surgeID)) == Set(10...21))
+            let histogram = try await db.histogram(RequestQuery(range: .all, interval: window), buckets: 5)
+            #expect(Fixture.close(histogram.start, window.start) && Fixture.close(histogram.end, window.end))
+            #expect(histogram.counts.reduce(0, +) == 12)
+
+            // Keyset pages: no row twice and none skipped, even while newer rows keep arriving.
+            var query = RequestQuery(range: .all, limit: 7)
+            var page = try await db.queryRequests(query)
+            #expect(page.totalCount == 40)
+            var seen: [RequestRecord] = []
+            var lateID: Int64 = 1_000
+            while true {
+                seen += page.rows
+                guard page.rows.count == query.limit, let last = page.rows.last, let rowID = last.rowID else { break }
+                query.before = RequestCursor(startedAt: last.startedAt, rowID: rowID)
+                var late = Fixture.request(device: mac.id, id: lateID, host: "late.example.com")
+                late.startedAt = Fixture.now.addingTimeInterval(1)
+                lateID += 1
+                try await db.upsertRequests([late])
+                page = try await db.queryRequests(query)
+            }
+            #expect(seen.count == 40)
+            #expect(Set(seen.map(\.key.surgeID)) == Set(0..<40))
+            let order = seen.map { ($0.startedAt, $0.rowID ?? 0) }
+            #expect(zip(order, order.dropFirst()).allSatisfy { $0 > $1 })
+        }
+    }
+
+    @Test func searchesAndOtherMacPollsUseTheirIndexes() async throws {
+        try await withTestDatabase { db in
+            let mac = Fixture.device("MacBook Pro")
+            try await db.upsertDevice(mac)
+            let app = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            try await db.insertApp(app)
+            var curl = Fixture.request(device: mac.id, id: 1, host: "github.com")
+            curl.processPath = "/usr/bin/curl"
+            try await db.upsertRequests([curl])
+
+            /// The plan with only bitmap scans allowed: when no index serves the condition, PostgreSQL has to
+            /// fall back to a (disabled) sequential scan.
+            func plan(_ sql: PostgresDatabase.SQL) async throws -> String {
+                try await db.withTransaction { connection in
+                    _ = try await connection.query("SET LOCAL enable_seqscan = off", logger: PostgresDatabase.logger).collect()
+                    _ = try await connection.query("SET LOCAL enable_indexscan = off", logger: PostgresDatabase.logger).collect()
+                    return try await connection.query(sql.query, logger: PostgresDatabase.logger).collect()
+                        .map { try $0.makeRandomAccess()[0].decode(String.self) }.joined(separator: "\n")
+                }
+            }
+            var search = PostgresDatabase.SQL("EXPLAIN SELECT 1 FROM requests r")
+            PostgresDatabase.appendFilters(RequestQuery(range: .all, search: "cursor"), window: .init(lower: nil, upper: nil), searchApps: [app.id], to: &search)
+            let searchPlan = try await plan(search)
+            #expect(searchPlan.contains("requests_search_trgm_idx") && searchPlan.contains("requests_app_started_idx"), "\(searchPlan)")
+            #expect(!searchPlan.contains("Seq Scan"), "\(searchPlan)")
+            let pollPlan = try await plan(PostgresDatabase.SQL("EXPLAIN SELECT 1 FROM requests r WHERE r.updated_at > now() - interval '5 seconds'"))
+            #expect(pollPlan.contains("requests_updated_brin_idx") && !pollPlan.contains("Seq Scan"), "\(pollPlan)")
+
+            // The indexed text joins columns with newlines; a term never matches across two of them.
+            #expect(try await db.queryRequests(RequestQuery(range: .all, search: "github.com")).totalCount == 1)
+            #expect(try await db.queryRequests(RequestQuery(range: .all, search: "CURL")).totalCount == 1)
+            #expect(try await db.queryRequests(RequestQuery(range: .all, search: "github.com\ncurl")).totalCount == 0)
+        }
+    }
+
     // MARK: - Harness
 
-    /// Runs `body` against a freshly migrated `tm_test_<8 hex>` schema and always drops it afterwards.
-    private func withTestDatabase(_ body: (PostgresDatabase) async throws -> Void) async throws {
+    /// Every index of the test schema → whether it is valid.
+    private func indexes(_ db: PostgresDatabase) async throws -> [String: Bool] {
+        try await db.rows("""
+            SELECT c.relname AS name, i.indisvalid AS valid FROM pg_index i
+            JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = \(db.schema)
+            """).reduce(into: [String: Bool]()) { result, row in
+            let read = PostgresRowReader(row)
+            result[try read("name", as: String.self)] = try read("valid", as: Bool.self)
+        }
+    }
+
+    /// Runs `body` against a freshly migrated `tm_test_<8 hex>` schema (up to migration `version`, all of
+    /// them when nil) and always drops it afterwards.
+    private func withTestDatabase(upTo version: Int? = nil, _ body: (PostgresDatabase) async throws -> Void) async throws {
         let url = try #require(Self.databaseURL)
         let schema = "tm_test_" + String(format: "%08x", UInt32.random(in: .min ... .max))
         let db = PostgresDatabase(url: url, schema: schema)
@@ -879,7 +1274,7 @@ struct DatabaseLiveTests {
 
         var failure: (any Error)?
         do {
-            try await db.migrate()
+            try await db.migrate(upTo: version)
             try await body(db)
         } catch {
             failure = error
