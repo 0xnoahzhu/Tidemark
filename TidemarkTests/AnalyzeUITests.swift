@@ -407,6 +407,79 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
     }
 }
 
+@Suite @MainActor struct EgressFormatTests {
+    private let chinese = Locale(identifier: "zh-Hans")
+
+    @Test func localizesCountryCodesAndEnglishNames() {
+        #expect(EgressFormat.location("US", languageCode: "en") == "United States")
+        #expect(EgressFormat.location("us", languageCode: "zh-Hans") == chinese.localizedString(forRegionCode: "US"))
+        // English names written by earlier checks.
+        #expect(EgressFormat.location("Hong Kong", languageCode: "zh-Hans") == chinese.localizedString(forRegionCode: "HK"))
+        #expect(EgressFormat.location("Hong Kong", languageCode: "en") == "Hong Kong")
+        // `City, CC`: English keeps it, Chinese names the country.
+        #expect(EgressFormat.location("Los Angeles, US", languageCode: "en") == "Los Angeles, US")
+        let city = EgressFormat.location("Los Angeles, US", languageCode: "zh-Hans") ?? ""
+        #expect(city.contains("Los Angeles") && city.contains(chinese.localizedString(forRegionCode: "US") ?? "?"))
+        #expect(EgressFormat.location("Atlantis", languageCode: "zh-Hans") == "Atlantis")
+        #expect(EgressFormat.location(" ", languageCode: "en") == nil)
+        #expect(EgressFormat.location(nil) == nil)
+    }
+
+    @Test func describesNetworkTypes() {
+        #expect(EgressFormat.networkType("hosting") == tr("hosting network", "Egress"))
+        #expect(EgressFormat.networkType("Hosting · proxy") == tr("hosting network", "Egress") + " · " + tr("proxy", "Egress"))
+        #expect(EgressFormat.networkType("Satellite") == "Satellite")
+        #expect(EgressFormat.networkType("  ") == nil)
+        #expect(EgressFormat.type("Hosting · anycast") == tr("Hosting", "Egress") + " · " + tr("anycast", "Egress"))
+        #expect(EgressFormat.type(nil) == nil)
+    }
+
+    @Test func translatesInterfaceKindsButNotNetworkNames() {
+        #expect(EgressFormat.interface("Wired") == tr("Wired", "SurgeCLI"))
+        #expect(EgressFormat.interface("Ethernet") == tr("Ethernet", "Egress"))
+        #expect(EgressFormat.interface("Wi-Fi “Office-5G”") == "Wi-Fi “Office-5G”")
+        #expect(EgressFormat.interface("Wired “Dock”") == tr("Wired", "SurgeCLI") + " “Dock”")
+    }
+
+    @Test func namesWhatRoutesTheCurrentEgress() {
+        #expect(EgressFormat.ruleLabel(proxyMode: 2, currentRule: nil) == trf("Rule %@", "Egress", "FINAL"))
+        #expect(EgressFormat.ruleLabel(proxyMode: 2, currentRule: "DOMAIN-SUFFIX,example.com") == trf("Rule %@", "Egress", "DOMAIN-SUFFIX,example.com"))
+        #expect(EgressFormat.ruleLabel(proxyMode: 1, currentRule: "Global · AI") == tr("Global proxy", "Egress"))
+        #expect(EgressFormat.ruleLabel(proxyMode: 0, currentRule: nil) == nil)
+        #expect(EgressFormat.ruleLabel(proxyMode: nil, currentRule: nil) == nil)
+        #expect(EgressFormat.modeLabel(2) == tr("· rule mode", "Egress"))
+        #expect(EgressFormat.modeLabel(nil) == nil)
+    }
+
+    @Test func seedsTheLookupFromTheLastCheck() {
+        let sample = EgressSample(policyPath: ["Proxy", "HK-01"], ip: "103.152.220.41", location: "HK", network: "AS9009 M247 Europe SRL",
+                                  latencyMs: 42, isCurrent: true, checkedAt: .now, error: nil, networkType: "hosting", hasIPv6: false)
+        let seed = EgressFormat.lookupSeed(from: sample)
+        #expect(seed?.ip == "103.152.220.41")
+        #expect(seed?.asn == 9009 && seed?.organization == "M247 Europe SRL")
+        #expect(seed?.country == "HK" && seed?.networkType == "hosting")
+        var unchecked = sample
+        unchecked.ip = nil
+        #expect(EgressFormat.lookupSeed(from: unchecked) == nil)
+        #expect(EgressFormat.detail(sample).hasSuffix(tr("hosting network", "Egress")))
+    }
+
+    @Test func translatesEveryReasonTheMonitorWrites() throws {
+        #expect(EgressView.localizedReason("Profile reloaded") == tr("Profile reloaded", "Egress"))
+        #expect(EgressView.localizedReason("Egress changed") == tr("Egress changed", "Egress"))
+        #expect(EgressView.localizedReason("Network changed to Ethernet") == trf("Network changed to %@", "Egress", tr("Ethernet", "Egress")))
+        #expect(EgressView.localizedReason("Network changed to Wi-Fi “Office-5G”") == trf("Network changed to %@", "Egress", "Wi-Fi “Office-5G”"))
+        #expect(EgressView.localizedReason("Something else") == "Something else")
+
+        let lproj = try #require(Bundle.main.path(forResource: "zh-Hans", ofType: "lproj"))
+        let chinese = NSDictionary(contentsOf: URL(fileURLWithPath: lproj).appendingPathComponent("Egress.strings")) as? [String: String]
+        let reasons = [EgressSignal.policyChanged, .profileReloaded, .surgeRestarted].compactMap(\.reason) + ["Egress changed"]
+        for key in reasons + ["Network changed to %@", "Ethernet", "Cellular"] {
+            #expect(chinese?[key] != nil, "\(key)")
+        }
+    }
+}
+
 @Suite @MainActor struct AnalyzeLocalizationTests {
     /// Every catalog compiles into the app with a Chinese translation for each key.
     @Test func chineseCatalogsAreComplete() throws {

@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%1$@, %2$@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%2$@ · %1$@"
+          }
+        }
+      }
+    },
     "Auto test picked a faster node" : {
       "localizations" : {
         "zh-Hans" : {
@@ -11,12 +21,32 @@
         }
       }
     },
+    "Business" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "企业"
+          }
+        }
+      }
+    },
     "By policy" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "按策略"
+          }
+        }
+      }
+    },
+    "Cellular" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "蜂窝网络"
           }
         }
       }
@@ -91,6 +121,16 @@
         }
       }
     },
+    "Education" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "教育"
+          }
+        }
+      }
+    },
     "Egress IP" : {
       "localizations" : {
         "zh-Hans" : {
@@ -101,12 +141,22 @@
         }
       }
     },
-    "Enhanced mode · rule-based" : {
+    "Egress changed" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "增强模式 · 规则分流"
+            "value" : "出口已变化"
+          }
+        }
+      }
+    },
+    "Ethernet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以太网"
           }
         }
       }
@@ -121,12 +171,42 @@
         }
       }
     },
+    "Government" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "政府"
+          }
+        }
+      }
+    },
+    "Hosting" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "机房"
+          }
+        }
+      }
+    },
     "IP address" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "IP 地址"
+          }
+        }
+      }
+    },
+    "IPv6" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支持 IPv6"
           }
         }
       }
@@ -201,6 +281,26 @@
         }
       }
     },
+    "Loopback" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回环"
+          }
+        }
+      }
+    },
+    "Mobile" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移动"
+          }
+        }
+      }
+    },
     "NOW" : {
       "localizations" : {
         "zh-Hans" : {
@@ -221,12 +321,22 @@
         }
       }
     },
-    "Network changed to Wi-Fi %@" : {
+    "Network changed to %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "网络切换到 Wi-Fi %@"
+            "value" : "网络切换到 %@"
+          }
+        }
+      }
+    },
+    "No IPv6" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无 IPv6"
           }
         }
       }
@@ -301,6 +411,26 @@
         }
       }
     },
+    "Profile reloaded" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配置已重新加载"
+          }
+        }
+      }
+    },
+    "Residential" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "住宅"
+          }
+        }
+      }
+    },
     "Reverse DNS" : {
       "localizations" : {
         "zh-Hans" : {
@@ -321,12 +451,12 @@
         }
       }
     },
-    "Rule FINAL" : {
+    "Rule %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "规则 FINAL"
+            "value" : "规则 %@"
           }
         }
       }
@@ -371,12 +501,122 @@
         }
       }
     },
+    "VPN" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "VPN"
+          }
+        }
+      }
+    },
     "What the outside world sees, for each policy" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "外界看到的你，按策略分别显示"
+          }
+        }
+      }
+    },
+    "Wireless" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无线"
+          }
+        }
+      }
+    },
+    "anycast" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任播"
+          }
+        }
+      }
+    },
+    "business network" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "企业网络"
+          }
+        }
+      }
+    },
+    "education network" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "教育网络"
+          }
+        }
+      }
+    },
+    "government network" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "政府网络"
+          }
+        }
+      }
+    },
+    "hosting network" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "机房网络"
+          }
+        }
+      }
+    },
+    "mobile network" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移动网络"
+          }
+        }
+      }
+    },
+    "offline" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "离线"
+          }
+        }
+      }
+    },
+    "proxy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理"
+          }
+        }
+      }
+    },
+    "residential network" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "住宅网络"
           }
         }
       }

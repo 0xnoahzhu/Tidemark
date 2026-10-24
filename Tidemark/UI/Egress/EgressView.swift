@@ -4,22 +4,19 @@ import SwiftUI
 struct EgressView: View {
     @Environment(AppModel.self) private var model
 
-    /// Surge's outbound mode (0 direct, 1 global proxy, 2 rule), read from `environment`.
-    @State private var proxyMode: Int?
-
     var body: some View {
         let egress = model.egress
         ScrollView {
             HStack(alignment: .top, spacing: 14) {
                 VStack(spacing: 14) {
-                    EgressCurrentCard(sample: egress.current, lastChecked: egress.lastChecked, proxyMode: proxyMode,
-                                      isChecking: egress.isChecking)
+                    EgressCurrentCard(sample: egress.current, lastChecked: egress.lastChecked, proxyMode: egress.proxyMode,
+                                      currentRule: egress.currentRule, isChecking: egress.isChecking)
                     EgressPolicyCard(samples: Self.ordered(egress.samples), isChecking: egress.isChecking)
                     EgressChangesCard(changes: egress.changes)
                 }
                 .frame(maxWidth: .infinity)
                 VStack(spacing: 14) {
-                    EgressLookupCard(suggestion: egress.current?.ip)
+                    EgressLookupCard(current: egress.current)
                     EgressThisMacCard(network: egress.network)
                 }
                 .frame(width: 310)
@@ -34,10 +31,7 @@ struct EgressView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    Task {
-                        await model.egressActions.checkAll()
-                        await refreshMode()
-                    }
+                    Task { await model.egressActions.checkAll() }
                 } label: {
                     Label(egress.isChecking ? tr("Checking…", "Egress") : tr("Check All", "Egress"),
                           systemImage: "arrow.clockwise")
@@ -47,13 +41,6 @@ struct EgressView: View {
                 .disabled(egress.isChecking)
                 .help(tr("Look up the egress IP through every policy again", "Egress"))
             }
-        }
-        .task { await refreshMode() }
-    }
-
-    private func refreshMode() async {
-        if let environment = try? await model.surge.environment() {
-            proxyMode = environment.proxyMode
         }
     }
 
@@ -69,10 +56,13 @@ struct EgressView: View {
         case "Policy group switched by hand": return tr("Policy group switched by hand", "Egress")
         case "Auto test picked a faster node": return tr("Auto test picked a faster node", "Egress")
         case "Surge restarted": return tr("Surge restarted", "Egress")
+        case "Profile reloaded": return tr("Profile reloaded", "Egress")
+        case "Egress changed": return tr("Egress changed", "Egress")
         default:
-            let wifi = "Network changed to Wi-Fi "
-            if reason.hasPrefix(wifi) { return trf("Network changed to Wi-Fi %@", "Egress", String(reason.dropFirst(wifi.count))) }
-            return reason
+            // `Network changed to Wi-Fi “Office-5G”`, `… to Ethernet`, `… to Cellular`
+            let prefix = "Network changed to "
+            guard reason.hasPrefix(prefix) else { return reason }
+            return trf("Network changed to %@", "Egress", EgressFormat.interface(String(reason.dropFirst(prefix.count))))
         }
     }
 }
@@ -95,18 +85,21 @@ private struct EgressCard<Content: View>: View {
 // MARK: - Current egress
 
 private struct EgressCurrentCard: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var sample: EgressSample?
     var lastChecked: Date?
     var proxyMode: Int?
+    var currentRule: String?
     var isChecking: Bool
 
     var body: some View {
         EgressCard(padding: EdgeInsets(top: 18, leading: 20, bottom: 18, trailing: 20)) {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 8) {
-                    StatusDot(color: sample?.error == nil && sample != nil ? Theme.live : Theme.ink3, size: 7, pulsing: isChecking)
+                    StatusDot(color: sample?.error == nil && sample != nil ? Theme.live : Theme.ink3, size: 7,
+                              pulsing: isChecking && !reduceMotion)
                     Text(tr("Current egress", "Egress")).fontWeight(.semibold).foregroundStyle(Theme.ink)
-                    if let mode = modeLabel { Text(mode) }
+                    if let mode = EgressFormat.modeLabel(proxyMode) { Text(mode) }
                     Spacer(minLength: 8)
                     if let lastChecked {
                         Text(trf("Checked %@", "Egress", Fmt.hms(lastChecked)))
@@ -123,15 +116,20 @@ private struct EgressCurrentCard: View {
                         .minimumScaleFactor(0.5)
                         .textSelection(.enabled)
                         .contentTransition(.numericText())
-                    let detail = [sample.location, sample.network].compactMap { $0 }.filter { !$0.isEmpty }
+                    let detail = EgressFormat.detail(sample)
                     if !detail.isEmpty {
-                        Text(detail.joined(separator: " · "))
+                        Text(detail)
                             .font(.system(size: 13))
                             .foregroundStyle(Theme.ink2)
                     }
                     HStack(spacing: 6) {
                         PolicyChip(policyPath: sample.policyPath)
-                        if let rule = ruleLabel { AnalyzePill(text: rule, style: .neutral) }
+                        if let rule = EgressFormat.ruleLabel(proxyMode: proxyMode, currentRule: currentRule) {
+                            AnalyzePill(text: rule, style: .neutral)
+                        }
+                        if let ipv6 = sample.hasIPv6 {
+                            AnalyzePill(text: ipv6 ? tr("IPv6", "Egress") : tr("No IPv6", "Egress"), style: .neutral)
+                        }
                         if let latency = sample.latencyMs { AnalyzePill(text: "\(latency) ms", style: .neutral) }
                         if let error = sample.error {
                             Text(error).font(.system(size: 11.5)).foregroundStyle(Theme.failed).lineLimit(1)
@@ -147,24 +145,6 @@ private struct EgressCurrentCard: View {
                         .foregroundStyle(Theme.ink2)
                 }
             }
-        }
-    }
-
-    private var modeLabel: String? {
-        switch proxyMode {
-        case 0: tr("· direct mode", "Egress")
-        case 1: tr("· global mode", "Egress")
-        case 2: tr("· rule mode", "Egress")
-        default: nil
-        }
-    }
-
-    /// What sends traffic through the current policy: the FINAL rule in rule mode, the outbound mode otherwise.
-    private var ruleLabel: String? {
-        switch proxyMode {
-        case 1: tr("Global proxy", "Egress")
-        case 2: tr("Rule FINAL", "Egress")
-        default: nil
         }
     }
 }
@@ -219,7 +199,8 @@ private struct EgressPolicyCard: View {
     }
 
     private func row(_ sample: EgressSample) -> some View {
-        AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
+        let network = [sample.network, EgressFormat.networkType(sample.networkType)].compactMap { $0 }.filter { !$0.isEmpty }
+        return AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
             AnalyzePolicyChip(policyPath: sample.policyPath, maxWidth: 128)
             HStack(spacing: 6) {
                 Text(sample.ip ?? "—").font(Theme.mono(11.5)).lineLimit(1).truncationMode(.middle).layoutPriority(1).textSelection(.enabled)
@@ -231,7 +212,7 @@ private struct EgressPolicyCard: View {
                         .fixedSize()
                 }
             }
-            Text(sample.location ?? "—").foregroundStyle(Theme.ink2).lineLimit(1)
+            Text(EgressFormat.location(sample.location) ?? "—").foregroundStyle(Theme.ink2).lineLimit(1)
             Group {
                 if let error = sample.error {
                     Text(error).foregroundStyle(Theme.failed)
@@ -240,7 +221,7 @@ private struct EgressPolicyCard: View {
                 }
             }
             .lineLimit(1)
-            .help(sample.error ?? sample.network ?? "")
+            .help(sample.error ?? network.joined(separator: " · "))
             Text(isChecking ? "…" : sample.latencyMs.map { "\($0) ms" } ?? "—")
                 .font(Theme.mono(11))
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -296,12 +277,14 @@ private struct EgressChangesCard: View {
 
 private struct EgressLookupCard: View {
     @Environment(AppModel.self) private var model
-    /// Placeholder address (the current egress IP).
-    var suggestion: String?
+    /// The current egress: its IP is the field's placeholder and is looked up when nothing was typed.
+    var current: EgressSample?
 
     @State private var query = ""
     @State private var result: IPLookupResult?
     @State private var isLookingUp = false
+
+    private var suggestion: String? { current?.ip }
 
     var body: some View {
         EgressCard(padding: EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16)) {
@@ -322,10 +305,10 @@ private struct EgressLookupCard: View {
                         .disabled(address.isEmpty || isLookingUp)
                 }
                 VStack(alignment: .leading, spacing: 7) {
-                    KeyValueRow(tr("Country", "Egress"), result?.country ?? "—", labelWidth: 84)
+                    KeyValueRow(tr("Country", "Egress"), EgressFormat.location(result?.country) ?? "—", labelWidth: 84)
                     KeyValueRow("ASN", result?.asn.map { "AS\($0)" } ?? "—", mono: true, labelWidth: 84)
                     KeyValueRow(tr("Organization", "Egress"), result?.organization ?? "—", labelWidth: 84)
-                    KeyValueRow(tr("Type", "Egress"), result?.networkType ?? "—", labelWidth: 84)
+                    KeyValueRow(tr("Type", "Egress"), EgressFormat.type(result?.networkType) ?? "—", labelWidth: 84)
                     KeyValueRow(tr("Reverse DNS", "Egress"), result?.reverseDNS ?? "—", mono: true, labelWidth: 84)
                 }
                 .redacted(reason: isLookingUp ? .placeholder : [])
@@ -335,6 +318,19 @@ private struct EgressLookupCard: View {
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+        // Until something is typed, the card describes the current egress IP: what the last check knows
+        // right away, then a full lookup (once per IP while the app runs) when an IP info service is set;
+        // the egress monitor sends the egress IP to that service anyway.
+        .task(id: suggestion) {
+            guard query.trimmingCharacters(in: .whitespaces).isEmpty, let current, let ip = current.ip,
+                  result?.ip != ip else { return }
+            if let known = EgressLookupMemory.last, known.ip == ip {
+                result = known
+                return
+            }
+            result = EgressFormat.lookupSeed(from: current)
+            if model.preferences.ipInfoService != .off { lookUp() }
         }
     }
 
@@ -348,10 +344,18 @@ private struct EgressLookupCard: View {
         guard !ip.isEmpty, !isLookingUp else { return }
         isLookingUp = true
         Task {
-            result = await model.egressActions.lookup(ip: ip)
+            let found = await model.egressActions.lookup(ip: ip)
+            result = found
+            EgressLookupMemory.last = found
             isLookingUp = false
         }
     }
+}
+
+/// The last lookup, so revisiting the page doesn't ask the IP info service about the same IP again.
+@MainActor
+private enum EgressLookupMemory {
+    static var last: IPLookupResult?
 }
 
 // MARK: - This Mac
@@ -375,7 +379,7 @@ private struct EgressThisMacCard: View {
     }
 
     private var interface: String {
-        let parts = [network?.interface, network?.interfaceDetail].compactMap { $0 }.filter { !$0.isEmpty }
+        let parts = [network?.interface, network?.interfaceDetail.map(EgressFormat.interface)].compactMap { $0 }.filter { !$0.isEmpty }
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")
     }
 
@@ -384,8 +388,157 @@ private struct EgressThisMacCard: View {
         return servers.joined(separator: " · ")
     }
 
+    /// `Enhanced mode · global proxy` and the other modes surge-cli reports are translated in the `SurgeCLI` table.
     private var surgeMode: String {
         guard let mode = network?.surgeMode, !mode.isEmpty else { return "—" }
-        return mode == "Enhanced mode · rule-based" ? tr("Enhanced mode · rule-based", "Egress") : mode
+        return tr(mode, "SurgeCLI")
     }
+}
+
+// MARK: - Formatting
+
+/// Display forms of the egress monitor's values, which are stored in English or as codes.
+@MainActor
+enum EgressFormat {
+    /// `· rule mode`, `· global mode`, `· direct mode` for Surge's outbound mode (0 direct, 1 global, 2 rule).
+    static func modeLabel(_ proxyMode: Int?) -> String? {
+        switch proxyMode {
+        case 0: tr("· direct mode", "Egress")
+        case 1: tr("· global mode", "Egress")
+        case 2: tr("· rule mode", "Egress")
+        default: nil
+        }
+    }
+
+    /// What sends traffic through the current policy: `Global proxy`, or `Rule FINAL` (the rule the monitor
+    /// matched, FINAL when it did not report one) in rule mode.
+    static func ruleLabel(proxyMode: Int?, currentRule: String?) -> String? {
+        let rule = currentRule?.trimmingCharacters(in: .whitespaces) ?? ""
+        switch proxyMode {
+        case 0: return nil
+        case 1: return tr("Global proxy", "Egress")
+        default:
+            if rule.hasPrefix("Global") { return tr("Global proxy", "Egress") }
+            if !rule.isEmpty { return trf("Rule %@", "Egress", rule) }
+            return proxyMode == 2 ? trf("Rule %@", "Egress", "FINAL") : nil
+        }
+    }
+
+    /// `Hong Kong · AS9009 M247 Europe SRL · hosting network`
+    static func detail(_ sample: EgressSample) -> String {
+        [location(sample.location), sample.network, networkType(sample.networkType)]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    /// A country in the UI language: `US` → `United States` (or its Chinese name), `Los Angeles, US` → the
+    /// Chinese country name, then the city, in Chinese, and English country names from older checks translated
+    /// too. Anything else is shown as is.
+    static func location(_ raw: String?, languageCode: String = Localizer.shared.languageCode) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
+        let locale = Locale(identifier: languageCode)
+        if let country = countryName(code: raw, locale: locale) { return country }
+        let english = languageCode == "en"
+        if let comma = raw.range(of: ", ", options: .backwards) {
+            let city = String(raw[..<comma.lowerBound])
+            if let country = countryName(code: String(raw[comma.upperBound...]), locale: locale) {
+                return english ? raw : trf("%1$@, %2$@", "Egress", city, country)
+            }
+        }
+        if !english, let code = englishCountryCodes[raw.lowercased()], let country = locale.localizedString(forRegionCode: code) {
+            return country
+        }
+        return raw
+    }
+
+    /// `hosting` → `hosting network`, `Hosting · proxy` → `hosting network · proxy`.
+    static func networkType(_ raw: String?) -> String? {
+        let words = typeWords(raw)
+        guard let first = words.first else { return nil }
+        let head = networkWords[first.lowercased()].map { tr($0, "Egress") } ?? typeWord(first)
+        return ([head] + words.dropFirst().map(typeWord)).joined(separator: " · ")
+    }
+
+    /// `Hosting · anycast` with each known word translated (the lookup's Type row).
+    static func type(_ raw: String?) -> String? {
+        let words = typeWords(raw)
+        return words.isEmpty ? nil : words.map(typeWord).joined(separator: " · ")
+    }
+
+    /// `en0`'s kind: `Wired`, `Ethernet`, `Wi-Fi “Office-5G”` (the network name stays as is).
+    static func interface(_ detail: String) -> String {
+        if let quote = detail.firstIndex(of: "“") {
+            let kind = detail[..<quote].trimmingCharacters(in: .whitespaces)
+            return interfaceKind(kind) + " " + detail[quote...]
+        }
+        return interfaceKind(detail)
+    }
+
+    /// What the lookup card can show for the current egress before (or without) a lookup.
+    static func lookupSeed(from sample: EgressSample) -> IPLookupResult? {
+        guard let ip = sample.ip else { return nil }
+        var result = IPLookupResult(ip: ip, country: sample.location, networkType: sample.networkType)
+        // `AS9009 M247 Europe SRL`, as the monitor writes it.
+        if let network = sample.network, let match = network.wholeMatch(of: /AS(\d+)(?:\s+(.+))?/) {
+            result.asn = Int(match.1)
+            result.organization = match.2.map(String.init)
+        } else {
+            result.organization = sample.network
+        }
+        return result
+    }
+
+    // MARK: Private
+
+    private static func countryName(code: String, locale: Locale) -> String? {
+        guard code.count == 2, code.allSatisfy({ $0.isASCII && $0.isLetter }) else { return nil }
+        return locale.localizedString(forRegionCode: code.uppercased())
+    }
+
+    /// English country name (lowercased) → region code, for names stored by earlier versions.
+    private static let englishCountryCodes: [String: String] = {
+        var codes: [String: String] = [:]
+        let english = [Locale(identifier: "en"), Locale(identifier: "en_US")]
+        for region in Locale.Region.isoRegions {
+            let code = region.identifier
+            guard code.count == 2, code.allSatisfy(\.isLetter) else { continue }
+            for locale in english {
+                if let name = locale.localizedString(forRegionCode: code) { codes[name.lowercased()] = code }
+            }
+            if let name = EgressPlanner.countryName(code) { codes[name.lowercased()] = code }
+        }
+        return codes
+    }()
+
+    private static func typeWords(_ raw: String?) -> [String] {
+        (raw ?? "").components(separatedBy: "·").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    private static func typeWord(_ word: String) -> String {
+        typeKeys[word.lowercased()].map { tr($0, "Egress") } ?? word
+    }
+
+    private static func interfaceKind(_ kind: String) -> String {
+        let surge = tr(kind, "SurgeCLI")
+        return surge != kind ? surge : (interfaceKeys[kind.lowercased()].map { tr($0, "Egress") } ?? kind)
+    }
+
+    /// Network types from the IP info service (proxycheck.io `type`, plus flags) and their display keys.
+    private static let typeKeys: [String: String] = [
+        "hosting": "Hosting", "residential": "Residential", "business": "Business", "wireless": "Wireless",
+        "mobile": "Mobile", "education": "Education", "government": "Government",
+        "proxy": "proxy", "vpn": "VPN", "anycast": "anycast",
+    ]
+
+    private static let networkWords: [String: String] = [
+        "hosting": "hosting network", "residential": "residential network", "business": "business network",
+        "wireless": "mobile network", "mobile": "mobile network", "education": "education network",
+        "government": "government network",
+    ]
+
+    /// Interface kinds from `NWPathMonitor` that the `SurgeCLI` table does not have.
+    private static let interfaceKeys: [String: String] = [
+        "ethernet": "Ethernet", "cellular": "Cellular", "loopback": "Loopback", "offline": "offline",
+    ]
 }
