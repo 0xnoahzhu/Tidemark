@@ -66,9 +66,8 @@ struct RequestsCSVSnapshot: Sendable {
 }
 
 /// The current History query as a document for `fileExporter`. Rows are streamed from PostgreSQL in pages
-/// of `RequestsCSV.pageSize` while the file is written, so exports of any size never sit in memory. Pages
-/// follow a keyset cursor (`RequestQuery.before`) rather than an offset, so rows recorded while the export
-/// runs neither shift pages (duplicating rows) nor make it skip any.
+/// of `RequestsCSV.pageSize` while the file is written (see `RequestsCSVPager`), so exports of any size never
+/// sit in memory.
 final class RequestsCSVDocument: WritableDocument {
     static var writableContentTypes: [UTType] { [.commaSeparatedText] }
 
@@ -94,12 +93,8 @@ struct RequestsCSVWriter: DocumentWriter {
 
     @concurrent
     func write(snapshot: sending RequestsCSVSnapshot, to destination: sending URL, previous: sending RequestsCSVSnapshot?, progress: consuming Subprogress) async throws {
-        var query = snapshot.query
-        query.limit = RequestsCSV.pageSize
-        query.offset = 0
-        query.before = nil
-
-        let first = try await snapshot.database.queryRequests(query)
+        var pager = RequestsCSVPager(query: snapshot.query, database: snapshot.database)
+        let first = try await pager.first()
         // The total can be an estimate for very large results: progress never runs past it and is
         // completed when the last page is written.
         let total = max(Int(clamping: first.totalCount), first.rows.count)
@@ -125,20 +120,77 @@ struct RequestsCSVWriter: DocumentWriter {
             manager.complete(count: step)
             reported += step
 
-            guard let fetched = try await nextPage(after: page, query: &query, database: snapshot.database) else { break }
-            page = fetched
+            guard let next = try await pager.next() else { break }
+            page = next
         }
         if reported < total { manager.complete(count: total - reported) }
     }
+}
 
-    /// The page after `page` in newest-first order, or nil at the end. A full page continues from its last
-    /// row; rows that are not strictly older than that cursor are dropped, so a database that ignored the
-    /// cursor can never make the export loop or repeat rows.
-    private func nextPage(after page: [RequestRecord], query: inout RequestQuery, database: any TidemarkDatabase) async throws -> [RequestRecord]? {
-        guard page.count == query.limit, let cursor = RequestsCSV.cursor(after: page) else { return nil }
-        query.before = cursor
-        let next = try await database.queryRequests(query).rows.filter { RequestsCSV.isOlder($0, than: cursor) }
-        return next.isEmpty ? nil : next
+/// Fetches an export's pages in newest-first order.
+///
+/// Each page continues from the last row written through `RequestQuery.before`, so requests recorded while
+/// the export runs neither shift the pages nor repeat rows. A database that answers a cursor query with
+/// rows that are not older than the cursor ignores it; the pager then continues with offsets. Either way only
+/// rows strictly older than the last one written are returned, so no row is written twice.
+struct RequestsCSVPager {
+    private var query: RequestQuery
+    private let database: any TidemarkDatabase
+    /// Last row handed out; nil once it is unknown (the export ends).
+    private var cursor: RequestCursor?
+    /// Rows the database returned so far: the next page's offset when the cursor is ignored.
+    private var fetched = 0
+    private var lastPageFull = false
+    private var usesCursor = true
+
+    init(query: RequestQuery, database: any TidemarkDatabase, pageSize: Int = RequestsCSV.pageSize) {
+        var query = query
+        query.limit = pageSize
+        query.offset = 0
+        query.before = nil
+        self.query = query
+        self.database = database
+    }
+
+    /// The first page, with the total match count.
+    mutating func first() async throws -> RequestPage {
+        let page = try await database.queryRequests(query)
+        accept(page.rows)
+        cursor = RequestsCSV.cursor(after: page.rows)
+        return page
+    }
+
+    /// The next page, or nil at the end.
+    mutating func next() async throws -> [RequestRecord]? {
+        while lastPageFull, let cursor {
+            let rows: [RequestRecord]
+            if usesCursor {
+                query.before = cursor
+                query.offset = 0
+                let page = try await database.queryRequests(query).rows
+                if let newest = page.first, !RequestsCSV.isOlder(newest, than: cursor) {
+                    usesCursor = false
+                    continue
+                }
+                rows = page
+            } else {
+                query.before = nil
+                query.offset = fetched
+                rows = try await database.queryRequests(query).rows
+            }
+            accept(rows)
+            let fresh = rows.filter { RequestsCSV.isOlder($0, than: cursor) }
+            if !fresh.isEmpty {
+                self.cursor = RequestsCSV.cursor(after: fresh)
+                return fresh
+            }
+        }
+        return nil
+    }
+
+    private mutating func accept(_ rows: [RequestRecord]) {
+        fetched += rows.count
+        lastPageFull = rows.count == query.limit
     }
 }
 

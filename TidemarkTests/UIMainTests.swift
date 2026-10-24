@@ -319,20 +319,33 @@ struct RequestsCSVTests {
         #expect(await store.queries > 1)
     }
 
-    /// A database that ignored the cursor would hand back the first page forever; the export stops instead.
-    @Test func stopsWhenTheCursorIsIgnored() async throws {
-        let base = Date.now.addingTimeInterval(-600)
-        let rows = (0..<6_000).map { F.record(id: Int64($0), startedAt: base.addingTimeInterval(Double($0) * 0.05)) }
+    /// A database that ignores the cursor would hand back the first page forever; the export continues with
+    /// offsets instead and still writes every row once while new rows arrive.
+    @Test func fallsBackToOffsetsWhenTheCursorIsIgnored() async throws {
+        let base = Date.now.addingTimeInterval(-1_800)
+        let original = (0..<12_000).map { F.record(id: Int64($0), startedAt: base.addingTimeInterval(Double($0) * 0.1)) }
+        let store = RequestsGrowingStore(rows: original, nextID: 100_000)
         let database = RequestsStubDatabase(query: { query in
-            var first = query
-            first.before = nil
-            return try await ShellDemoDatabase(rows: rows).queryRequests(first)
+            await store.addNewRows(250)
+            var ignoringCursor = query
+            ignoringCursor.before = nil
+            return try await ShellDemoDatabase(rows: store.rows).queryRequests(ignoringCursor)
         })
         var query = RequestQuery()
         query.range = .lastHour
         let ids = try await exportedRowIDs(query: query, database: database)
-        #expect(ids.count == RequestsCSV.pageSize)
-        #expect(ids.count == Set(ids).count)
+
+        #expect(ids.count == Set(ids).count, "no row is written twice")
+        #expect(Set(original.compactMap(\.rowID)).isSubset(of: Set(ids)), "every row that existed is written")
+    }
+
+    @Test func pagesThroughSmallResultsOnce() async throws {
+        let rows = (0..<7).map { F.record(id: Int64($0), startedAt: Date.now.addingTimeInterval(-Double($0))) }
+        let database = RequestsStubDatabase(query: { query in try await ShellDemoDatabase(rows: rows).queryRequests(query) })
+        var pager = RequestsCSVPager(query: RequestQuery(), database: database, pageSize: 3)
+        var ids = try await pager.first().rows.compactMap(\.rowID)
+        while let next = try await pager.next() { ids += next.compactMap(\.rowID) }
+        #expect(ids == [0, 1, 2, 3, 4, 5, 6])
     }
 
     private func exportedRowIDs(query: RequestQuery, database: any TidemarkDatabase) async throws -> [Int64] {
