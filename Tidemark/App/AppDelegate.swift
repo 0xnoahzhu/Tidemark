@@ -6,6 +6,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     private var terminating = false
 
+    /// App Intents resolve `@Dependency AppModel`; register it before the system can run an intent or
+    /// entity query that launched Tidemark.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        TidemarkIntents.register(model: model)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppBootstrap.start(model)
     }

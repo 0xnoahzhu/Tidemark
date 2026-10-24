@@ -13,9 +13,15 @@ enum TidemarkIntents {
     static var mainWindowOpener: (@MainActor () -> Void)?
 
     private static var catalogWatch: Task<Void, Never>?
+    /// The model handed to `AppDependencyManager`; registering it again is a no-op.
+    private(set) static var registeredModel: AppModel?
 
-    /// Call once at launch, before any intent can run.
+    /// Registers `model` as the intents' `@Dependency`. Call as early as possible at launch
+    /// (`applicationWillFinishLaunching`), before the system can resolve an intent or entity query.
+    /// Later calls with the same model do nothing.
     static func register(model: AppModel) {
+        guard registeredModel !== model else { return }
+        registeredModel = model
         AppDependencyManager.shared.add(dependency: model)
         TidemarkShortcuts.updateAppShortcutParameters()
         catalogWatch?.cancel()
@@ -48,8 +54,9 @@ enum TidemarkIntents {
     }
 }
 
-/// Lets intents open the main window through SwiftUI's `openWindow`. Attach it to a view that exists for
-/// the whole session, such as the menu bar label: `.modifier(TidemarkIntentsWindowBridge())`.
+/// Lets intents open the main window through SwiftUI's `openWindow`. Attached to the main window and the
+/// Settings window: whichever appears first captures an `openWindow` action that keeps working after its
+/// window closes. `showMainWindow()` falls back to an existing main window when neither has appeared.
 struct TidemarkIntentsWindowBridge: ViewModifier {
     @Environment(\.openWindow) private var openWindow
 
