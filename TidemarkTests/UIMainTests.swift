@@ -239,6 +239,33 @@ struct RequestsRowTintTests {
     }
 }
 
+@MainActor
+struct RequestsTableLayoutTests {
+    /// The Remote IP column is fixed to the widest IPv4 address in the cell's 11 pt SF Mono, with the few
+    /// points of inset the fixed Time column also leaves around its text, so a rebuilt table can't squeeze it.
+    @Test func remoteIPColumnFitsEveryIPv4Address() {
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let widest = ("255.255.255.255" as NSString).size(withAttributes: [.font: font]).width
+        #expect(widest + 6 <= RequestsTable.remoteIPWidth)
+        #expect(RequestsTable.remoteIPWidth <= 124, "the column stays narrow; Host gets the rest")
+    }
+
+    /// At its minimum the Policy column still shows the group and part of the final policy (`AI › …steria2`).
+    @Test func policyColumnKeepsTheGroupAndTheEndOfThePolicy() {
+        let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        let group = ("AI › " as NSString).size(withAttributes: [.font: font]).width
+        let leafEnd = ("…steria2" as NSString).size(withAttributes: [.font: font]).width
+        // 6 pt chip padding on each side.
+        #expect(group + leafEnd + 12 <= RequestsTable.policyMinWidth)
+        #expect(RequestsTable.policyMinWidth >= 84, "at least the design's column")
+    }
+
+    /// "Open <App>" from a request (inspector and row menu) shows the app's Domains & IPs, as in the design.
+    @Test func openingAnAppShowsItsDomainsAndIPs() {
+        #expect(RequestsPresentation.openAppTab == .inventory)
+    }
+}
+
 struct RequestsCSVTests {
     typealias F = UIMainFixtures
 

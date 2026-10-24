@@ -20,11 +20,18 @@ struct RequestsTable: View {
     /// Reference time for the fresh-row background; nil disables it (History).
     var now: Date?
 
+    /// Fits the widest IPv4 address (`255.255.255.255`, about 102 pt in 11 pt SF Mono) with the cell's inset.
+    static let remoteIPWidth: CGFloat = 108
+    /// The Policy column never gets narrower than the group plus the end of the final policy
+    /// (`AI › …Hysteria2`).
+    static let policyMinWidth: CGFloat = 96
+
     var body: some View {
-        // The table scrolls horizontally below the sum of the ideal widths and hands extra width out in equal
-        // shares to every resizable column up to its maximum. So the ideals stay modest (the default window
-        // fits without scrolling), Time and Size are fixed to their text, Remote IP and Policy stop growing
-        // early, and the rest goes to App · Process and Host, as in the design's grid.
+        // The table scrolls horizontally below the sum of the ideal widths, but how it shares width out after
+        // that depends on how the table was built and resized: a rebuilt table can leave a resizable column at
+        // its minimum while others keep the slack. So every column whose content has a known width is fixed to
+        // it (Time, Remote IP, Size), Policy's minimum still shows the final policy, App · Process stops growing
+        // where its names end, and whatever is left goes to Host, as in the design's grid.
         Table(rows, selection: $selection) {
             TableColumn(Self.header(tr("Time", "Requests"))) { record in
                 RequestsTimeCell(date: record.startedAt, style: timeStyle)
@@ -40,7 +47,7 @@ struct RequestsTable: View {
             TableColumn(Self.header(tr("App · Process", "Requests"))) { record in
                 RequestsAppCell(model: model, record: record)
             }
-            .width(min: 110, ideal: 150)
+            .width(min: 110, ideal: 150, max: 300)
 
             TableColumn(Self.header(tr("Host", "Requests"))) { record in
                 RequestsHostCell(record: record)
@@ -48,18 +55,15 @@ struct RequestsTable: View {
             .width(min: 140, ideal: 190)
 
             TableColumn(Self.header(tr("Remote IP", "Requests"))) { record in
-                Text(record.remoteIP ?? "—")
-                    .font(Theme.mono(11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                RequestsRemoteIPCell(remoteIP: record.remoteIP)
             }
-            .width(min: 80, ideal: 100, max: 124)
+            .width(Self.remoteIPWidth)
 
             TableColumn(Self.header(tr("Policy", "Requests"))) { record in
-                RequestsPolicyTag(policyPath: record.policyPath)
+                // The shared chip: a truncated policy keeps its group and the end of the final policy.
+                PolicyChip(policyPath: record.policyPath, maxWidth: .infinity)
             }
-            .width(min: 70, ideal: 110, max: 200)
+            .width(min: Self.policyMinWidth, ideal: 150, max: 200)
 
             TableColumn(Self.header(tr("Size", "Requests"))) { record in
                 RequestsSizeCell(record: record)
@@ -177,30 +181,18 @@ struct RequestsSizeCell: View {
     }
 }
 
-/// A policy chip that hugs its text and truncates inside narrow table columns. A row without a policy yet
-/// (written before Surge decided) shows a plain dash, like any other missing value.
-struct RequestsPolicyTag: View {
-    var policyPath: [String]
+/// Monospaced remote IP. Every IPv4 address fits the column; a longer IPv6 address is shortened in the middle
+/// and shown in full on hover.
+struct RequestsRemoteIPCell: View {
+    var remoteIP: String?
 
     var body: some View {
-        if policyPath.isEmpty {
-            Text(verbatim: "—")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.ink3)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            let tint = Theme.tint(Theme.policyHue(policyPath))
-            Text(policyPath.joined(separator: " › "))
-                .font(.system(size: 11, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .padding(.horizontal, 7)
-                .frame(height: 18)
-                .background(tint.background, in: .rect(cornerRadius: 5, style: .continuous))
-                .foregroundStyle(tint.foreground)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .help(policyPath.joined(separator: " › "))
-        }
+        Text(remoteIP ?? "—")
+            .font(Theme.mono(11))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help(remoteIP ?? "")
     }
 }
 
