@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import System
 import UniformTypeIdentifiers
 
 /// Settings › Surge: the surge-cli executable, the event subscription, reconnecting and a remote Surge.
@@ -93,24 +94,40 @@ struct SettingsSurgePane: View {
 
     // MARK: Status
 
+    /// One line, built from state at render time so it follows the language and the connected endpoint.
     @ViewBuilder
     private var status: some View {
         // A remote Surge is also reached through the local surge-cli (`--remote`).
-        if !FileManager.default.isExecutableFile(atPath: model.preferences.surgeCLIPath) {
-            SettingsStatusLine(tone: .failed, text: tr("surge-cli was not found at this path", "Settings"))
+        if let problem = SurgeCLIPathProblem(checking: model.preferences.surgeCLIPath) {
+            SettingsStatusLine(tone: .failed, text: Self.message(for: problem))
         } else {
             switch model.live.surge {
             case .connected:
-                SettingsStatusLine(tone: .ok, text: tr("Found · controller connected · streaming", "Settings"), detail: model.live.surgeDetail)
+                SettingsStatusLine(tone: .ok, text: Self.connectedText(remote: model.surge.endpoint.remote != nil))
             case .connecting:
                 SettingsStatusLine(tone: .pending, text: tr("Connecting…", "Settings"))
             case .failed(let message):
                 SettingsStatusLine(tone: .failed, text: message)
             case .paused:
-                SettingsStatusLine(tone: .neutral, text: tr("Recording is paused", "Settings"), detail: model.live.surgeDetail)
+                SettingsStatusLine(tone: .neutral, text: tr("Recording is paused", "Settings"))
             case .idle:
                 SettingsStatusLine(tone: .neutral, text: tr("Not connected", "Settings"))
             }
+        }
+    }
+
+    /// `Found · controller connected · streaming`, or the remote variant.
+    static func connectedText(remote: Bool) -> String {
+        remote
+            ? tr("Remote · controller connected · streaming", "Settings")
+            : tr("Found · controller connected · streaming", "Settings")
+    }
+
+    /// Why surge-cli cannot run from the chosen path, in the app's language.
+    static func message(for problem: SurgeCLIPathProblem) -> String {
+        switch problem {
+        case .inaccessible(let errno): trf(problem.message, "SurgeCLI", errno.description)
+        case .missing, .notAFile, .notExecutable: tr(problem.message, "SurgeCLI")
         }
     }
 
@@ -132,6 +149,8 @@ struct SettingsSurgePane: View {
         hasStoredPassword = Keychain.read(account: Keychain.surgeRemoteAccount)?.isEmpty == false
     }
 
+    /// Saves the remote settings (the password to the Keychain) and only then reconnects, so the engine
+    /// rebuilds its Surge client from what was just saved.
     private func apply() {
         guard hasChanges else { return }
         model.preferences.surgeRemote = remoteDraft.trimmingCharacters(in: .whitespaces)
@@ -141,6 +160,8 @@ struct SettingsSurgePane: View {
             passwordDraft = ""
             hasStoredPassword = true
         }
+        remoteDraft = model.preferences.surgeRemote
+        tagDraft = model.preferences.surgeRemoteTag
         model.capture.reconnect()
         withAnimation { applied = true }
         Task { @MainActor in
@@ -160,7 +181,7 @@ struct SettingsSurgePane: View {
         panel.allowedContentTypes = [.unixExecutable, .executable]
         let current = URL(fileURLWithPath: model.preferences.surgeCLIPath)
         panel.directoryURL = current.deletingLastPathComponent()
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, let url = panel.url, url.path != model.preferences.surgeCLIPath else { return }
         model.preferences.surgeCLIPath = url.path
         model.capture.reconnect()
     }

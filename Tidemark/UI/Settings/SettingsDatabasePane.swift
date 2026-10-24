@@ -220,7 +220,7 @@ struct SettingsDatabasePane: View {
     }
 
     /// Saves the URL (moving an embedded password to the Keychain) and the password draft.
-    /// Returns `true` when anything changed.
+    /// Returns `true` when the saved URL or password changed.
     private func commitConnection() -> Bool {
         let parts = SettingsDatabaseURL.split(urlDraft.trimmingCharacters(in: .whitespacesAndNewlines))
         var changed = false
@@ -230,24 +230,27 @@ struct SettingsDatabasePane: View {
         }
         urlDraft = parts.url
         if let password = parts.password ?? (passwordDraft.isEmpty ? nil : passwordDraft) {
-            Keychain.write(password, account: Keychain.databaseAccount)
+            if password != Keychain.read(account: Keychain.databaseAccount) {
+                Keychain.write(password, account: Keychain.databaseAccount)
+                changed = true
+            }
             passwordDraft = ""
             hasStoredPassword = true
-            changed = true
         }
         return changed
     }
 
+    /// Saves a changed URL or password, reconnects so the engine rebuilds its database client from the saved
+    /// credentials, and only then tests: the test always runs against what was just saved.
     private func testConnection() {
         guard !testing else { return }
-        let changed = commitConnection()
+        if commitConnection() { model.capture.reconnect() }
         testing = true
         testResult = nil
         Task { @MainActor in
             let result = await model.capture.testDatabaseConnection()
             testing = false
             testResult = result
-            if changed, case .success = result { model.capture.reconnect() }
             await loadSchema()
         }
     }

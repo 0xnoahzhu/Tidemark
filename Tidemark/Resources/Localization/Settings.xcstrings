@@ -691,6 +691,16 @@
         }
       }
     },
+    "Remote · controller connected · streaming" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "远程 · 控制器已连接 · 正在订阅"
+          }
+        }
+      }
+    },
     "Remove" : {
       "localizations" : {
         "zh-Hans" : {
@@ -917,16 +927,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "surge-cli 位置"
-          }
-        }
-      }
-    },
-    "surge-cli was not found at this path" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这个路径下找不到 surge-cli"
           }
         }
       }
