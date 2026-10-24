@@ -1,0 +1,1 @@
+{"domain":"example.com","logs":["950.85ms Receive an A answer from https:\/\/cloudflare-dns.com\/dns-query"],"interface":null,"server":"https:\/\/cloudflare-dns.com\/dns-query","v6Addresses":[],"duration-ms":950.88,"expires-in":132.99971604347229,"path":"example.com -> 172.66.147.243, 104.20.23.154","v4Addresses":["172.66.147.243","104.20.23.154"]}
