@@ -423,7 +423,12 @@ final class PostgresDatabase: TidemarkDatabase {
             if let first = error.connectionErrors.first { return "Could not connect to \(target): \(describe(first.error, endpoint: endpoint))" }
             return "Could not connect to \(target)."
         case let error as IOError:
-            return String(cString: strerror(error.errnoCode))
+            let reason = String(cString: strerror(error.errnoCode))
+            // macOS answers EHOSTUNREACH when Local Network privacy blocks the app from a LAN address.
+            if error.errnoCode == EHOSTUNREACH, let host = endpoint?.host, isLocalNetworkHost(host) {
+                return "\(reason). If the server is on your local network, allow Tidemark in System Settings › Privacy & Security › Local Network."
+            }
+            return reason
         case let error as ChannelError:
             if case .connectTimeout = error { return "Timed out connecting to \(target)." }
             return "Connection to \(target) failed (\(error))."
@@ -432,6 +437,22 @@ final class PostgresDatabase: TidemarkDatabase {
         default:
             return String(describing: error)
         }
+    }
+
+    /// Private, link-local or `.local` addresses, which macOS gates behind Local Network privacy.
+    static func isLocalNetworkHost(_ host: String) -> Bool {
+        let lower = host.lowercased()
+        if lower.hasSuffix(".local") { return true }
+        if HostName.isIPv4(lower) {
+            let octets = lower.split(separator: ".").compactMap { Int($0) }
+            switch (octets[0], octets[1]) {
+            case (10, _), (192, 168), (169, 254): return true
+            case (172, 16...31): return true
+            default: return false
+            }
+        }
+        guard lower.contains(":") else { return false }
+        return lower.hasPrefix("fe80:") || lower.hasPrefix("fc") || lower.hasPrefix("fd")
     }
 
     /// The message of a `DatabaseError` without its "PostgreSQL is unreachable:" style prefix.

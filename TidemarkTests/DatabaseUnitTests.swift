@@ -132,6 +132,15 @@ struct DatabaseUnitTests {
         #expect(PostgresDatabase.plannedRows(fromExplainJSON: "nonsense") == nil)
     }
 
+    @Test func recognizesLocalNetworkHosts() {
+        for host in ["10.1.2.52", "192.168.1.20", "172.20.0.5", "169.254.1.1", "nas.local", "fd12::1", "fe80::1"] {
+            #expect(PostgresDatabase.isLocalNetworkHost(host), "\(host)")
+        }
+        for host in ["8.8.8.8", "172.32.0.1", "db.example.com", "fdic.gov", "2001:db8::1", "127.0.0.1"] {
+            #expect(!PostgresDatabase.isLocalNetworkHost(host), "\(host)")
+        }
+    }
+
     @Test func validatesSchemaNames() {
         #expect(PostgresDatabase.isValidSchemaName("public"))
         #expect(PostgresDatabase.isValidSchemaName("tm_test_0a1b2c3d"))
