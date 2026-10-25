@@ -247,6 +247,9 @@ holding the `zh-Hans` translations; Settings › Language switches at runtime.
 * Swift 6 language mode (which implies complete strict concurrency), no warnings.
 * Views inside SwiftUI `Table` cells and AppKit-hosted panels do not receive custom environment objects on
   macOS 27: pass `AppModel` explicitly there.
+* SwiftUI tables run without NSTableView's estimated row heights (`TableRowHeightDefaults`, registered in
+  `TidemarkApp.init`): with them, a table that receives more than 200 rows at once re-enters AppKit's row height
+  cache, which AppKit logs as a reentrant operation in the table's delegate and will turn into an assert.
 * English for all code, comments, docs and commit messages; other languages only in String Catalogs.
 * Conventional Commits (`feat(capture): …`, `fix(ui): …`, `test(database): …`).
 * No credentials in the repository.
