@@ -235,6 +235,11 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var vanishedCounts = 0
     /// Number of request upsert statements (refused ones included).
     var requestWriteCalls = 0
+    /// The device of every `upsertDevice` call.
+    var deviceUpserts: [DeviceID] = []
+    /// Asked on every `upsertDevice` call; its answers go to `onlineWhenRegistered`.
+    var onUpsertDevice: (@Sendable () async -> Bool)?
+    var onlineWhenRegistered: [Bool] = []
     var knownHostsCalls = 0
     /// Returned by `alerts(after:excluding:)` (alerts other Macs wrote).
     var otherMacAlerts: [AlertItem] = []
@@ -265,6 +270,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     private var nextID: Int64 = 1
 
     func setFailing(_ on: Bool) { failing = on }
+    func setOnUpsertDevice(_ hook: @escaping @Sendable () async -> Bool) { onUpsertDevice = hook }
     func setRefusingEverything(_ on: Bool) { refusingEverything = on }
     func setEnforcesForeignKeys(_ on: Bool) { enforcesForeignKeys = on }
     func setRefusedHosts(_ hosts: Set<String>) { refusedHosts = hosts }
@@ -308,7 +314,11 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func schemaVersion() async throws -> Int { 1 }
     func tableNames() async throws -> [String] { [] }
 
-    func upsertDevice(_ device: Device) async throws { try check() }
+    func upsertDevice(_ device: Device) async throws {
+        try check()
+        deviceUpserts.append(device.id)
+        if let onUpsertDevice { onlineWhenRegistered.append(await onUpsertDevice()) }
+    }
     func devices() async throws -> [Device] { [] }
     func renameDevice(_ id: DeviceID, name: String) async throws {}
 

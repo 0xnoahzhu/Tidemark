@@ -235,8 +235,10 @@ final class CaptureEngine {
 
     /// One connection attempt: connect, migrate, ping, register this Mac and load the shared state.
     /// Connecting and the ping are bounded (a pooled connection may be dead); migrations are not, since
-    /// building an index on a large table may take minutes. Writes resume before the shared state has loaded,
-    /// so a slow read there never keeps capture offline.
+    /// building an index on a large table may take minutes. This Mac's row is written before writes resume:
+    /// every request row references it, and a flush that reached the server first would be refused whole and
+    /// spooled. Writes resume before the rest of the shared state has loaded, so a slow read there never keeps
+    /// capture offline.
     @discardableResult
     func connectDatabase() async -> Bool {
         model.live.database = .connecting
@@ -253,6 +255,7 @@ final class CaptureEngine {
             await pipeline.setDatabaseOnline(false)
             return false
         }
+        await registerDevices()
         await pipeline.setDatabaseOnline(true)
         await loadSharedState()
         return true
@@ -323,9 +326,9 @@ final class CaptureEngine {
         if let retire = retireDatabase { Task.detached { await retire(old) } }
     }
 
-    /// Devices, apps, installs, mutes, inventory, alerts, probe sessions and counters.
+    /// Apps, installs, mutes, inventory, alerts, probe sessions and counters (devices are registered and loaded
+    /// by `connectDatabase` before writes resume).
     private func loadSharedState() async {
-        await registerDevices()
         do {
             let generation = catalogGeneration
             let apps = try await database.apps()

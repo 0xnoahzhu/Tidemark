@@ -184,6 +184,19 @@ struct CaptureEngineTests {
         if case .failed = offlineModel.live.database {} else { Issue.record("expected a failed link status") }
     }
 
+    @Test func registersThisMacBeforeWritesResume() async {
+        // Every request row references this Mac's row: a flush that reached the server first would be refused
+        // whole and spooled.
+        let database = CaptureFakeDatabase()
+        let (engine, _) = makeEngine(database: database)
+        let pipeline = engine.pipeline
+        await database.setOnUpsertDevice { await pipeline.isOnline }
+        #expect(await engine.connectDatabase())
+        #expect(await database.deviceUpserts == [engine.thisDeviceID])
+        #expect(await database.onlineWhenRegistered == [false])
+        #expect(await pipeline.isOnline)
+    }
+
     @Test func describesThisMac() {
         #expect(CaptureDeviceInfo.modelDescription(product: "Mac mini (2024)", chip: "M4") == "Mac mini · M4")
         #expect(CaptureDeviceInfo.modelDescription(product: nil, chip: nil) == nil)
