@@ -41,11 +41,14 @@ struct SettingsView: View {
 
 // MARK: - Shared pieces
 
-/// Fixed pane width; each pane is as tall as its content so the window resizes between tabs.
+/// The design's 660 × 590 window, toolbar included, whatever the tab; a pane's content scrolls past it.
 enum SettingsLayout {
     static let width: CGFloat = 660
-    /// Tallest a pane opens, which a 13-inch display still shows; its content scrolls beyond.
-    static let maxHeight: CGFloat = 800
+    static let height: CGFloat = 590
+    /// Title bar and tab toolbar of a preference-style window (32 pt icons with labels) on macOS 27.
+    static let toolbarHeight: CGFloat = 88
+    /// What the window leaves a pane.
+    static var paneHeight: CGFloat { height - toolbarHeight }
 }
 
 /// The design's Settings tab icons: a 26 pt rounded tile in the tab's color holding a white glyph
@@ -137,22 +140,19 @@ enum SettingsTabIcon {
     }
 }
 
-/// A pane laid out as in the design: 18 pt above, 26 pt at the sides, 24 pt below, groups 16 pt apart. The pane
-/// is as tall as its content and scrolls past `SettingsLayout.maxHeight`.
+/// A pane laid out as in the design: 18 pt above, 26 pt at the sides, 24 pt below, groups 16 pt apart. Every
+/// pane is `SettingsLayout.paneHeight` tall, so the window keeps its size between tabs, and scrolls beyond.
 struct SettingsPage<Content: View>: View {
     @ViewBuilder var content: Content
-
-    @State private var contentHeight: CGFloat?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) { content }
                 .padding(EdgeInsets(top: 18, leading: 26, bottom: 24, trailing: 26))
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { contentHeight = $0 }
         }
         .scrollBounceBehavior(.basedOnSize)
-        .frame(width: SettingsLayout.width, height: min(contentHeight ?? SettingsLayout.maxHeight / 2, SettingsLayout.maxHeight))
+        .frame(width: SettingsLayout.width, height: SettingsLayout.paneHeight)
     }
 }
 

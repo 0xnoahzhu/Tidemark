@@ -115,8 +115,35 @@ struct UIChromeTests {
 
     // MARK: Settings chrome
 
-    @Test func settingsWindowMatchesTheDesignWidth() {
+    /// 660 × 590 with the toolbar, as in the design: the panes leave room for the toolbar a preference-style
+    /// window with labelled 32 pt tab icons has (measured on a window that is never shown).
+    @Test func settingsWindowMatchesTheDesignSize() {
         #expect(SettingsLayout.width == 660)
+        #expect(SettingsLayout.paneHeight + SettingsLayout.toolbarHeight == 590)
+
+        @MainActor final class Tabs: NSObject, NSToolbarDelegate {
+            let ids = SettingsTab.allCases.map { NSToolbarItem.Identifier(String(describing: $0)) }
+            func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { ids }
+            func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { ids }
+            func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { ids }
+            func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
+                         willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+                let item = NSToolbarItem(itemIdentifier: id)
+                item.label = id.rawValue
+                item.image = SettingsTabIcon.image(.general)
+                return item
+            }
+        }
+        let tabs = Tabs()
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: SettingsLayout.width, height: SettingsLayout.paneHeight),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let toolbar = NSToolbar(identifier: "settings-size-test")
+        toolbar.delegate = tabs
+        window.toolbar = toolbar
+        window.toolbarStyle = .preference
+        #expect(window.frame.height - window.contentLayoutRect.height == SettingsLayout.toolbarHeight)
+        withExtendedLifetime(tabs) {}
     }
 
     /// Each tab icon is a full-color 26 pt tile in the design's color with a white glyph on it, centered on the
