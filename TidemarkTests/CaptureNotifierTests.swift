@@ -44,32 +44,37 @@ struct CaptureNotifierTests {
         #expect(next != first)
     }
 
-    @Test func buildsDesignTitlesAndSubtitles() {
+    /// The design's banner: "Raycast reached a new site" over "notion.com · first host api.notion.com · via node".
+    @Test func wordsAlertsLikeTheDesignsBanner() {
         Localizer.shared.preference = .english
         let app = UUID()
         let site = alert(1, app: app, scope: .site, value: "api.notion.com", site: "notion.com", ip: "104.18.22.110")
-        #expect(CaptureAlertText.title(appName: "Cursor", alert: site) == "Cursor reached a new site, notion.com")
-        #expect(CaptureAlertText.subtitle(alert: site) == "First host api.notion.com · via node · US · AS13335 Cloudflare")
+        #expect(CaptureAlertText.title(appName: "Raycast", alert: site) == "Raycast reached a new site")
+        #expect(CaptureAlertText.details(alert: site) == "notion.com · first host api.notion.com · via node")
 
         let host = alert(2, app: app, scope: .host, value: "raw.githubusercontent.com", ip: "185.199.108.133")
-        #expect(CaptureAlertText.title(appName: "Cursor", alert: host) == "Cursor contacted raw.githubusercontent.com")
-        #expect(CaptureAlertText.subtitle(alert: host) == "via node · 185.199.108.133 · US · AS13335 Cloudflare")
+        #expect(CaptureAlertText.title(appName: "Cursor", alert: host) == "Cursor contacted a new host")
+        #expect(CaptureAlertText.details(alert: host) == "raw.githubusercontent.com · via node")
 
         let ip = alert(3, app: app, scope: .ip, value: "104.16.98.215", host: "production.cloudflare.docker.com", ip: "104.16.98.215")
-        #expect(CaptureAlertText.title(appName: "Docker", alert: ip) == "Docker connected to 104.16.98.215")
+        #expect(CaptureAlertText.title(appName: "Docker", alert: ip) == "Docker connected to a new IP")
+        #expect(CaptureAlertText.details(alert: ip, deviceName: "Mac mini (Office)") == "Mac mini (Office) · 104.16.98.215 · via node")
 
-        let direct = alert(4, app: app, scope: .ip, value: "157.148.69.80", ip: "157.148.69.80", direct: true)
-        #expect(CaptureAlertText.title(appName: "WeChat", alert: direct) == "WeChat connected straight to 157.148.69.80")
-        #expect(CaptureAlertText.subtitle(alert: direct, deviceName: "Mac mini") == "Mac mini · No hostname · via node · US · AS13335 Cloudflare")
+        var direct = alert(4, app: app, scope: .ip, value: "157.148.69.80", ip: "157.148.69.80", direct: true)
+        #expect(CaptureAlertText.title(appName: "WeChat", alert: direct) == "WeChat connected straight to a new IP")
+        direct.processName = "Unknown"
+        #expect(CaptureAlertText.details(alert: direct) == "157.148.69.80", "no process to name")
     }
 
-    @Test func translatesTitlesToChinese() {
+    @Test func translatesAlertsToChinese() {
         Localizer.shared.preference = .chinese
         defer { Localizer.shared.preference = .english }
         guard Localizer.shared.bundle != nil else { return }
         let site = alert(1, app: UUID(), scope: .site, value: "api.notion.com", site: "notion.com")
-        #expect(CaptureAlertText.title(appName: "Cursor", alert: site) == "Cursor 访问了新站点 notion.com")
-        #expect(CaptureAlertText.subtitle(alert: site).hasPrefix("首个主机 api.notion.com · 经由 node"))
+        #expect(CaptureAlertText.title(appName: "Raycast", alert: site) == "Raycast 访问了新站点")
+        #expect(CaptureAlertText.details(alert: site) == "notion.com · 首个主机 api.notion.com · 经由 node")
+        let direct = alert(2, app: UUID(), scope: .ip, value: "157.148.69.80", direct: true)
+        #expect(CaptureAlertText.title(appName: "WeChat", alert: direct) == "WeChat 直接连接了新 IP")
     }
 
     @Test func measuresTheRate() {

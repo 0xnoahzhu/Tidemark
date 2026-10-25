@@ -2,40 +2,34 @@ import AppKit
 import Foundation
 @preconcurrency import UserNotifications
 
-/// Titles and subtitles of first-contact alerts, matching the design:
-/// "Cursor reached a new site, notion.com" · "First host api.notion.com · via node · US · AS13335 Cloudflare".
+/// What a first-contact notification says, as the design's banner shows it: "Raycast reached a new site" over
+/// "notion.com · first host api.notion.com · via node", led by the Mac's name when another Mac found it.
 enum CaptureAlertText {
     @MainActor
     static func title(appName: String, alert: AlertItem) -> String {
         switch alert.scope {
-        case .site: trf("%1$@ reached a new site, %2$@", "Capture", appName, alert.site ?? alert.value)
-        case .host: trf("%1$@ contacted %2$@", "Capture", appName, alert.value)
+        case .site: trf("%@ reached a new site", "Capture", appName)
+        case .host: trf("%@ contacted a new host", "Capture", appName)
         case .ip:
             alert.isDirect
-                ? trf("%1$@ connected straight to %2$@", "Capture", appName, alert.value)
-                : trf("%1$@ connected to %2$@", "Capture", appName, alert.value)
+                ? trf("%@ connected straight to a new IP", "Capture", appName)
+                : trf("%@ connected to a new IP", "Capture", appName)
         }
     }
 
-    /// `deviceName` prefixes alerts that another Mac found.
+    /// The new site and its first host, or the new host or IP, then the process. `deviceName` leads alerts that
+    /// another Mac found.
     @MainActor
-    static func subtitle(alert: AlertItem, deviceName: String? = nil) -> String {
+    static func details(alert: AlertItem, deviceName: String? = nil) -> String {
         var parts: [String] = []
         if let deviceName, !deviceName.isEmpty { parts.append(deviceName) }
-        let via = alert.knownProcessName.map { trf("via %@", "Capture", $0) }
-        let geo = alert.geo?.display ?? ""
-        switch alert.scope {
-        case .site:
-            parts.append(trf("First host %@", "Capture", alert.value))
-            if let via { parts.append(via) }
-        case .host:
-            if let via { parts.append(via) }
-            if let ip = alert.ip, !ip.isEmpty { parts.append(ip) }
-        case .ip:
-            if let host = alert.host, !host.isEmpty { parts.append(host) } else { parts.append(tr("No hostname", "Capture")) }
-            if let via { parts.append(via) }
+        if alert.scope == .site, let site = alert.site, !site.isEmpty {
+            parts.append(site)
+            parts.append(trf("first host %@", "Capture", alert.value))
+        } else {
+            parts.append(alert.value)
         }
-        if !geo.isEmpty { parts.append(geo) }
+        if let process = alert.knownProcessName { parts.append(trf("via %@", "Capture", process)) }
         return parts.joined(separator: " · ")
     }
 }
@@ -114,17 +108,17 @@ final class CaptureNotifier: NSObject {
         switch grouper.add(alert, now: now) {
         case .post(let identifier):
             add(identifier: identifier, text: Text(
-                title: CaptureAlertText.title(appName: appName, alert: alert),
-                subtitle: CaptureAlertText.subtitle(alert: alert, deviceName: deviceName),
-                body: nil, silent: false, appID: alert.appID, alertIDs: [alert.id], muteValue: alert.value
+                headline: CaptureAlertText.title(appName: appName, alert: alert),
+                details: CaptureAlertText.details(alert: alert, deviceName: deviceName),
+                silent: false, appID: alert.appID, alertIDs: [alert.id], muteValue: alert.value
             ))
         case .aggregate(let identifier, let first, let extra):
             let values = extra.map { $0.scope == .site ? ($0.site ?? $0.value) : $0.value }
+            let more = trf("…and %lld more: %@", "Capture", extra.count, values.joined(separator: ", "))
             // The burst already alerted once; the update is silent.
             add(identifier: identifier, text: Text(
-                title: CaptureAlertText.title(appName: appName, alert: first),
-                subtitle: CaptureAlertText.subtitle(alert: first, deviceName: deviceName),
-                body: trf("…and %lld more: %@", "Capture", extra.count, values.joined(separator: ", ")),
+                headline: CaptureAlertText.title(appName: appName, alert: first),
+                details: CaptureAlertText.details(alert: first, deviceName: deviceName) + "\n" + more,
                 silent: true, appID: alert.appID, alertIDs: [first.id] + extra.map(\.id), muteValue: first.value
             ))
         }
@@ -132,22 +126,23 @@ final class CaptureNotifier: NSObject {
 
     /// What one notification says (built into `UNNotificationContent` on delivery).
     private struct Text {
-        var title: String
-        var subtitle: String
-        var body: String?
+        var headline: String
+        var details: String
         var silent: Bool
         var appID: AppID
         var alertIDs: [Int64]
         var muteValue: String
     }
 
+    /// Lays the text out like the design's banner: "Tidemark" on top (with the time beside it), the headline, then
+    /// the details.
     private func add(identifier: String, text: Text) {
         let content = UNMutableNotificationContent()
         content.categoryIdentifier = Self.categoryIdentifier
         content.threadIdentifier = text.appID.uuidString
-        content.title = text.title
-        content.subtitle = text.subtitle
-        if let body = text.body, !body.isEmpty { content.body = body }
+        content.title = "Tidemark"
+        content.subtitle = text.headline
+        content.body = text.details
         if text.silent {
             content.sound = nil
             content.interruptionLevel = .passive

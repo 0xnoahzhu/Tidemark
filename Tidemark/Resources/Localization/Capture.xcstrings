@@ -1,24 +1,24 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "%1$@ connected straight to %2$@" : {
+    "%@ connected straight to a new IP" : {
       "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 直接用 IP 连接了 %2$@" } }
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 直接连接了新 IP" } }
       }
     },
-    "%1$@ connected to %2$@" : {
+    "%@ connected to a new IP" : {
       "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 连接了 %2$@" } }
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 连接了新 IP" } }
       }
     },
-    "%1$@ contacted %2$@" : {
+    "%@ contacted a new host" : {
       "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 访问了 %2$@" } }
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 访问了新主机" } }
       }
     },
-    "%1$@ reached a new site, %2$@" : {
+    "%@ reached a new site" : {
       "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 访问了新站点 %2$@" } }
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 访问了新站点" } }
       }
     },
     "%@ asked for an authentication method Tidemark does not support." : {
@@ -101,11 +101,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法与 %@ 建立 TLS 连接。" } }
       }
     },
-    "First host %@" : {
-      "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "首个主机 %@" } }
-      }
-    },
     "Invalid PostgreSQL URL: %@" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PostgreSQL 连接地址无效：%@" } }
@@ -119,11 +114,6 @@
     "No connection to %1$@ within %2$@." : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%2$@内没有可用的 %1$@ 连接。" } }
-      }
-    },
-    "No hostname" : {
-      "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有域名" } }
       }
     },
     "No PostgreSQL connection is configured." : {
@@ -254,6 +244,11 @@
     "Unknown app" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知 App" } }
+      }
+    },
+    "first host %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "首个主机 %@" } }
       }
     },
     "via %@" : {

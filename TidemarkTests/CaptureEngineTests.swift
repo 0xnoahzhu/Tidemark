@@ -365,8 +365,10 @@ struct CaptureEngineTests {
         await database.setOtherMacAlerts([alert(2, mini.id, docker, .ip, "104.16.98.215")])
         await engine.pollOtherMacAlerts()
 
-        #expect(notifications.value.count == 2)
-        #expect(notifications.value.last?.content.subtitle.hasPrefix("Mac mini (Office) · ") == true)
+        let posted = notifications.value.map(\.content)
+        #expect(posted.map(\.title) == ["Tidemark", "Tidemark"])
+        #expect(posted.map(\.subtitle) == ["Cursor contacted a new host", "Docker connected to a new IP"])
+        #expect(posted.map(\.body) == ["api2.cursor.sh · via com.docker.backend", "Mac mini (Office) · 104.16.98.215 · via com.docker.backend"])
         #expect(model.alerts.items.map(\.id) == [2, 1])
     }
 
