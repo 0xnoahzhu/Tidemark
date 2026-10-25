@@ -368,8 +368,16 @@ struct CaptureEngineTests {
         update.databaseFailure = "PostgreSQL refused every write: disk full"
         update.databaseError = CaptureServerRejection(message: "disk full")
         engine.apply(update)
-        #expect(model.live.database == .failed(message: "PostgreSQL refused every write: disk full"))
+        #expect(model.live.database == .failed(CaptureServerRejection(message: "disk full")))
+        #expect(SidebarStatusText.help(model.live.database) == "PostgreSQL refused every write: disk full")
         #expect(CaptureEngine.message(for: CaptureTimeoutError(seconds: 20)) == "PostgreSQL did not answer in time")
+
+        // The status keeps the error, so it reads in a language chosen after the failure.
+        Localizer.shared.preference = .chinese
+        defer { Localizer.shared.preference = .english }
+        guard Localizer.shared.bundle != nil else { return }
+        #expect(SidebarStatusText.help(model.live.database) == "PostgreSQL 拒绝了所有写入：disk full")
+        #expect(CaptureEngine.message(for: CaptureSurgeFailure.stoppedStreaming) == "Surge 已停止推送")
     }
 
     @Test func describesDatabaseAndSurgeFailuresInTheUILanguage() {

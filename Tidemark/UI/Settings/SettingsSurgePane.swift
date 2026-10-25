@@ -106,8 +106,8 @@ struct SettingsSurgePane: View {
                 SettingsStatusLine(tone: .ok, text: Self.connectedText(remote: model.surge.endpoint.remote != nil))
             case .connecting:
                 SettingsStatusLine(tone: .pending, text: tr("Connecting…", "Settings"))
-            case .failed(let message):
-                SettingsStatusLine(tone: .failed, text: message)
+            case .failed(let error):
+                SettingsStatusLine(tone: .failed, text: CaptureEngine.message(for: error))
             case .paused:
                 SettingsStatusLine(tone: .neutral, text: tr("Recording is paused", "Settings"))
             case .idle:

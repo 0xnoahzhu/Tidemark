@@ -69,7 +69,7 @@ struct SettingsDatabasePane: View {
             case .success(let detail):
                 SettingsStatusLine(tone: .ok, text: detail)
             case .failure(let error):
-                SettingsStatusLine(tone: .failed, text: error.localizedDescription)
+                SettingsStatusLine(tone: .failed, text: CaptureEngine.message(for: error))
             }
         } else {
             switch model.live.database {
@@ -77,8 +77,8 @@ struct SettingsDatabasePane: View {
                 SettingsStatusLine(tone: .ok, text: connectedText(fallback: detail))
             case .connecting:
                 SettingsStatusLine(tone: .pending, text: tr("Connecting…", "Settings"))
-            case .failed(let message):
-                SettingsStatusLine(tone: .failed, text: message)
+            case .failed(let error):
+                SettingsStatusLine(tone: .failed, text: CaptureEngine.message(for: error))
             case .paused:
                 SettingsStatusLine(tone: .neutral, text: tr("Recording is paused", "Settings"))
             case .idle:

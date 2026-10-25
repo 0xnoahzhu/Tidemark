@@ -1,5 +1,20 @@
 import Foundation
 
+/// Why the Surge link is down when no call failed. `errorDescription` is English, for the log.
+enum CaptureSurgeFailure: Error, Equatable, LocalizedError {
+    /// The watch ended without an error.
+    case stoppedStreaming
+    /// Surge announced that it is quitting.
+    case shuttingDown
+
+    var errorDescription: String? {
+        switch self {
+        case .stoppedStreaming: "Surge stopped streaming"
+        case .shuttingDown: "Surge is shutting down"
+        }
+    }
+}
+
 /// The reasons inside `CaptureEngine.message(for:)`'s failures, in the UI language. Text the server, the
 /// network or surge-cli reported stays as it was reported.
 extension CaptureEngine {

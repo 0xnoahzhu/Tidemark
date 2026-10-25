@@ -8,8 +8,6 @@ import Observation
 final class LiveState {
     var surge: LinkStatus = .idle
     var database: LinkStatus = .idle
-    /// Surge version / profile line shown in Settings › Surge.
-    var surgeDetail: String = ""
 
     /// Recording on/off (pausing stops writes and alerts; it resumes on next launch).
     var recording: Bool = true

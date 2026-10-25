@@ -247,7 +247,7 @@ final class CaptureEngine {
             model.live.serverVersion = ping.serverVersion
             model.live.database = .connected(detail: "PostgreSQL \(ping.serverVersion)")
         } catch {
-            model.live.database = .failed(message: Self.message(for: error))
+            model.live.database = .failed(error)
             await pipeline.setDatabaseOnline(false)
             return false
         }
@@ -464,7 +464,8 @@ final class CaptureEngine {
                 // A replaced run must not touch the state of the run that replaced it.
                 if Task.isCancelled { return }
                 let stream = surge.events()
-                model.live.surge = .connected(detail: tr("watching requests", "Capture"))
+                // Language-neutral, so the sidebar's tooltip never keeps the language of the moment it connected.
+                model.live.surge = .connected(detail: status.version.map { "Surge \($0)" } ?? "")
                 streamConnectedAt = .now
                 attempt = 0
                 let backfill = Task { [surge, pipeline] in
@@ -491,11 +492,11 @@ final class CaptureEngine {
                 try await pipeline.consume(stream)
                 if Task.isCancelled { return }
                 streamConnectedAt = nil
-                model.live.surge = .failed(message: tr("Surge stopped streaming", "Capture"))
+                model.live.surge = .failed(CaptureSurgeFailure.stoppedStreaming)
             } catch {
                 if Task.isCancelled { return }
                 streamConnectedAt = nil
-                model.live.surge = .failed(message: Self.message(for: error))
+                model.live.surge = .failed(error)
             }
             guard model.preferences.surgeReconnect else { return }
             attempt += 1
@@ -750,13 +751,13 @@ final class CaptureEngine {
                 egress?.note(.profileReloaded)
                 scheduleSessionCheck()
             case .shutdown:
-                live.surge = .failed(message: tr("Surge is shutting down", "Capture"))
+                live.surge = .failed(CaptureSurgeFailure.shuttingDown)
             case .sessionCheck:
                 scheduleSessionCheck()
             }
         }
-        if let failure = update.databaseFailure {
-            live.database = .failed(message: update.databaseError.map(Self.message(for:)) ?? failure)
+        if let error = update.databaseError {
+            live.database = .failed(error)
             lastWriteFailureAt = now
             scheduleDatabaseReconnect()
         }
@@ -856,7 +857,7 @@ final class CaptureEngine {
             if lastWriteFailureAt.map({ Date.now.timeIntervalSince($0) > 120 }) ?? true { reconnectAttempt = 0 }
             if model.live.serverVersion != result.serverVersion { model.live.serverVersion = result.serverVersion }
         } catch {
-            model.live.database = .failed(message: Self.message(for: error))
+            model.live.database = .failed(error)
             await pipeline.setDatabaseOnline(false)
             scheduleDatabaseReconnect()
         }
@@ -1024,10 +1025,13 @@ final class CaptureEngine {
     }
 
     /// A failure for display (Settings › Database and Surge, the sidebar's status), in the UI language. Details
-    /// that come from the server or surge-cli stay as they were reported.
+    /// that come from the server or surge-cli stay as they were reported. Views call it while rendering a
+    /// `LinkStatus.failed`, so the text follows a change of the UI language.
     static func message(for error: any Error) -> String {
         switch error {
         case is CaptureTimeoutError: tr("PostgreSQL did not answer in time", "Capture")
+        case CaptureSurgeFailure.stoppedStreaming: tr("Surge stopped streaming", "Capture")
+        case CaptureSurgeFailure.shuttingDown: tr("Surge is shutting down", "Capture")
         case let rejection as CaptureServerRejection: trf("PostgreSQL refused every write: %@", "Capture", rejection.message)
         case let failure as CaptureDisplayError: message(for: failure.underlying)
         case let error as DatabaseError:

@@ -89,8 +89,8 @@ private struct RequestsLiveEmptyState: View {
             EmptyState(systemImage: "magnifyingglass", title: trf("No requests match “%@”", "Requests", search), message: tr("The filter looks at host, remote IP, process and app.", "Requests"))
         } else if !model.live.rows.isEmpty {
             EmptyState(systemImage: "line.3.horizontal.decrease.circle", title: tr("No requests match these filters", "Requests"), message: tr("Check the Mac menu in the sidebar and the filter options.", "Requests"))
-        } else if case .failed(let message) = model.live.surge {
-            EmptyState(systemImage: "bolt.horizontal.circle", title: tr("Surge isn't connected", "Requests"), message: message)
+        } else if case .failed(let error) = model.live.surge {
+            EmptyState(systemImage: "bolt.horizontal.circle", title: tr("Surge isn't connected", "Requests"), message: CaptureEngine.message(for: error))
         } else if !model.live.recording {
             EmptyState(systemImage: "pause.circle", title: tr("Recording is paused", "Requests"), message: tr("Resume recording to see requests as Surge handles them.", "Requests"))
         } else {

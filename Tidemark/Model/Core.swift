@@ -56,11 +56,33 @@ enum LinkStatus: Equatable, Sendable {
     case idle
     case connecting
     case connected(detail: String)
-    case failed(message: String)
+    /// Why the link is down. The error itself is kept and described where it is shown
+    /// (`CaptureEngine.message(for:)`), so the text follows the UI language when it changes later.
+    case failed(any Error)
     case paused
 
     var isHealthy: Bool {
         if case .connected = self { return true }
         return false
     }
+
+    /// Failures are equal when their errors are: equal values of an `Equatable` error type, otherwise errors
+    /// of the same type that describe themselves the same way.
+    static func == (lhs: LinkStatus, rhs: LinkStatus) -> Bool {
+        switch (lhs, rhs) {
+        case (.idle, .idle), (.connecting, .connecting), (.paused, .paused): true
+        case (.connected(let a), .connected(let b)): a == b
+        case (.failed(let a), .failed(let b)): sameError(a, b)
+        default: false
+        }
+    }
+
+    private static func sameError(_ a: any Error, _ b: any Error) -> Bool {
+        if let a = (a as Any) as? any Equatable { return a.isEqual(to: b) }
+        return type(of: a) == type(of: b) && String(describing: a) == String(describing: b)
+    }
+}
+
+private extension Equatable {
+    func isEqual(to other: Any) -> Bool { (other as? Self) == self }
 }

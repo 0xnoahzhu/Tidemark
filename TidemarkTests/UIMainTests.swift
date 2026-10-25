@@ -710,7 +710,17 @@ struct ShellTests {
         Localizer.shared.preference = .english
         #expect(SidebarStatusText.surge(.connected(detail: "")) == "watching requests")
         #expect(SidebarStatusText.database(.connected(detail: ""), totalRows: 1_284_093) == "1,284,093 rows")
-        #expect(SidebarStatusText.help(.failed(message: "connection refused")) == "connection refused")
+        #expect(SidebarStatusText.help(.failed(DatabaseError.unreachable("connection refused"))) == "PostgreSQL is unreachable: connection refused")
+        #expect(SidebarStatusText.help(.failed(CaptureSurgeFailure.shuttingDown)) == "Surge is shutting down")
+        #expect(SidebarStatusText.help(.connected(detail: "Surge 6.10.0")) == "Surge 6.10.0")
         #expect(SidebarStatusText.help(.idle) == nil)
+
+        // A failed link keeps its error: equal errors make equal statuses, so views only update on a new failure.
+        #expect(LinkStatus.failed(DatabaseError.notConfigured) == .failed(DatabaseError.notConfigured))
+        #expect(LinkStatus.failed(DatabaseError.notConfigured) != .failed(DatabaseError.invalidURL("x")))
+        #expect(LinkStatus.failed(CaptureServerRejection(message: "disk full")) == .failed(CaptureServerRejection(message: "disk full")))
+        #expect(LinkStatus.failed(CaptureServerRejection(message: "disk full")) != .failed(CaptureServerRejection(message: "read-only")))
+        #expect(LinkStatus.failed(CaptureTimeoutError(seconds: 20)) != .failed(DatabaseError.notConfigured))
+        #expect(LinkStatus.failed(DatabaseError.notConfigured) != .connecting)
     }
 }

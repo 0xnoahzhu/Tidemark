@@ -14,9 +14,9 @@ struct UIChromeTests {
         let connected = LinkStatus.connected(detail: "")
         #expect(MenuBarGlyph.state(recording: true, surge: connected, unreadAlerts: 0) == .normal)
         #expect(MenuBarGlyph.state(recording: true, surge: connected, unreadAlerts: 3) == .alert)
-        #expect(MenuBarGlyph.state(recording: true, surge: .failed(message: "x"), unreadAlerts: 3) == .offline)
+        #expect(MenuBarGlyph.state(recording: true, surge: .failed(CaptureSurgeFailure.stoppedStreaming), unreadAlerts: 3) == .offline)
         #expect(MenuBarGlyph.state(recording: true, surge: .connecting, unreadAlerts: 0) == .offline)
-        #expect(MenuBarGlyph.state(recording: false, surge: .failed(message: "x"), unreadAlerts: 3) == .paused)
+        #expect(MenuBarGlyph.state(recording: false, surge: .failed(CaptureSurgeFailure.stoppedStreaming), unreadAlerts: 3) == .paused)
     }
 
     @Test func glyphIsAnEighteenPointTemplate() throws {

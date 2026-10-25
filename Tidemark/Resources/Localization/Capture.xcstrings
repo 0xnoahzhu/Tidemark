@@ -266,11 +266,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看" } }
       }
     },
-    "watching requests" : {
-      "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在订阅请求" } }
-      }
-    },
     "…and %lld more: %@" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "…还有 %lld 项：%@" } }

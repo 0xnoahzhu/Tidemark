@@ -96,10 +96,11 @@ enum SidebarStatusText {
         }
     }
 
-    /// The failure message, or the connection detail, for the line's tooltip.
+    /// The failure (in the current UI language), or the connection detail, for the line's tooltip.
+    @MainActor
     static func help(_ status: LinkStatus) -> String? {
         switch status {
-        case .failed(let message): message
+        case .failed(let error): CaptureEngine.message(for: error)
         case .connected(let detail): detail.isEmpty ? nil : detail
         default: nil
         }
