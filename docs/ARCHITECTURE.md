@@ -171,7 +171,8 @@ migration runner and every time limit.
   never starve the writer. Reads over a long history (History pages, totals and histogram, an app's counters…)
   get a longer budget in their own transaction, and every call also has a client-side limit, so a server that
   stopped answering cannot hold a connection forever; cancelling a writer call closes its connection, so its
-  transaction rolls back. [DATABASE.md › Connections](DATABASE.md#connections) lists the limits.
+  transaction rolls back. Either way the call ends as soon as its connection is closed.
+  [DATABASE.md › Connections](DATABASE.md#connections) lists the limits.
 * **Counts** — total rows use `pg_class.reltuples` plus rows written since; "today" is an indexed count.
 * **Retention** — optional; deletes requests older than *N* days in batches every hour.
 * **Credentials** — the URL is stored without its password in `UserDefaults`; the password lives in the
