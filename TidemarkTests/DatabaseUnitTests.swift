@@ -75,6 +75,15 @@ struct DatabaseUnitTests {
             }
         }
         #expect(!PostgresConnectionURL.redact("postgres://h/d?password=secret").contains("secret"))
+        // Text that is not a PostgreSQL URL may hold a password anywhere before its last "@", or after a keyword.
+        for text in ["tide:secret@db/tidemark", "mysql://u:se@secret@h/d", "postgres://u:a/b@secret@h/d", "postgres://u:a/b@h/d?PASSWORD=secret",
+                     "host=db password=secret", "postgres://u:%zz@h/d?Password=secret"] {
+            #expect(!PostgresConnectionURL.redact(text).contains("secret"), "\(text)")
+        }
+        #expect(PostgresConnectionURL.redact("mysql://u:se@secret@h/d") == "mysql://…@h/d")
+        #expect(PostgresConnectionURL.redact("tide:secret@db/tidemark") == "…@db/tidemark")
+        #expect(PostgresConnectionURL.redact("postgres://tide:secret@h/d?sslmode=bogus") == "postgres://tide:•••@h/d?sslmode=bogus")
+        #expect(PostgresConnectionURL.redact("postgres://h/d?password=secret&sslmode=bogus") == "postgres://h/d?password=•••&sslmode=bogus")
     }
 
     @Test func classifiesServerErrorsByWhetherARetryCanSucceed() {

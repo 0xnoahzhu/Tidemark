@@ -128,17 +128,20 @@ struct PostgresConnectionURL: Hashable, Sendable {
     /// Removes the password (in the user info or a `password` query parameter) from a URL string so it
     /// can be shown or logged.
     static func redact(_ string: String) -> String {
-        guard var components = URLComponents(string: string) else {
-            // Not parseable: drop everything between "://" and "@" to be safe.
-            guard let scheme = string.range(of: "://"), let at = string.range(of: "@", range: scheme.upperBound..<string.endIndex) else {
-                return string.contains("password=") ? "(invalid URL)" : string
-            }
-            return String(string[..<scheme.upperBound]) + "…" + String(string[at.lowerBound...])
+        guard var components = URLComponents(string: string), let scheme = components.scheme?.lowercased(),
+              scheme == "postgres" || scheme == "postgresql" else {
+            // Not a PostgreSQL URL, so a password could be anywhere: drop everything before the last "@" (a password
+            // may hold an "@" too) but the scheme, and give up on text that names a password at all.
+            guard string.range(of: "password", options: .caseInsensitive) == nil else { return "(invalid URL)" }
+            guard let at = string.range(of: "@", options: .backwards) else { return string }
+            let scheme = string.range(of: "://", range: string.startIndex..<at.lowerBound).map { String(string[..<$0.upperBound]) }
+            return (scheme ?? "") + "…" + String(string[at.lowerBound...])
         }
         if components.password != nil { components.password = "•••" }
         if let items = components.queryItems, items.contains(where: { $0.name.lowercased() == "password" }) {
             components.queryItems = items.map { $0.name.lowercased() == "password" ? URLQueryItem(name: $0.name, value: "•••") : $0 }
         }
-        return components.string ?? string
+        // `URLComponents` percent-encodes the dots.
+        return components.string?.replacingOccurrences(of: "%E2%80%A2", with: "•") ?? "(invalid URL)"
     }
 }
