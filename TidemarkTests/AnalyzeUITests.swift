@@ -566,6 +566,36 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(EgressFormat.error("Something odd", languageCode: "zh-Hans") == tr("The check failed", "Egress"))
     }
 
+    /// `egress_checks.error` holds English whatever the UI language, since other Macs and later versions read it.
+    @Test func storesCheckErrorsInAStableEnglishForm() {
+        Localizer.shared.preference = .chinese
+        defer { Localizer.shared.preference = .english }
+        #expect(EgressMonitor.storedError(CaptureTimeoutError(seconds: 20)) == "Timed out after 20 s.")
+        #expect(EgressMonitor.storedError(SurgeError.cliNotFound(path: "/x/surge-cli")) == "surge-cli was not found at /x/surge-cli.")
+        #expect(EgressMonitor.storedError(SurgeError.commandFailed(command: "test-policy-external-ip X", message: "Policy does not exist."))
+                == "surge-cli test-policy-external-ip X failed: Policy does not exist.")
+        #expect(EgressMonitor.storedError(SurgeError.decoding(command: "geoip 1.1.1.1", message: "no address in the reply"))
+                == "Could not read the output of surge-cli geoip 1.1.1.1: no address in the reply")
+        #expect(EgressMonitor.storedError(SurgeError.timedOut(command: "test-policy X")) == "surge-cli test-policy X timed out.")
+        #expect(EgressMonitor.storedError(CancellationError()) == "CancellationError()")
+    }
+
+    /// Every stored form reads in Chinese; only Surge's unknown reasons fall back to a general sentence.
+    @Test func translatesStoredCheckErrorsIntoChinese() {
+        Localizer.shared.preference = .chinese
+        defer { Localizer.shared.preference = .english }
+        guard Localizer.shared.bundle != nil else { return }
+        let zh = "zh-Hans"
+        #expect(EgressFormat.error("Timed out after 20 s.", languageCode: zh) == "20 秒后超时")
+        #expect(EgressFormat.error("surge-cli was not found at /x/surge-cli.", languageCode: zh) == "找不到 surge-cli")
+        #expect(EgressFormat.error("Could not read the output of surge-cli geoip 1.1.1.1: bad", languageCode: zh) == "无法读取 surge-cli 的输出")
+        #expect(EgressFormat.error("surge-cli test-policy X timed out.", languageCode: zh) == "surge-cli 没有及时响应")
+        #expect(EgressFormat.error("surge-cli test-policy-external-ip X failed: HTTP request timeout", languageCode: zh) == "超时")
+        #expect(EgressFormat.error("surge-cli test-policy-external-ip X failed: Policy does not exist.", languageCode: zh) == "找不到这个策略")
+        #expect(EgressFormat.error("surge-cli test-policy-external-ip X failed: No outgoing interface", languageCode: zh) == "没有可用的出站接口")
+        #expect(EgressFormat.error("surge-cli test-policy-external-ip X failed: TLS handshake failed", languageCode: zh) == "Surge 无法检测这个策略")
+    }
+
     @Test func translatesSurgeModesAlsoWithoutTheOutboundMode() {
         #expect(EgressFormat.surgeMode("Enhanced mode · rule-based") == tr("Enhanced mode · rule-based", "SurgeCLI"))
         #expect(EgressFormat.surgeMode("Enhanced mode") == tr("Enhanced mode", "Egress"))

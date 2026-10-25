@@ -202,6 +202,9 @@ enum SurgeError: Error, Sendable, Equatable, LocalizedError {
     case decoding(command: String, message: String)
     case timedOut(command: String)
 
+    /// English, and stable: the egress monitor stores it in `egress_checks.error`, where other Macs and later
+    /// versions read it (`EgressFormat.error`), so the wording must not change. The UI describes these errors
+    /// in its own language (`CaptureEngine.message(for:)`, `ProbeController.listenerFailure`).
     var errorDescription: String? {
         switch self {
         case .cliNotFound(let path): "surge-cli was not found at \(path)."

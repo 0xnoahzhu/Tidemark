@@ -4,6 +4,8 @@ import Synchronization
 /// Thrown when an operation outlives its deadline.
 struct CaptureTimeoutError: Error, LocalizedError, Equatable {
     var seconds: Double
+    /// English, and stable: stored in `egress_checks.error` and read back by `EgressFormat.error` (on other
+    /// Macs too). The UI says it in its own language (`CaptureEngine.message(for:)`, the probe controller).
     var errorDescription: String? { "Timed out after \(Int(seconds.rounded())) s." }
 
     init(seconds: Double) {

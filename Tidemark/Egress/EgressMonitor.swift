@@ -240,10 +240,16 @@ final class EgressMonitor: EgressActions {
                 hasIPv6: ip.contains(":") ? true : nil
             )
         } catch {
-            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             return EgressSample(policyPath: candidate.policyPath, ip: nil, location: nil, network: nil, latencyMs: nil,
-                                isCurrent: false, checkedAt: now, error: message)
+                                isCurrent: false, checkedAt: now, error: storedError(error))
         }
+    }
+
+    /// A failed check as `egress_checks.error` keeps it: the error's English description (`Timed out after 20 s.`,
+    /// `surge-cli test-policy-external-ip … failed: Policy does not exist.`), never the UI language, because other
+    /// Macs and later versions read it back (`EgressFormat.error` shows it short and translated).
+    nonisolated static func storedError(_ error: any Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? String(describing: error)
     }
 
     // MARK: Network type and IPv6
