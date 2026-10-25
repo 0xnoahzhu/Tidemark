@@ -145,14 +145,17 @@ struct SettingsGeneralPane: View {
 
     // MARK: Login item
 
+    /// On only while macOS will open Tidemark at login: an item still waiting for approval reads off.
     private var loginBinding: Binding<Bool> {
         Binding(
-            get: { loginStatus == .enabled || loginStatus == .requiresApproval },
+            get: { loginStatus == .enabled },
             set: { setOpenAtLogin($0) }
         )
     }
 
-    /// A failure leaves the switch where the system has it (the design shows no message for it).
+    /// A failure leaves the switch where the system has it (the design shows no message for it). An item that
+    /// needs approval opens System Settings › Login Items, where the user approves it; the switch turns on when
+    /// Tidemark becomes active again.
     private func setOpenAtLogin(_ on: Bool) {
         do {
             try SettingsLoginItem.set(on)
@@ -161,6 +164,7 @@ struct SettingsGeneralPane: View {
             SettingsLoginItem.log.error("Changing the login item failed: \(error.localizedDescription, privacy: .public)")
         }
         loginStatus = SMAppService.mainApp.status
+        if on, loginStatus == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
     }
 }
 
