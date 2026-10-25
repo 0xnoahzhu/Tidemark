@@ -491,16 +491,6 @@
         }
       }
     },
-    "Site Probe needs Surge on this Mac. Tidemark is reading a remote Surge (Settings › Surge), so probes are turned off." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "网站探测需要本机上的 Surge。Tidemark 正在读取远程 Surge（设置 › Surge），所以探测已关闭。"
-          }
-        }
-      }
-    },
     "Start Probe" : {
       "localizations" : {
         "zh-Hans" : {

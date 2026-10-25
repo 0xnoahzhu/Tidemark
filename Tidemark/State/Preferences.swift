@@ -27,7 +27,8 @@ final class Preferences {
     // MARK: Surge
     var surgeCLIPath: String { didSet { set(surgeCLIPath, "surge.cliPath") } }
     /// `host:port` of a remote Surge controller, empty for this Mac's Surge. Settings offer no remote Surge, so
-    /// nothing in the app sets it (a stored `surge.remote` is ignored); the engine keeps the code path.
+    /// nothing in the app sets it (a stored `surge.remote` is ignored); the engine keeps the code path, without a
+    /// password.
     var surgeRemote = ""
     /// Device name stored with requests from the remote Surge.
     var surgeRemoteTag = ""
@@ -100,11 +101,7 @@ final class Preferences {
 
     var surgeEndpoint: SurgeEndpoint {
         let remote = surgeRemote.trimmingCharacters(in: .whitespaces)
-        return SurgeEndpoint(
-            cliPath: surgeCLIPath,
-            remote: remote.isEmpty ? nil : remote,
-            password: remote.isEmpty ? nil : Keychain.read(account: Keychain.surgeRemoteAccount)
-        )
+        return SurgeEndpoint(cliPath: surgeCLIPath, remote: remote.isEmpty ? nil : remote, password: nil)
     }
 
     /// Full connection URL including the Keychain password.

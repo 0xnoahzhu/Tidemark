@@ -44,8 +44,9 @@ services on `AppModel` (`model.database`, `model.capture`, `model.probeActions`,
 
 All Surge access goes through `surge-cli --raw` (JSON output). The executable lives at
 `/Applications/Surge.app/Contents/Applications/surge-cli` (also linked from `/usr/local/bin/surge-cli`).
-Tidemark reads this Mac's Surge: Settings offer no remote Surge. The client still supports one, adding
-`--remote host:port` and sending the password on stdin with `--password-stdin` (never in argv). A stream that
+Tidemark reads this Mac's Surge: Settings offer no remote Surge, and the remote controller password earlier
+versions kept in the Keychain is deleted at launch. The client still supports one, adding `--remote host:port`
+and sending a password on stdin with `--password-stdin` (never in argv). A stream that
 ends or fails is always restarted, with backoff.
 
 * **Stream** — `watch request request-update real-time-speed environment reload shutdown`. First line is
@@ -210,8 +211,8 @@ records IP, policy and rule, while Tidemark knows that every connection on that 
 Hosts are recorded with their first/last activity relative to the probe start and the step (page load,
 click, device switch) that first reached them; the waterfall colors same-site hosts with the accent and
 other sites in amber. The proxy matches Surge records to the probe by the forwarder's source port and
-address. The forwarder dials the interface Surge's HTTP listener is bound to; probes are not available with a
-remote Surge, whose proxy is not reachable through a loopback forwarder.
+address. The forwarder dials the interface Surge's HTTP listener is bound to. A probe needs this Mac's Surge,
+the only one Tidemark reads: a remote Surge would not see the forwarder's source ports.
 
 Stopping a probe waits for the rest of its tail (by default a probe records until at least 6 s after its first
 page load, so a Stop pressed earlier still catches the page's late requests), lets the last Surge records

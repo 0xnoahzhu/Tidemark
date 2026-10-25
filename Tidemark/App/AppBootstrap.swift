@@ -12,6 +12,8 @@ enum AppBootstrap {
         Localizer.shared.preference = model.preferences.language
         applyAppearance(model.preferences.appearance)
         applyActivationPolicy(model.preferences.showIn)
+        // Settings offer no remote Surge: drop the controller password an earlier version kept for one.
+        Keychain.write(nil, account: Keychain.retiredSurgeRemoteAccount)
 
         let classifier = PublicSuffixClassifier()
         let processes = LibProcInspector()

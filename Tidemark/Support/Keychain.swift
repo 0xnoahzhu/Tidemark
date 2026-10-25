@@ -1,11 +1,13 @@
 import Foundation
 import Security
 
-/// Minimal generic-password Keychain access for the database and remote Surge passwords.
+/// Minimal generic-password Keychain access for the database password.
 enum Keychain {
     static let service = "io.tidemark.Tidemark"
     static let databaseAccount = "database.password"
-    static let surgeRemoteAccount = "surge.remote.password"
+    /// A remote Surge controller's password, which earlier versions kept. Settings offer no remote Surge, so
+    /// launching deletes it.
+    static let retiredSurgeRemoteAccount = "surge.remote.password"
 
     static func read(account: String) -> String? {
         let query: [String: Any] = [

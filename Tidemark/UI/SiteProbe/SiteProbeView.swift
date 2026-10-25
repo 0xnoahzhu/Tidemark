@@ -66,7 +66,6 @@ struct SiteProbeView: View {
     private var urlBar: some View {
         @Bindable var web = web
         let running = model.probe.isRunning
-        let unavailable = ProbeWebSession.unavailableReason(remoteSurge: model.preferences.surgeRemote)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 TextField(text: $web.urlDraft, prompt: Text(verbatim: "https://example.com")) {
@@ -78,7 +77,7 @@ struct SiteProbeView: View {
                 .autocorrectionDisabled()
                 .focused($urlFocused)
                 .disabled(running || web.isBusy)
-                .onSubmit { if !running, !web.isBusy, unavailable == nil { start() } }
+                .onSubmit { if !running, !web.isBusy { start() } }
 
                 if web.isStopping {
                     ProbeStoppingButton()
@@ -91,18 +90,10 @@ struct SiteProbeView: View {
                     Button(tr("Start Probe", "SiteProbe")) { start() }
                         .buttonStyle(.glassProminent)
                         .tint(Theme.accent)
-                        .disabled(unavailable != nil || ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isBusy)
-                        .help(unavailable ?? "")
+                        .disabled(ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isBusy)
                 }
             }
             .controlSize(.large)
-            if let unavailable, !running {
-                Label(unavailable, systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.ink2)
-                    .symbolRenderingMode(.multicolor)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 14)

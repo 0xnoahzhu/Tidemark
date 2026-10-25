@@ -90,11 +90,9 @@ final class CaptureEngine {
     /// stale and must not be applied.
     var catalogGeneration = 0
 
-    /// Preferences the engine reacts to.
+    /// Preferences the engine reacts to. (Settings offer no remote Surge, so nothing changes `surgeRemote`.)
     private struct PreferenceValues: Equatable {
         var cliPath: String
-        var remote: String
-        var remoteTag: String
         var databaseURL: String
         var batchRows: Int
         var batchInterval: Double
@@ -102,8 +100,6 @@ final class CaptureEngine {
 
         @MainActor init(_ p: Preferences) {
             cliPath = p.surgeCLIPath
-            remote = p.surgeRemote.trimmingCharacters(in: .whitespaces)
-            remoteTag = p.surgeRemoteTag
             databaseURL = p.databaseURL
             batchRows = p.batchRows
             batchInterval = p.batchInterval
@@ -579,10 +575,8 @@ final class CaptureEngine {
     }
 
     private func preferencesChanged(from old: PreferenceValues, to new: PreferenceValues) {
-        if old.cliPath != new.cliPath || old.remote != new.remote {
+        if old.cliPath != new.cliPath {
             debounce("surge-settings", .milliseconds(1500)) { $0.scheduleSurgeSettings(restartStream: false) }
-        } else if old.remoteTag != new.remoteTag {
-            debounce("remote-tag", .milliseconds(1500)) { await $0.registerDevices() }
         }
         if old.databaseURL != new.databaseURL {
             debounce("database-url", .milliseconds(1500)) { $0.applyDatabaseSettings(force: false) }

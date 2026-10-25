@@ -80,9 +80,6 @@ final class ProbeWebSession {
         // The probe controller clears `running` before it saves the stopped session, so `isStopping` is what
         // keeps a new probe from starting while the old `stop()` can still tear the browser down.
         guard !isBusy, !model.probe.isRunning else { return }
-        if let reason = Self.unavailableReason(remoteSurge: model.preferences.surgeRemote) {
-            throw ProbeWebError(errorDescription: reason)
-        }
         guard let url = Self.normalizedURL(urlDraft) else {
             throw ProbeWebError(errorDescription: trf("“%@” is not a web address.", "SiteProbe", urlDraft))
         }
@@ -369,13 +366,6 @@ final class ProbeWebSession {
     }
 
     // MARK: Helpers
-
-    /// Why a probe cannot start, or nil. The probe's proxy forwards to the Surge on this Mac, so probes
-    /// are off while Tidemark reads a remote Surge.
-    static func unavailableReason(remoteSurge: String) -> String? {
-        guard !remoteSurge.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-        return tr("Site Probe needs Surge on this Mac. Tidemark is reading a remote Surge (Settings › Surge), so probes are turned off.", "SiteProbe")
-    }
 
     /// Adds `https://` when the scheme is missing; nil when there is no host.
     nonisolated static func normalizedURL(_ raw: String) -> URL? {

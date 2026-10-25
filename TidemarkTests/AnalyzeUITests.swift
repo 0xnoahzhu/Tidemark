@@ -354,12 +354,6 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(ProbeWebSession.userAgent(for: .iphone).contains("Mobile/"))
     }
 
-    @Test func isOffWhileReadingARemoteSurge() {
-        #expect(ProbeWebSession.unavailableReason(remoteSurge: "") == nil)
-        #expect(ProbeWebSession.unavailableReason(remoteSurge: "  ") == nil)
-        #expect(ProbeWebSession.unavailableReason(remoteSurge: "192.168.1.20:6170") != nil)
-    }
-
     /// WebKit traps when a page still bound to one `WebView` is given to another, so the page only moves
     /// once the view that showed it is gone.
     @Test func movesThePageOnlyAfterTheOldWebViewIsGone() async throws {

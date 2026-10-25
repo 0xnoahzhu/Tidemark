@@ -141,8 +141,8 @@ final class CaptureFakeSurge: SurgeClient {
     let endpoint: SurgeEndpoint
     let state = Mutex(State())
 
-    init(remote: String? = nil, cliPath: String = "/usr/bin/false") {
-        endpoint = SurgeEndpoint(cliPath: cliPath, remote: remote, password: nil)
+    init(cliPath: String = "/usr/bin/false") {
+        endpoint = SurgeEndpoint(cliPath: cliPath, remote: nil, password: nil)
     }
 
     func update(_ body: (inout State) -> Void) { state.withLock { body(&$0) } }

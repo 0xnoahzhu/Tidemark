@@ -324,21 +324,6 @@ struct ProbeControllerTests {
         #expect(model.probe.running == nil)
     }
 
-    @Test func refusesARemoteSurge() async {
-        let model = makeModel(surge: CaptureFakeSurge(remote: "192.168.1.2:6171"))
-        let controller = ProbeController(model: model, registry: ProbeRegistry())
-        do {
-            _ = try await controller.startProbe(url: "github.com", mode: .desktop, tail: true)
-            Issue.record("a probe started against a remote Surge")
-        } catch let error as ProbeStartError {
-            #expect(error.reason == .remoteSurge)
-            #expect(error.errorDescription?.isEmpty == false)
-        } catch {
-            Issue.record("unexpected \(error)")
-        }
-        #expect(model.probe.running == nil && model.probe.phase == .idle)
-    }
-
     @Test func explainsAMissingHTTPProxy() async {
         let surge = EgressFakeSurge()
         surge.update { $0.listener = nil }

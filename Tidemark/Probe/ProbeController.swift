@@ -4,8 +4,6 @@ import os
 /// Why a site probe cannot start. `errorDescription` is already in the app language.
 struct ProbeStartError: Error, LocalizedError, Hashable, Sendable {
     enum Reason: Hashable, Sendable {
-        /// A remote Surge is configured: its records cannot be matched to this Mac's probe proxy.
-        case remoteSurge
         /// Surge reports no HTTP proxy listener.
         case httpProxyOff
         /// Surge's HTTP proxy listener could not be read.
@@ -86,12 +84,6 @@ final class ProbeController: ProbeActions {
             throw URLError(.badURL)
         }
         let surge = model.surge
-        if let remote = surge.endpoint.remote?.trimmingCharacters(in: .whitespaces), !remote.isEmpty {
-            throw ProbeStartError(
-                reason: .remoteSurge,
-                message: tr("Site Probe needs the Surge running on this Mac. A remote Surge is set in Settings › Surge, and its records can't be matched to the probe's connections.", Self.table)
-            )
-        }
         let listener = try await httpListener(of: surge)
         let server = ProbeProxyServer(upstreamPort: UInt16(clamping: listener.port), registry: registry, upstreamHost: listener.connectHost)
         let id = UUID()

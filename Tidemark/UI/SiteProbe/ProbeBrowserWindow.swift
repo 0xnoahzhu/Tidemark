@@ -87,7 +87,6 @@ struct ProbeBrowserWindow: View {
                 .tint(ProbeStoppingButton.tint)
                 .keyboardShortcut(".", modifiers: .command)
             } else {
-                let unavailable = ProbeWebSession.unavailableReason(remoteSurge: model.preferences.surgeRemote)
                 Button(tr("Start Probe", "SiteProbe")) {
                     Task {
                         do { try await web.start(model: model, inWindow: true) } catch { startError = error }
@@ -95,8 +94,7 @@ struct ProbeBrowserWindow: View {
                 }
                 .buttonStyle(.glassProminent)
                 .tint(Theme.accent)
-                .disabled(unavailable != nil || ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isBusy)
-                .help(unavailable ?? "")
+                .disabled(ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isBusy)
             }
         }
     }
