@@ -66,7 +66,7 @@ struct SettingsGeneralPane: View {
     // MARK: Rows
 
     private var showInPicker: some View {
-        Picker(tr("Show in", "Settings"), selection: Binding(
+        DesignSegmentedControl(tr("Show in", "Settings"), selection: Binding(
             get: { model.preferences.showIn },
             set: { value in
                 model.preferences.showIn = value
@@ -74,30 +74,24 @@ struct SettingsGeneralPane: View {
                 // Changing the activation policy can deactivate the app; keep Settings in front.
                 Task { @MainActor in NSApp.activate() }
             }
-        )) {
-            Text(tr("Menu Bar & Dock", "Settings")).tag(Preferences.ShowIn.menuBarAndDock)
-            Text(tr("Menu Bar Only", "Settings")).tag(Preferences.ShowIn.menuBarOnly)
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
+        ), size: .regular(horizontalPadding: 10), segments: [
+            (.menuBarAndDock, tr("Menu Bar & Dock", "Settings")),
+            (.menuBarOnly, tr("Menu Bar Only", "Settings")),
+        ])
     }
 
     private var appearancePicker: some View {
-        Picker(tr("Appearance", "Settings"), selection: Binding(
+        DesignSegmentedControl(tr("Appearance", "Settings"), selection: Binding(
             get: { model.preferences.appearance },
             set: { value in
                 model.preferences.appearance = value
                 AppBootstrap.applyAppearance(value)
             }
-        )) {
-            Text(tr("System", "Settings")).tag(Preferences.Appearance.system)
-            Text(tr("Light", "Settings")).tag(Preferences.Appearance.light)
-            Text(tr("Dark", "Settings")).tag(Preferences.Appearance.dark)
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
+        ), size: .regular(horizontalPadding: 10), segments: [
+            (.system, tr("System", "Settings")),
+            (.light, tr("Light", "Settings")),
+            (.dark, tr("Dark", "Settings")),
+        ])
     }
 
     /// A plain 150 pt track between the two end labels, as in the design (no tick marks).
