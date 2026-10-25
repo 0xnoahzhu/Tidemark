@@ -5,7 +5,7 @@ import Observation
 @MainActor
 @Observable
 final class AlertState {
-    /// Newest first, for the current device scope.
+    /// Newest first, from every Mac whatever the sidebar's Mac menu shows.
     var items: [AlertItem] = []
     var unreadCount: Int = 0
     /// Host, IP or `*.example.com` patterns. Muted hosts are still recorded but never alert.

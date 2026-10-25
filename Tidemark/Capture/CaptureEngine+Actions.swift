@@ -104,7 +104,7 @@ extension CaptureEngine: CaptureActions {
         model.alerts.items.removeAll { $0.appID == id }
         await pushApps()
         await pipeline.purgeApp(id)
-        if let unread = try? await database.unreadAlertCount(scope: model.devices.scope) { model.alerts.unreadCount = unread }
+        if let unread = try? await database.unreadAlertCount(scope: .all) { model.alerts.unreadCount = unread }
         if model.nav.page == .app(id) { model.nav.open(.requests) }
     }
 
@@ -164,8 +164,8 @@ extension CaptureEngine: CaptureActions {
             model.alerts.items[index].readAt = now
         }
         do {
-            try await database.markAllAlertsRead(appID: appID, scope: model.devices.scope)
-            model.alerts.unreadCount = try await database.unreadAlertCount(scope: model.devices.scope)
+            try await database.markAllAlertsRead(appID: appID, scope: .all)
+            model.alerts.unreadCount = try await database.unreadAlertCount(scope: .all)
         } catch {
             if appID == nil { model.alerts.unreadCount = 0 }
             Self.log.error("Marking all alerts read failed: \(error.localizedDescription, privacy: .public)")

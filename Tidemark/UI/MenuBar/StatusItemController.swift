@@ -71,7 +71,6 @@ final class StatusItemController: NSObject {
     private func refresh() {
         let state = MenuBarGlyph.state(for: model)
         let label = MenuBarStatusText.accessibilityLabel(for: state, unread: model.alerts.unreadCount)
-        applyGlass(model.preferences.glass)
         guard let button = statusItem.button else { return }
         button.image = MenuBarGlyph.image(for: state)
         button.toolTip = label
@@ -89,13 +88,14 @@ final class StatusItemController: NSObject {
 
     // MARK: Panel
 
-    /// The borderless panel and its glass. The SwiftUI content is installed by `installContent()`.
+    /// The borderless panel and its glass. The SwiftUI content, installed by `installContent()`, lays the
+    /// design's panel color over the glass.
     private func makePanel() -> MenuBarPanelWindow {
         let glass = NSGlassEffectView()
-        glass.cornerRadius = 18
+        glass.style = .regular
+        glass.cornerRadius = MenuBarPanel.cornerRadius
         glass.effectIsInteractive = true
         glassView = glass
-        applyGlass(model.preferences.glass)
 
         let panel = MenuBarPanelWindow(contentRect: NSRect(x: 0, y: 0, width: MenuBarPanel.width, height: 300))
         panel.contentView = glass
@@ -123,14 +123,6 @@ final class StatusItemController: NSObject {
     /// Drops the SwiftUI content of a hidden panel, ending its observation of live state.
     private func releaseContent() {
         glassView?.contentView = nil
-    }
-
-    /// Settings › General › Liquid Glass: nearly clear glass at 0, a window-colored frost at 100.
-    private func applyGlass(_ amount: Double) {
-        guard let glassView else { return }
-        let t = min(max(amount, 0), 100) / 100
-        glassView.style = .regular
-        glassView.tintColor = NSColor.windowBackgroundColor.withAlphaComponent(0.1 + 0.5 * t)
     }
 
     private func contentSizeChanged(_ size: CGSize) {

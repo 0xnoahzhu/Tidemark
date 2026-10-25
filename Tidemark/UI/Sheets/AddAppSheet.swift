@@ -43,7 +43,7 @@ struct AddAppSheet: View {
                 chooseAnother
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 10)
+            .padding(.bottom, 8)
             .disabled(working)
 
             footer

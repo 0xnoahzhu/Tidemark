@@ -759,8 +759,8 @@ final class CaptureEngine {
         if device != model.devices.devices[index] { model.devices.devices[index] = device }
     }
 
-    /// New alerts: into the Notifications list (when the scope shows their Mac) and as system notifications, the
-    /// ones other Macs found included. Alerts from other Macs are skipped when their host is muted or their app is
+    /// New alerts: into the Notifications list (whichever Mac found them) and as system notifications, the ones
+    /// other Macs found included. Alerts from other Macs are skipped when their host is muted or their app is
     /// archived (or gone) here; pausing an app's monitoring on this Mac only stops this Mac's own alerts.
     private func receive(_ alerts: [AlertItem], fromOtherMac: Bool) {
         for alert in alerts.sorted(by: { $0.id < $1.id }) {
@@ -769,7 +769,7 @@ final class CaptureEngine {
                 let muted = model.alerts.isMuted(alert.value) || (alert.host.map { model.alerts.isMuted($0) } ?? false)
                 guard !muted else { continue }
             }
-            if model.devices.scope.includes(alert.deviceID), !model.alerts.items.contains(where: { $0.id == alert.id }) {
+            if !model.alerts.items.contains(where: { $0.id == alert.id }) {
                 model.alerts.items.insert(alert, at: 0)
                 if alert.isUnread { model.alerts.unreadCount += 1 }
             }
@@ -809,14 +809,14 @@ final class CaptureEngine {
         }
     }
 
-    /// Alerts, unread count and app stats for the sidebar scope.
+    /// Alerts and their unread count from every Mac (as in the design, the Mac menu never hides an alert), and
+    /// app stats for the sidebar scope.
     func reloadScoped() async {
         guard databaseReady else { return }
-        let scope = model.devices.scope
-        if let items = try? await database.alerts(filter: .all, appID: nil, scope: scope, limit: 200) {
+        if let items = try? await database.alerts(filter: .all, appID: nil, scope: .all, limit: 200) {
             model.alerts.items = items
         }
-        if let unread = try? await database.unreadAlertCount(scope: scope) { model.alerts.unreadCount = unread }
+        if let unread = try? await database.unreadAlertCount(scope: .all) { model.alerts.unreadCount = unread }
         await refreshStats()
     }
 

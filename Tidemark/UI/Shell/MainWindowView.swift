@@ -1,8 +1,7 @@
-import AppKit
 import SwiftUI
 
 /// Main three-pane window: Liquid Glass sidebar, one page per destination, and the window-wide sheets
-/// and confirmations (Monitor an App, pause / resume recording).
+/// and confirmations (Monitor an App, pause / resume recording, stop / restart monitoring an app).
 struct MainWindowView: View {
     @Environment(AppModel.self) private var model
     @State private var columnVisibility = NavigationSplitViewVisibility.all
@@ -24,6 +23,7 @@ struct MainWindowView: View {
             AddAppSheet()
         }
         .modifier(ShellRecordingConfirmation())
+        .modifier(AppMonitoringConfirmation())
         #if DEBUG
         .task { ShellDemoData.installIfRequested(into: model) }
         #endif
@@ -54,35 +54,38 @@ private struct ShellDetail: View {
 }
 
 /// "Pause recording?" / "Resume recording?" confirmation, presented when `Navigation.confirmRecordingToggle`
-/// is set (Requests toolbar, Capture menu, menu bar panel). As in the design, the dialog carries the app icon
-/// and its confirming button is the default one (Pause draws as the filled red default button).
+/// is set (Requests toolbar, Capture menu, menu bar panel). As in the page, it is a glass dialog over the window
+/// with the app icon, Cancel and a red Pause or an accent Resume.
 struct ShellRecordingConfirmation: ViewModifier {
     @Environment(AppModel.self) private var model
 
     func body(content: Content) -> some View {
-        @Bindable var nav = model.nav
+        let nav = model.nav
         let pausing = model.live.recording
-        content.alert(
-            pausing ? tr("Pause recording?", "Shell") : tr("Resume recording?", "Shell"),
-            isPresented: $nav.confirmRecordingToggle
-        ) {
-            Button(tr("Cancel", "Shell"), role: .cancel) {}
-            if pausing {
-                Button(tr("Pause", "Shell"), role: .destructive) {
-                    model.capture.setRecording(false)
+        content.glassDialog(isPresented: nav.confirmRecordingToggle, onCancel: { nav.confirmRecordingToggle = false }) {
+            GlassDialog(
+                width: 290,
+                surface: .dialog,
+                title: pausing ? tr("Pause recording?", "Shell") : tr("Resume recording?", "Shell"),
+                message: pausing
+                    ? tr("Requests Surge handles from now on won't be saved to PostgreSQL, and no new-site alerts will fire until you resume. Recording turns back on by itself the next time Tidemark starts.", "Shell")
+                    : tr("Every request Surge sees will be saved to PostgreSQL again, and alerts turn back on. Nothing from the paused period is filled in.", "Shell"),
+                cancelTitle: tr("Cancel", "Shell"),
+                confirmTitle: pausing ? tr("Pause", "Shell") : tr("Resume", "Shell"),
+                tone: pausing ? .destructive : .accent,
+                onCancel: { nav.confirmRecordingToggle = false },
+                onConfirm: {
+                    nav.confirmRecordingToggle = false
+                    model.capture.setRecording(!pausing)
                 }
-                .keyboardShortcut(.defaultAction)
-            } else {
-                Button(tr("Resume", "Shell")) {
-                    model.capture.setRecording(true)
-                }
-                .keyboardShortcut(.defaultAction)
+            ) {
+                // The asset keeps the system icon margin; drawn at 72.5 pt its tile fills the page's 58 pt.
+                Image("BrandIcon")
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 72.5, height: 72.5)
+                    .padding(-7.25)
             }
-        } message: {
-            Text(pausing
-                ? tr("Requests Surge handles from now on won't be saved to PostgreSQL, and no new-site alerts will fire until you resume. Recording turns back on by itself the next time Tidemark starts.", "Shell")
-                : tr("Every request Surge sees will be saved to PostgreSQL again, and alerts turn back on. Nothing from the paused period is filled in.", "Shell"))
         }
-        .dialogIcon(Image(nsImage: NSApp.applicationIconImage))
     }
 }

@@ -39,7 +39,8 @@ struct SidebarFooter: View {
     }
 }
 
-/// `● Surge watching requests` with the dot colored by link health and the error as help text.
+/// `● Surge watching requests` with the dot colored by link health and, while the link is down, the error as
+/// help text.
 private struct SidebarStatusLine: View {
     var name: String
     var status: LinkStatus
@@ -96,13 +97,10 @@ enum SidebarStatusText {
         }
     }
 
-    /// The failure (in the current UI language), or the connection detail, for the line's tooltip.
+    /// The failure (in the current UI language) for the line's tooltip. A healthy line has none, as in the page.
     @MainActor
     static func help(_ status: LinkStatus) -> String? {
-        switch status {
-        case .failed(let error): CaptureEngine.message(for: error)
-        case .connected(let detail): detail.isEmpty ? nil : detail
-        default: nil
-        }
+        guard case .failed(let error) = status else { return nil }
+        return CaptureEngine.message(for: error)
     }
 }

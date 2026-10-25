@@ -1,147 +1,218 @@
-import AppKit
 import SwiftUI
 
 /// The main window's Liquid Glass sidebar: Mac menu, Capture and Analyze destinations, monitored and
 /// archived apps, and the Surge / PostgreSQL status footer.
+///
+/// Laid out like the page rather than as a system sidebar list: 30 pt rows one point apart, and the selected
+/// row on the accent wash with its text in ink. The Mac menu and the footer stay put while the rows scroll.
 struct ShellSidebar: View {
     @Environment(AppModel.self) private var model
-    @SceneStorage("sidebar.archivedExpanded") private var archivedExpanded = false
+    @SceneStorage("sidebar.archivedExpanded") private var archivedExpanded = true
 
     var body: some View {
-        let nav = model.nav
-        let glass = SidebarGlassStyle(preference: model.preferences.glass)
-        List(selection: Binding(get: { nav.page }, set: { if let page = $0 { nav.page = page } })) {
-            Section {
-                SidebarDestinationRow(title: tr("Requests", "Sidebar"), symbol: "line.3.horizontal", tint: Theme.tileRequests) {
-                    Text(Fmt.rate(model.live.recording ? model.live.rate : 0))
-                        .font(Theme.mono(11))
-                        .foregroundStyle(Theme.inkGlass)
-                        .contentTransition(.numericText())
-                }
-                .tag(Page.requests)
-
-                SidebarDestinationRow(title: tr("Notifications", "Sidebar"), symbol: "circle.fill", tint: Theme.tileNotifications, symbolScale: 0.36) {
-                    if model.alerts.unreadCount > 0 {
-                        CountBadge(count: model.alerts.unreadCount, style: .unread)
-                    }
-                }
-                .tag(Page.notifications)
-            } header: {
-                SidebarSectionHeader(title: tr("Capture", "Sidebar"))
-            }
-
-            Section {
-                SidebarDestinationRow(title: tr("Domains & IPs", "Sidebar"), symbol: "circle", tint: Theme.tileInventory, symbolScale: 0.52) { EmptyView() }
-                    .tag(Page.inventory)
-                SidebarDestinationRow(title: tr("Site Probe", "Sidebar"), symbol: "diamond.fill", tint: Theme.tileProbe, symbolScale: 0.42) { EmptyView() }
-                    .tag(Page.probe)
-                SidebarDestinationRow(title: tr("Egress IP", "Sidebar"), symbol: "triangle.fill", tint: Theme.tileEgress, symbolScale: 0.42) { EmptyView() }
-                    .tag(Page.egress)
-            } header: {
-                SidebarSectionHeader(title: tr("Analyze", "Sidebar"))
-            }
-
-            Section {
-                ForEach(model.catalog.active) { app in
-                    SidebarAppRow(app: app)
-                        .tag(Page.app(app.id))
-                }
-            } header: {
-                HStack(spacing: 4) {
-                    SidebarSectionHeader(title: tr("Monitored Apps", "Sidebar"))
-                    Spacer(minLength: 0)
-                    Button {
-                        nav.openAddApp()
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 12, weight: .semibold))
-                            .frame(width: 20, height: 20)
-                            .contentShape(.rect(cornerRadius: 6))
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.inkGlass)
-                    .help(tr("Monitor an App…", "Sidebar"))
-                    .accessibilityLabel(tr("Monitor an App…", "Sidebar"))
-                }
-            }
-
-            let archived = model.catalog.archived
-            if !archived.isEmpty {
-                Section(isExpanded: $archivedExpanded) {
-                    ForEach(archived) { app in
-                        SidebarArchivedRow(app: app)
-                            .tag(Page.app(app.id))
-                    }
-                } header: {
-                    HStack(spacing: 5) {
-                        SidebarSectionHeader(title: tr("Archived", "Sidebar"))
-                        Text(String(archived.count))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Theme.inkGlass)
-                    }
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .scrollContentBackground(.hidden)
-        .background { SidebarGlassWash(style: glass) }
-        .safeAreaBar(edge: .top) {
+        VStack(spacing: 0) {
             SidebarMacPicker()
                 .padding(.horizontal, 10)
-                .padding(.bottom, 6)
-        }
-        .safeAreaBar(edge: .bottom) {
+                .padding(.bottom, 8)
+                // The open Mac menu lies over the rows below.
+                .zIndex(1)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 1) {
+                    rows
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+            }
+            // No line or fade at either end: the page draws only the footer's own top border.
+            .scrollEdgeEffectHidden(true, for: .all)
+
             SidebarFooter()
+                .overlay(alignment: .top) {
+                    Rectangle().fill(Theme.line).frame(height: 0.5)
+                }
         }
+        .foregroundStyle(Theme.ink)
+        .background { SidebarGlassWash(opacity: GlassSurface.sidebar.opacity(preference: model.preferences.glass)) }
         .animation(.smooth(duration: 0.25), value: model.catalog.apps.map(\.id))
+    }
+
+    @ViewBuilder
+    private var rows: some View {
+        SidebarSectionHeader(title: tr("Capture", "Sidebar"), top: 4)
+        SidebarRow(page: .requests) {
+            SidebarGlyph(symbol: "line.3.horizontal", tint: Theme.tileRequests, scale: 0.5)
+            SidebarRowTitle(tr("Requests", "Sidebar"))
+            Text(Fmt.rate(model.live.recording ? model.live.rate : 0))
+                .font(Theme.mono(11))
+                .foregroundStyle(Theme.inkGlass)
+                .contentTransition(.numericText())
+        }
+        SidebarRow(page: .notifications) {
+            SidebarGlyph(symbol: "circle.fill", tint: Theme.tileNotifications, scale: 0.36)
+            SidebarRowTitle(tr("Notifications", "Sidebar"))
+            if model.alerts.unreadCount > 0 {
+                CountBadge(count: model.alerts.unreadCount, style: .unread)
+            }
+        }
+
+        SidebarSectionHeader(title: tr("Analyze", "Sidebar"))
+        SidebarRow(page: .inventory) {
+            SidebarGlyph(symbol: "circle", tint: Theme.tileInventory, scale: 0.52)
+            SidebarRowTitle(tr("Domains & IPs", "Sidebar"))
+        }
+        SidebarRow(page: .probe) {
+            SidebarGlyph(symbol: "diamond.fill", tint: Theme.tileProbe, scale: 0.42)
+            SidebarRowTitle(tr("Site Probe", "Sidebar"))
+        }
+        SidebarRow(page: .egress) {
+            SidebarGlyph(symbol: "triangle.fill", tint: Theme.tileEgress, scale: 0.42)
+            SidebarRowTitle(tr("Egress IP", "Sidebar"))
+        }
+
+        SidebarMonitoredHeader()
+        ForEach(model.catalog.active) { app in
+            SidebarAppRow(app: app)
+        }
+
+        let archived = model.catalog.archived
+        if !archived.isEmpty {
+            SidebarArchivedHeader(count: archived.count, isExpanded: $archivedExpanded)
+            if archivedExpanded {
+                ForEach(archived) { app in
+                    SidebarArchivedRow(app: app)
+                }
+            }
+        }
     }
 }
 
-/// A tint of the prototype's glass color laid over the system sidebar glass; empty at the Clear end.
+/// The design's sidebar glass color, laid over the system sidebar glass at the sidebar's opacity.
 private struct SidebarGlassWash: View {
-    var style: SidebarGlassStyle
+    var opacity: Double
 
     var body: some View {
         Rectangle()
-            .fill(SidebarGlassStyle.glassColor.opacity(style.washOpacity))
+            .fill(GlassSurface.color.opacity(opacity))
             .ignoresSafeArea()
             .allowsHitTesting(false)
-            .animation(.easeInOut(duration: 0.2), value: style.washOpacity)
+            .animation(.easeInOut(duration: 0.2), value: opacity)
     }
 }
 
-/// Section title in the prototype's sidebar style (11 pt semibold, glass ink).
+/// Section title in the page's sidebar style (11 pt semibold, glass ink), 14 pt below the rows above it.
 private struct SidebarSectionHeader: View {
     var title: String
+    var top: CGFloat = 14
 
     var body: some View {
         Text(title)
             .font(Theme.sectionLabel)
             .foregroundStyle(Theme.inkGlass)
+            .padding(EdgeInsets(top: top, leading: 8, bottom: 4, trailing: 8))
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
-/// A page destination: colored glyph tile, title and a trailing accessory.
-private struct SidebarDestinationRow<Accessory: View>: View {
-    var title: String
-    var symbol: String
-    var tint: Color
-    var symbolScale: CGFloat = 0.5
-    @ViewBuilder var accessory: Accessory
+/// `Monitored Apps` and its `+` button, which opens Monitor an App.
+private struct SidebarMonitoredHeader: View {
+    @Environment(AppModel.self) private var model
+    @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 9) {
-            SidebarGlyph(symbol: symbol, tint: tint, scale: symbolScale)
-            Text(title)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            accessory
+        HStack(spacing: 0) {
+            Text(tr("Monitored Apps", "Sidebar"))
+                .font(Theme.sectionLabel)
+                .foregroundStyle(Theme.inkGlass)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
+            Button {
+                model.nav.openAddApp()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.inkGlass)
+                    .frame(width: 20, height: 20)
+                    .background(isHovering ? Theme.fill2 : .clear, in: .rect(cornerRadius: 6, style: .continuous))
+                    .contentShape(.rect(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .help(tr("Monitor an App…", "Sidebar"))
+            .accessibilityLabel(tr("Monitor an App…", "Sidebar"))
         }
-        .frame(minHeight: 26)
+        .padding(EdgeInsets(top: 14, leading: 8, bottom: 4, trailing: 2))
     }
 }
 
-/// `GlyphTile` with a per-symbol scale, so the dot / ring / diamond / triangle glyphs match the prototype.
+/// `› Archived 1`: the archived apps' section title, which shows or hides them. Open by default, as in the page.
+private struct SidebarArchivedHeader: View {
+    var count: Int
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.smooth(duration: 0.2)) { isExpanded.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .frame(width: 8)
+                Text(tr("Archived", "Sidebar"))
+                    .font(Theme.sectionLabel)
+                Text(String(count))
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(Theme.inkGlass)
+            .padding(EdgeInsets(top: 12, leading: 8, bottom: 4, trailing: 8))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// One destination: a 30 pt row that opens `page`, on the accent wash while it is the page shown.
+private struct SidebarRow<Content: View>: View {
+    @Environment(AppModel.self) private var model
+    var page: Page
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        let selected = model.nav.page == page
+        Button {
+            model.nav.page = page
+        } label: {
+            HStack(spacing: 9) {
+                content
+            }
+            .font(.system(size: 13))
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .leading)
+            .background(selected ? Theme.accentTint : .clear, in: .rect(cornerRadius: 8, style: .continuous))
+            .contentShape(.rect(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// A row's title, taking the room its trailing counters leave.
+private struct SidebarRowTitle: View {
+    var title: String
+
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        Text(title)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// `GlyphTile` with a per-symbol scale, so the dot / ring / diamond / triangle glyphs match the page.
 private struct SidebarGlyph: View {
     var symbol: String
     var tint: Color
@@ -160,7 +231,8 @@ private struct SidebarGlyph: View {
     }
 }
 
-/// A monitored app: tile, name, "Not on this Mac" when absent on the selected Mac, and the 24 h NEW count.
+/// A monitored app: tile, name, "Not on this Mac" when absent on the selected Mac (the whole row dimmed, its path
+/// in the tooltip), and the 24 h NEW count.
 private struct SidebarAppRow: View {
     @Environment(AppModel.self) private var model
     var app: MonitoredApp
@@ -169,28 +241,23 @@ private struct SidebarAppRow: View {
         let context = model.devices.contextDeviceID
         let absent = model.catalog.isInstalled(app.id, on: context) == false
         let newCount = model.catalog.stats[app.id]?.newIn24h ?? 0
-        HStack(spacing: 9) {
-            AppTile(app: app, size: 20, dimmed: absent)
-            Text(app.name)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .opacity(absent ? 0.5 : 1)
-            Spacer(minLength: 4)
+        SidebarRow(page: .app(app.id)) {
+            AppTile(app: app, size: 20)
+                .saturation(absent ? 0 : 1)
+            SidebarRowTitle(app.name)
             if absent {
                 Text(absentShortLabel(context: context))
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.inkGlass)
                     .lineLimit(1)
-                    .opacity(0.8)
+                    .fixedSize()
             }
             if newCount > 0 {
                 CountBadge(count: newCount, style: .new)
-                    .help(trn("%lld new domain or IP in the last 24 hours", "%lld new domains and IPs in the last 24 hours", newCount, "Sidebar"))
             }
         }
-        .frame(minHeight: 26)
-        .help(absent ? absentLongLabel(context: context) : app.path)
-        .contextMenu { SidebarAppMenu(model: model, app: app) }
+        .opacity(absent ? 0.5 : 1)
+        .help(absent ? absentLongLabel(context: context) : "")
     }
 
     private func absentShortLabel(context: DeviceID) -> String {
@@ -206,35 +273,13 @@ private struct SidebarAppRow: View {
 
 /// An archived app, greyed out.
 private struct SidebarArchivedRow: View {
-    @Environment(AppModel.self) private var model
     var app: MonitoredApp
 
     var body: some View {
-        HStack(spacing: 9) {
+        SidebarRow(page: .app(app.id)) {
             AppTile(app: app, size: 20, dimmed: true)
-            Text(app.name)
-                .lineLimit(1)
+            SidebarRowTitle(app.name)
                 .foregroundStyle(Theme.inkGlass)
-            Spacer(minLength: 0)
         }
-        .frame(minHeight: 26)
-        .contextMenu { SidebarAppMenu(model: model, app: app) }
-    }
-}
-
-/// Right-click menu of an app row (menus are built outside the environment chain, so the model is passed in).
-private struct SidebarAppMenu: View {
-    var model: AppModel
-    var app: MonitoredApp
-
-    var body: some View {
-        Button(tr("Open", "Sidebar")) { model.nav.open(.app(app.id), tab: .requests) }
-        Button(tr("Domains & IPs", "Sidebar")) { model.nav.open(.app(app.id), tab: .inventory) }
-        Button(tr("Process Tree", "Sidebar")) { model.nav.open(.app(app.id), tab: .tree) }
-        Divider()
-        Button(tr("Show in Finder", "Sidebar")) {
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: app.path)])
-        }
-        .disabled(!FileManager.default.fileExists(atPath: app.path))
     }
 }

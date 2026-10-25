@@ -74,7 +74,7 @@ struct CaptureEngineTests {
         #expect(model.live.rateHistory.last == 2, "the closed second holds both new requests")
     }
 
-    @Test func listsNewAlertsForTheScope() {
+    @Test func listsNewAlertsFromEveryMac() {
         let (engine, model) = makeEngine()
         let me = model.preferences.thisDeviceID
         let alert = AlertItem(id: 41, deviceID: me, appID: UUID(), kind: .domain, scope: .site, value: "api.notion.com", site: "notion.com",
@@ -88,11 +88,12 @@ struct CaptureEngineTests {
 
         model.devices.scope = .device(UUID())
         var other = CaptureUIUpdate()
-        var hidden = alert
-        hidden.id = 42
-        other.alerts = [hidden]
+        var shown = alert
+        shown.id = 42
+        other.alerts = [shown]
         engine.apply(other)
-        #expect(model.alerts.items.map(\.id) == [41], "another Mac's scope hides this Mac's alerts")
+        #expect(model.alerts.items.map(\.id) == [42, 41], "another Mac's scope still lists this Mac's alerts")
+        #expect(model.alerts.unreadCount == 2)
     }
 
     @Test func monitorsAnAppFromItsBundle() async throws {

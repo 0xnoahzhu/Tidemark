@@ -196,10 +196,10 @@ migration runner and every time limit.
 ## Multi-Mac
 
 Every row carries `device_id`. Each Mac records and alerts on its own requests, and every Mac posts the
-notifications of every Mac's alerts. The sidebar's Mac menu
-scopes every page to one Mac or all. The live table merges this Mac's stream with rows other Macs wrote
-(polled by `updated_at` through `requestsWritten(after:)`, with a few seconds of overlap). "Mark All as
-Read" only touches the selected Mac's rows. Apps are shared by bundle path; each Mac reports in `app_installs` whether the
+notifications of every Mac's alerts. The sidebar's Mac menu scopes every page to one Mac or all, except alerts:
+the Notifications page, its unread count, "Mark All as Read" and the menu bar list every Mac's alerts. The live
+table merges this Mac's stream with rows other Macs wrote (polled by `updated_at` through
+`requestsWritten(after:)`, with a few seconds of overlap). Apps are shared by bundle path; each Mac reports in `app_installs` whether the
 path exists locally ("Installed on MacBook Pro · Mac mini (Office) · Path not found").
 
 ## Site Probe
@@ -250,9 +250,13 @@ reused for an hour.
 The window follows the "Three-pane · Native" direction of the design: a Liquid Glass sidebar (Mac menu,
 Capture, Analyze, Monitored Apps, Archived, Surge/PostgreSQL status footer), a content column per page,
 and an inspector beside the Requests page's live table (History has none). Native controls are preferred
-(segmented pickers, switches, `Table`, search fields, sheets, `confirmationDialog`/alerts). Colors come from
-`Theme` (exact OKLCH conversions of the design tokens); app tiles use the real app icon when the bundle
-exists locally.
+(switches, `Table`, search fields, sheets); the pause / resume and Stop monitoring confirmations are the design's
+glass dialogs (`GlassDialog`), laid over the whole window. Colors come from `Theme` (exact OKLCH conversions of
+the design tokens); app tiles use the real app icon when the bundle exists locally. The sidebar, its Mac menu, the
+menu bar panel and the dialogs lay the design's glass color over the system glass at an opacity of their own
+(`GlassSurface`: at least .42 for the sidebar, .88 for the Mac menu, .85 for the panel, .6 for the pause dialog
+and .85 for the monitoring one, more as Settings › General › Liquid Glass moves toward Tinted), so their text
+stays legible over any background.
 History runs its page query and its histogram side by side: the rows appear as soon as the page arrives, a
 histogram that fails leaves them in place (the chart area says it is unavailable and why), and a newer query
 cancels the older one's histogram.

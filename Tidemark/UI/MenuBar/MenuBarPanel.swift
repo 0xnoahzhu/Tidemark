@@ -4,8 +4,10 @@ import SwiftUI
 /// Content of the menu bar panel: recording switch, today's counters, the current egress IP, the latest
 /// first-contact alerts and the Open Window / Settings… / Quit footer.
 ///
-/// Hosted by `StatusItemController` in a Liquid Glass panel. Every action calls `onDismiss` first so the
-/// panel closes before the main window or Settings come forward.
+/// Hosted by `StatusItemController` in a Liquid Glass panel, over which it lays the design's panel glass color
+/// (`GlassSurface.panel`, which follows Settings › General › Liquid Glass), so its text stays legible over any
+/// desktop. Every action calls `onDismiss` first so the panel closes before the main window or Settings come
+/// forward.
 struct MenuBarPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
@@ -16,6 +18,7 @@ struct MenuBarPanel: View {
     var onDismiss: @MainActor () -> Void = {}
 
     static let width: CGFloat = 320
+    static let cornerRadius: CGFloat = 16
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -31,17 +34,22 @@ struct MenuBarPanel: View {
         .padding(12)
         .frame(width: Self.width)
         .foregroundStyle(Theme.ink)
+        .background(
+            GlassSurface.panel.tint(preference: model.preferences.glass),
+            in: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+        )
     }
 
     // MARK: Header
 
     private var header: some View {
         HStack(spacing: 10) {
+            // The asset keeps the system icon margin; drawn at 45 pt its tile fills the design's 36 pt.
             Image("BrandIcon")
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 34, height: 34)
-                .padding(-3)
+                .frame(width: 45, height: 45)
+                .padding(-4.5)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: "Tidemark")
@@ -113,27 +121,25 @@ struct MenuBarPanel: View {
 
     // MARK: Latest alerts
 
+    /// The `LATEST` title and the three newest alerts, spaced like every other part of the panel.
+    @ViewBuilder
     private var latest: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(tr("Latest", "MenuBar").uppercased(with: localizer.locale))
-                .font(.system(size: 10.5, weight: .semibold))
-                .tracking(0.6)
+        Text(tr("Latest", "MenuBar").uppercased(with: localizer.locale))
+            .font(.system(size: 10.5, weight: .semibold))
+            .tracking(0.6)
+            .foregroundStyle(Theme.ink2)
+            .padding(.horizontal, 2)
+            .padding(.top, 2)
+        let items = Array(model.alerts.items.prefix(3))
+        if items.isEmpty {
+            Text(tr("Nothing here. New domains and IPs show up the first time they're seen.", "MenuBar"))
+                .font(.system(size: 11.5))
                 .foregroundStyle(Theme.ink2)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 2)
-                .padding(.top, 2)
-                .padding(.bottom, 2)
-            let items = Array(model.alerts.items.prefix(3))
-            if items.isEmpty {
-                Text(tr("Nothing here. New domains and IPs show up the first time they're seen.", "MenuBar"))
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 2)
-                    .padding(.vertical, 4)
-            } else {
-                ForEach(items) { alert in
-                    MenuBarAlertRow(alert: alert) { open(alert) }
-                }
+        } else {
+            ForEach(items) { alert in
+                MenuBarAlertRow(alert: alert) { open(alert) }
             }
         }
     }
@@ -141,27 +147,24 @@ struct MenuBarPanel: View {
     // MARK: Footer
 
     private var footer: some View {
-        GlassEffectContainer {
-            HStack(spacing: 6) {
-                Button {
-                    showMainWindow()
-                } label: {
-                    Text(tr("Open Window", "MenuBar")).frame(maxWidth: .infinity)
-                }
-                Button(tr("Settings…", "MenuBar")) {
-                    onDismiss()
-                    NSApp.activate()
-                    openSettings()
-                }
-                Button(tr("Quit", "MenuBar")) {
-                    onDismiss()
-                    AppDelegate.requestQuit()
-                }
-                .foregroundStyle(Theme.ink2)
+        HStack(spacing: 6) {
+            Button {
+                showMainWindow()
+            } label: {
+                Text(tr("Open Window", "MenuBar")).frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glass)
-            .font(.system(size: 12, weight: .medium))
+            Button(tr("Settings…", "MenuBar")) {
+                onDismiss()
+                NSApp.activate()
+                openSettings()
+            }
+            Button(tr("Quit", "MenuBar")) {
+                onDismiss()
+                AppDelegate.requestQuit()
+            }
+            .foregroundStyle(Theme.ink2)
         }
+        .buttonStyle(MenuBarPanelButtonStyle())
         .padding(.top, 8)
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.line).frame(height: 0.5)
@@ -185,6 +188,19 @@ struct MenuBarPanel: View {
         model.nav.appSelectedHost = alert.kind == .domain ? alert.value : nil
         model.nav.open(.app(alert.appID), tab: .inventory)
         showMainWindow()
+    }
+}
+
+/// The footer's flat buttons: 28 pt high on the design's fill, darker while pressed.
+private struct MenuBarPanelButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .medium))
+            .lineLimit(1)
+            .padding(.horizontal, 11)
+            .frame(height: 28)
+            .background(configuration.isPressed ? Theme.fill2 : Theme.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -248,7 +264,6 @@ struct MenuBarEgressValue: View {
             .font(Theme.mono(12, weight: .semibold))
             .lineLimit(1)
             .textSelection(.enabled)
-            .help(ip)
     }
 }
 
@@ -267,7 +282,6 @@ private struct MenuBarPolicyChip: View {
             .padding(.vertical, 1)
             .background(tint.background, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .foregroundStyle(tint.foreground)
-            .help(policyPath.joined(separator: " › "))
     }
 }
 
@@ -278,13 +292,11 @@ private struct MenuBarAlertRow: View {
     var alert: AlertItem
     var action: () -> Void
 
-    @State private var hovering = false
-
     var body: some View {
         Button(action: action) {
             HStack(spacing: 9) {
                 AppTile(identity: identity, size: 22)
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(value)
                         .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
@@ -300,14 +312,11 @@ private struct MenuBarAlertRow: View {
                     .foregroundStyle(Theme.ink3)
                     .monospacedDigit()
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 2)
             .padding(.vertical, 3)
-            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .background(hovering ? Theme.fill : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, -2)
-        .onHover { hovering = $0 }
         .accessibilityHint(tr("Shows this app's domains and IPs", "MenuBar"))
     }
 

@@ -45,28 +45,6 @@
         }
       }
     },
-    "%lld new domain or IP in the last 24 hours" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "24 小时内新增 %lld 个域名和 IP"
-          }
-        }
-      }
-    },
-    "%lld new domains and IPs in the last 24 hours" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "24 小时内新增 %lld 个域名和 IP"
-          }
-        }
-      }
-    },
     "All Macs" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -188,17 +166,6 @@
         }
       }
     },
-    "No Macs match" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有匹配的 Mac"
-          }
-        }
-      }
-    },
     "not connected" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -276,17 +243,6 @@
         }
       }
     },
-    "Open" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开"
-          }
-        }
-      }
-    },
     "paused" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -294,17 +250,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已暂停"
-          }
-        }
-      }
-    },
-    "Process Tree" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "进程树"
           }
         }
       }
@@ -327,28 +272,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "设置…"
-          }
-        }
-      }
-    },
-    "Show data from one Mac or from all of them" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "查看某一台 Mac 或全部 Mac 的数据"
-          }
-        }
-      }
-    },
-    "Show in Finder" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在访达中显示"
           }
         }
       }

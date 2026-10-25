@@ -59,12 +59,12 @@ struct SettingsWindowGlass: View {
 
     /// The design's alpha for the Settings window.
     static func opacity(_ preference: Double) -> Double {
-        max(0.72, 0.16 + 0.76 * SidebarGlassStyle(preference: preference).amount)
+        GlassSurface.settings.opacity(preference: preference)
     }
 
     var body: some View {
         SettingsBehindWindowBlur()
-            .overlay(SidebarGlassStyle.glassColor.opacity(Self.opacity(preference)))
+            .overlay(GlassSurface.settings.tint(preference: preference))
             .ignoresSafeArea()
     }
 }

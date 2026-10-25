@@ -4,8 +4,8 @@ import SwiftUI
 /// Page of one monitored app: header, stats and the Requests / Domains & IPs / Process Tree tabs.
 ///
 /// The app's tile, name and bundle path live in the window toolbar (title, subtitle and a leading tile);
-/// the tab switch is the toolbar's trailing item. The page also presents the "Stop monitoring" and
-/// "Delete" confirmations whenever `Navigation.confirmMonitoringToggle` / `confirmDeleteApp` name this app.
+/// the tab switch is the toolbar's trailing item. The page also presents the "Delete" sheet whenever
+/// `Navigation.confirmDeleteApp` names this app; the main window asks before monitoring stops or restarts.
 struct AppDetailView: View {
     @Environment(AppModel.self) private var model
     var appID: AppID
@@ -74,24 +74,9 @@ struct AppDetailView: View {
         .task(id: statsKey) {
             await refreshStats(statsKey)
         }
-        .confirmationDialog(monitoringTitle(app), isPresented: monitoringDialog(app), titleVisibility: .visible) {
-            let monitoring = model.catalog.isMonitoring(app.id)
-            Button(monitoring ? tr("Stop Monitoring", "AppDetail") : tr("Start Monitoring", "AppDetail"),
-                   role: monitoring ? .destructive : nil) {
-                model.capture.setMonitoring(app.id, enabled: !monitoring)
-            }
-            Button(tr("Cancel", "AppDetail"), role: .cancel) {}
-        } message: {
-            Text(monitoringMessage(app))
+        .sheet(isPresented: deleteDialog(app)) {
+            AppDeleteConfirmation(app: app, requests: stats.requests) { delete(app) }
         }
-        .confirmationDialog(trf("Delete %@?", "AppDetail", app.name), isPresented: deleteDialog(app), titleVisibility: .visible) {
-            Button(tr("Delete", "AppDetail"), role: .destructive) { delete(app) }
-            Button(tr("Cancel", "AppDetail"), role: .cancel) {}
-        } message: {
-            Text(trf("This removes %1$@'s domain and IP lists, its alerts and its settings. Its %2$@ requests stay in the global request log, because every request is recorded anyway.",
-                     "AppDetail", app.name, Fmt.count(stats.requests)))
-        }
-        .dialogIcon(dialogIconImage(app))
         .alert(error: $actionError) {
             Button(tr("OK", "AppDetail")) {}
         }
@@ -273,39 +258,11 @@ struct AppDetailView: View {
 
     // MARK: Dialogs
 
-    private func monitoringDialog(_ app: MonitoredApp) -> Binding<Bool> {
-        Binding(
-            get: { model.nav.confirmMonitoringToggle == app.id },
-            set: { if !$0, model.nav.confirmMonitoringToggle == app.id { model.nav.confirmMonitoringToggle = nil } }
-        )
-    }
-
     private func deleteDialog(_ app: MonitoredApp) -> Binding<Bool> {
         Binding(
             get: { model.nav.confirmDeleteApp == app.id },
             set: { if !$0, model.nav.confirmDeleteApp == app.id { model.nav.confirmDeleteApp = nil } }
         )
-    }
-
-    private func monitoringTitle(_ app: MonitoredApp) -> String {
-        model.catalog.isMonitoring(app.id)
-            ? trf("Stop monitoring %@?", "AppDetail", app.name)
-            : trf("Monitor %@ again?", "AppDetail", app.name)
-    }
-
-    private func monitoringMessage(_ app: MonitoredApp) -> String {
-        model.catalog.isMonitoring(app.id)
-            ? trf("Its requests are still recorded in the global log, but they won't be added to %@'s domain and IP lists or trigger alerts. Monitoring turns back on the next time Tidemark starts.", "AppDetail", app.name)
-            : trf("New domains and IPs from %@ and everything it launches will be added to its lists and alert again.", "AppDetail", app.name)
-    }
-
-    /// The app's icon (or its letter tile) for the confirmation dialogs; rendered only while one is up.
-    private func dialogIconImage(_ app: MonitoredApp) -> Image? {
-        guard model.nav.confirmDeleteApp == app.id || model.nav.confirmMonitoringToggle == app.id else { return nil }
-        if let icon = AppIconCache.shared.icon(for: app.path) { return Image(nsImage: icon) }
-        let renderer = ImageRenderer(content: LetterTile(letter: app.tileLetter, color: Theme.tileColor(hue: app.tileHue), size: 64))
-        renderer.scale = 2
-        return renderer.nsImage.map { Image(nsImage: $0) }
     }
 
     // MARK: Actions

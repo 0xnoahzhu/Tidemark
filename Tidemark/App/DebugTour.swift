@@ -92,7 +92,7 @@ enum DebugTour {
 
         nav.confirmRecordingToggle = true
         await pause(1.5)
-        snapshotSheet(to: directory.appendingPathComponent("\(prefix)-10-pause-dialog.png"))
+        snapshotMain(to: directory.appendingPathComponent("\(prefix)-10-pause-dialog.png"))
         nav.confirmRecordingToggle = false
         await pause(1)
 

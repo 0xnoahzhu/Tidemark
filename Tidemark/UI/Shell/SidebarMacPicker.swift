@@ -2,8 +2,9 @@ import SwiftUI
 
 /// The sidebar's Mac menu: shows the current device scope and opens a searchable list of Macs.
 ///
-/// It sits at the top of the sidebar like a toolbar platter: a Liquid Glass capsule whose glass follows the
-/// Settings › General › Liquid Glass preference (clear at one end, tinted at the other).
+/// As in the page, the list drops down 6 pt under the picker at the picker's width, without an arrow, over the
+/// rows below (the sidebar draws the picker above them). A click outside the picker and the list, or Escape,
+/// closes it.
 struct SidebarMacPicker: View {
     @Environment(AppModel.self) private var model
 
@@ -12,7 +13,6 @@ struct SidebarMacPicker: View {
 
     var body: some View {
         let current = SidebarMacOption.current(in: model.devices)
-        let style = SidebarGlassStyle(preference: model.preferences.glass)
         Button {
             isPresented.toggle()
         } label: {
@@ -30,31 +30,55 @@ struct SidebarMacPicker: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.inkGlass)
                     .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8.5, weight: .bold))
+                Image(systemName: "arrowtriangle.down.fill")
+                    .font(.system(size: 6))
                     .foregroundStyle(Theme.inkGlass)
             }
             .padding(.horizontal, 10)
-            .frame(height: 30)
-            .contentShape(.rect(cornerRadius: 10))
+            .frame(height: Self.height)
+            .contentShape(.rect(cornerRadius: 9))
         }
         .buttonStyle(.plain)
-        .background(isHovering || isPresented ? Theme.fill : .clear, in: .rect(cornerRadius: 10, style: .continuous))
-        .glassEffect(style.glass.interactive(), in: .rect(cornerRadius: 10, style: .continuous))
+        .background(isHovering || isPresented ? Theme.fill2 : Theme.fill, in: .rect(cornerRadius: 9, style: .continuous))
         .onHover { isHovering = $0 }
-        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
-            SidebarMacMenu(model: model) { isPresented = false }
-        }
         .accessibilityLabel(tr("Mac", "Sidebar"))
         .accessibilityValue(current.label)
-        .help(tr("Show data from one Mac or from all of them", "Sidebar"))
+        .overlay(alignment: .top) {
+            if isPresented {
+                VStack(spacing: 6) {
+                    // The picker's own area, so a click on it toggles the list instead of closing it first.
+                    Color.clear
+                        .frame(height: Self.height)
+                        .allowsHitTesting(false)
+                    SidebarMacMenu { isPresented = false }
+                }
+                .background {
+                    // A click outside the picker and the list, or Escape, closes it.
+                    EventMonitor(
+                        onKeyDown: { event in
+                            guard event.keyCode == EventMonitor.escapeKey else { return false }
+                            isPresented = false
+                            return true
+                        },
+                        onMouseDown: { inside in
+                            if !inside { isPresented = false }
+                        }
+                    )
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                // Laid out in the picker's frame and drawn below it.
+                .frame(height: Self.height, alignment: .top)
+            }
+        }
     }
+
+    static let height: CGFloat = 30
 }
 
-/// Contents of the Mac menu popover: a "Find a Mac" field, "All Macs" and every Mac in the database.
-/// The popover is hosted in its own window, so the model is passed in.
+/// The open Mac menu: a "Find a Mac" field, "All Macs" and every Mac whose name matches, on the page's menu
+/// glass (`max(.88, glassA)`, radius 10, a hairline and a soft shadow).
 private struct SidebarMacMenu: View {
-    var model: AppModel
+    @Environment(AppModel.self) private var model
     var dismiss: () -> Void
 
     @State private var query = ""
@@ -63,31 +87,38 @@ private struct SidebarMacMenu: View {
     var body: some View {
         let options = SidebarMacOption.options(in: model.devices, matching: query)
         VStack(alignment: .leading, spacing: 1) {
-            TextField(tr("Find a Mac", "Sidebar"), text: $query, prompt: Text(tr("Find a Mac", "Sidebar")))
-                .textFieldStyle(.bordered)
-                .textInputBorderShape(.capsule)
-                .focused($searchFocused)
-                .padding(.bottom, 5)
-                .onSubmit {
-                    if let first = options.first(where: { $0.scope != .all }) ?? options.first { pick(first) }
-                }
+            HStack(spacing: 6) {
+                Circle()
+                    .strokeBorder(Theme.ink3, lineWidth: 1.5)
+                    .frame(width: 8, height: 8)
+                TextField(tr("Find a Mac", "Sidebar"), text: $query, prompt: Text(tr("Find a Mac", "Sidebar")))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .focused($searchFocused)
+                    .onSubmit {
+                        if let first = options.first(where: { $0.scope != .all }) ?? options.first { pick(first) }
+                    }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .background(Theme.fill, in: .rect(cornerRadius: 6, style: .continuous))
+            .padding(.bottom, 4)
             ForEach(options) { option in
                 SidebarMacMenuRow(option: option, isSelected: option.scope == model.devices.scope) {
                     pick(option)
                 }
             }
-            if options.isEmpty {
-                Text(tr("No Macs match", "Sidebar"))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.ink3)
-                    .padding(.horizontal, 8)
-                    .frame(height: 28)
-            }
         }
-        .padding(6)
-        .frame(width: 236)
+        .padding(5)
+        .frame(maxWidth: .infinity)
+        .background(GlassSurface.menu.tint(preference: model.preferences.glass), in: Self.shape)
+        .glassEffect(.regular, in: Self.shape)
+        .overlay { Self.shape.strokeBorder(.black.opacity(0.18), lineWidth: 0.5) }
+        .shadow(color: .black.opacity(0.22), radius: 15, y: 10)
         .onAppear { searchFocused = true }
     }
+
+    private static let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
 
     private func pick(_ option: SidebarMacOption) {
         if model.devices.scope != option.scope {
@@ -116,7 +147,7 @@ private struct SidebarMacMenuRow: View {
                     .fill(option.color)
                     .frame(width: 8, height: 8)
                 Text(option.label)
-                    .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+                    .font(.system(size: 12.5))
                     .foregroundStyle(Theme.ink)
                     .lineLimit(1)
                 Spacer(minLength: 6)
@@ -164,7 +195,7 @@ struct SidebarMacOption: Identifiable, Equatable {
         )
     }
 
-    /// "All Macs" followed by every Mac whose name contains `query`.
+    /// "All Macs", whatever the query, followed by every Mac whose name contains `query`.
     @MainActor
     static func options(in state: DeviceState, matching query: String) -> [SidebarMacOption] {
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -172,8 +203,7 @@ struct SidebarMacOption: Identifiable, Equatable {
         let devices = sortedDevices(state)
             .filter { needle.isEmpty || $0.name.lowercased().contains(needle) }
             .map { option(for: $0, in: state) }
-        let showAll = needle.isEmpty || all.label.lowercased().contains(needle)
-        return (showAll ? [all] : []) + devices
+        return [all] + devices
     }
 
     /// This Mac first, then the others by name.

@@ -35,6 +35,8 @@ enum Theme {
     static let accentInk = Color.dynamic(light: OKLCH.nsColor(0.45, 0.13, 240), dark: OKLCH.nsColor(0.8, 0.1, 240))
     static let onAccent = Color.white
     static let onAccent2 = Color.white.opacity(0.75)
+    /// Fill of a confirming button that stops or deletes something (Pause, Stop Monitoring, Delete).
+    static let destructive = Color(oklch: 0.6, 0.2, 27)
 
     // Status
     static let failed = Color(oklch: 0.64, 0.19, 27)

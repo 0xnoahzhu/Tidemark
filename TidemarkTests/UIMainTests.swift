@@ -829,22 +829,21 @@ struct NotificationsPresentationTests {
 
 @MainActor
 struct ShellTests {
+    /// Each glass surface takes the design's `max(floor, .16 + .76·g)`: the sidebar .42, the menu bar panel .85, the
+    /// Mac menu .88 and the dialogs .6 and .85 at the Clear end and at the default 40, all of them .92 at Tinted.
     @Test func mapsTheGlassPreference() {
-        let clear = SidebarGlassStyle(preference: 0)
-        #expect(clear.isClear)
-        #expect(clear.washOpacity == 0)
-        #expect(clear.designOpacity == 0.42)
-        #expect(clear.designBlur == 14)
-
-        let tinted = SidebarGlassStyle(preference: 100)
-        #expect(!tinted.isClear)
-        #expect(abs(tinted.designOpacity - 0.92) < 0.0001)
-        #expect(tinted.designBlur == 40)
-        #expect(tinted.washOpacity > SidebarGlassStyle(preference: 60).washOpacity)
-        #expect(tinted.washOpacity <= 0.62)
-
-        #expect(SidebarGlassStyle(preference: 250).amount == 1)
-        #expect(SidebarGlassStyle(preference: -5).amount == 0)
+        #expect(GlassSurface.sidebar.opacity(preference: 0) == 0.42)
+        #expect(abs(GlassSurface.sidebar.opacity(preference: 40) - 0.464) < 0.0001)
+        #expect(GlassSurface.panel.opacity(preference: 0) == 0.85)
+        #expect(GlassSurface.panel.opacity(preference: 40) == 0.85)
+        #expect(GlassSurface.menu.opacity(preference: 40) == 0.88)
+        #expect(GlassSurface.dialog.opacity(preference: 40) == 0.6)
+        #expect(GlassSurface.appDialog.opacity(preference: 40) == 0.85)
+        for surface in [GlassSurface.sidebar, .panel, .menu, .dialog, .appDialog] {
+            #expect(abs(surface.opacity(preference: 100) - 0.92) < 0.0001)
+            #expect(surface.opacity(preference: 250) == surface.opacity(preference: 100))
+            #expect(surface.opacity(preference: -5) == surface.floor)
+        }
     }
 
     @Test func listsMacsWithThisMacFirst() {
@@ -857,7 +856,9 @@ struct ShellTests {
         let options = SidebarMacOption.options(in: state, matching: "")
         #expect(options.map(\.scope) == [.all, .device(UIMainFixtures.thisMac), .device(UIMainFixtures.otherMac)])
         #expect(options[2].detail == "Online")
-        #expect(SidebarMacOption.options(in: state, matching: "mini").map(\.scope) == [.device(UIMainFixtures.otherMac)])
+        // "All Macs" stays at the top of the menu whatever is typed, as in the design.
+        #expect(SidebarMacOption.options(in: state, matching: "mini").map(\.scope) == [.all, .device(UIMainFixtures.otherMac)])
+        #expect(SidebarMacOption.options(in: state, matching: "studio").map(\.scope) == [.all])
 
         #expect(SidebarMacOption.current(in: state).detail == "2 Macs")
         state.scope = .device(UIMainFixtures.thisMac)
@@ -871,7 +872,7 @@ struct ShellTests {
         #expect(SidebarStatusText.database(.connected(detail: ""), totalRows: 1_284_093) == "1,284,093 rows")
         #expect(SidebarStatusText.help(.failed(DatabaseError.unreachable("connection refused"))) == "PostgreSQL is unreachable: connection refused")
         #expect(SidebarStatusText.help(.failed(CaptureSurgeFailure.shuttingDown)) == "Surge is shutting down")
-        #expect(SidebarStatusText.help(.connected(detail: "Surge 6.10.0")) == "Surge 6.10.0")
+        #expect(SidebarStatusText.help(.connected(detail: "Surge 6.10.0")) == nil)
         #expect(SidebarStatusText.help(.idle) == nil)
 
         // A failed link keeps its error: equal errors make equal statuses, so views only update on a new failure.
