@@ -323,7 +323,7 @@ private struct EgressLookupCard: View {
                 .redacted(reason: isLookingUp ? .placeholder : [])
                 Text(EgressFormat.sourcesNote)
                     .font(.system(size: 11))
-                    .foregroundStyle(Theme.ink2)
+                    .foregroundStyle(Theme.ink3)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
