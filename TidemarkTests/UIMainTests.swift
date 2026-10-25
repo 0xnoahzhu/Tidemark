@@ -309,6 +309,45 @@ struct ToolbarSearchFieldTests {
     }
 }
 
+/// A segmented control in a toolbar too narrow for it overflows into a submenu of its choices, the selected one
+/// checked, and picking one there selects it (by default the menu would offer only the first segment's button).
+@MainActor
+struct DesignSegmentedControlTests {
+    @Test func overflowMenuOffersEveryChoice() async throws {
+        final class Box { var live = true }
+        let box = Box()
+        let control = DesignSegmentedControl("Mode", selection: Binding(get: { box.live }, set: { box.live = $0 }),
+                                             segments: [(true, "Live"), (false, "History")])
+        let host = NSHostingView(rootView: Color.clear.toolbar {
+            ToolbarItem(placement: .primaryAction) { control }
+        })
+        host.sceneBridgingOptions = [.toolbars]
+        // Never ordered in: a window this narrow puts the item in the overflow menu.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 120, height: 100),
+                              styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = host
+
+        var submenu: NSMenu?
+        let deadline = ContinuousClock.now + .seconds(5)
+        while submenu == nil, ContinuousClock.now < deadline {
+            window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(50))
+            submenu = window.toolbar?.items.lazy.compactMap { $0.menuFormRepresentation?.submenu }.first
+        }
+        let menu = try #require(submenu)
+        #expect(menu.items.map(\.title) == ["Live", "History"])
+        #expect(menu.items.map(\.state) == [.on, .off])
+        menu.performActionForItem(at: 1)
+        let selected = ContinuousClock.now + .seconds(2)
+        while box.live, ContinuousClock.now < selected {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(box.live == false)
+    }
+}
+
 /// The live table's backfill and a History page reach the table as hundreds of rows in one update. With
 /// NSTableView's estimated row heights, which SwiftUI turns on, more than 200 rows arriving at a table without
 /// cached row heights re-enter AppKit's row height cache, which AppKit logs (and will assert on).
