@@ -22,10 +22,6 @@ struct SettingsGeneralPane: View {
             }
 
             Section {
-                ipInfoServicePicker
-            }
-
-            Section {
                 Toggle(isOn: loginBinding) {
                     Text(tr("Open at login", "Settings"))
                     Text(tr("Starts recording right away and monitors every app except archived ones.", "Settings"))
@@ -151,28 +147,7 @@ struct SettingsGeneralPane: View {
         }
     }
 
-    /// Where the network type (hosting, residential…) of egress and looked-up IPs comes from.
-    private var ipInfoServicePicker: some View {
-        @Bindable var preferences = model.preferences
-        return Picker(selection: $preferences.ipInfoService) {
-            ForEach(Preferences.IPInfoService.allCases, id: \.self) { service in
-                Text(Self.ipInfoServiceName(service)).tag(service)
-            }
-        } label: {
-            Text(tr("IP info service", "Settings"))
-            Text(tr("Adds the network type (hosting, residential…) to egress IPs and IPs you look up. Only those addresses are sent, this Mac's own public IP (DIRECT) among them. Off, the default, keeps lookups to Surge's own GeoIP data.", "Settings"))
-        }
-        .pickerStyle(.menu)
-    }
-
-    static func ipInfoServiceName(_ service: Preferences.IPInfoService) -> String {
-        switch service {
-        case .proxycheck: "proxycheck.io"
-        case .off: tr("Off", "Settings")
-        }
-    }
-
-    /// A form menu row like the IP info service: not fixed-size, so its pop-up ends at the trailing edge.
+    /// A form menu row: not fixed-size, so its pop-up ends at the trailing edge.
     private var languagePicker: some View {
         Picker(tr("Language", "Settings"), selection: Binding(
             get: { model.preferences.language },

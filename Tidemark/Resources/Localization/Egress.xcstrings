@@ -101,22 +101,12 @@
         }
       }
     },
-    "Country and ASN come from Surge's own GeoIP database, reverse DNS from this Mac's resolver. Type comes from %@: Tidemark sends it its own egress IPs and the IPs you look up. You can turn it off in Settings › General." : {
+    "Country and ASN come from Surge's own GeoIP database. Type and reverse DNS come from the IP info service set in Settings." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "国家和 ASN 来自 Surge 自带的 GeoIP 数据库，反向解析来自本机的解析器。类型来自 %@：Tidemark 会把自己的出口 IP 和你查询的 IP 发给它。可以在设置 › 通用中关闭。"
-          }
-        }
-      }
-    },
-    "Country and ASN come from Surge's own GeoIP database, reverse DNS from this Mac's resolver. Type needs an IP info service, which is off: choose %@ in Settings › General." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "国家和 ASN 来自 Surge 自带的 GeoIP 数据库，反向解析来自本机的解析器。类型需要 IP 信息服务，目前已关闭：可以在设置 › 通用中选择 %@。"
+            "value" : "国家和 ASN 来自 Surge 自带的 GeoIP 数据库，类型和反向解析来自设置里配置的 IP 信息服务。"
           }
         }
       }
@@ -391,16 +381,6 @@
         }
       }
     },
-    "Open Settings…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开设置…"
-          }
-        }
-      }
-    },
     "Organization" : {
       "localizations" : {
         "zh-Hans" : {
@@ -517,16 +497,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Surge 重启"
-          }
-        }
-      }
-    },
-    "The IP info service is in Settings › General" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "IP 信息服务在设置 › 通用中"
           }
         }
       }

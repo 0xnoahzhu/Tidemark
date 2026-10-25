@@ -120,8 +120,8 @@ final class EgressMonitor: EgressActions {
         var result = IPLookupResult(ip: ip)
         guard HostName.isIPAddress(ip) else { return result }
         let surge = model.surge
-        // The IP info service only sees public addresses the user looked up, and only when it is on.
-        let useService = model.preferences.ipInfoService == .proxycheck && EgressIPInfo.isPublic(ip)
+        // The IP info service only sees public addresses the user looked up.
+        let useService = EgressIPInfo.isPublic(ip)
         let serviceLookup = self.serviceLookup
         let reverseLookup = self.reverseLookup
         async let geo = try? CaptureTimeout.run(.seconds(5)) { try await surge.geoIP(ip) }
@@ -256,12 +256,10 @@ final class EgressMonitor: EgressActions {
 
     /// Fills `networkType` and the current egress's `hasIPv6` from earlier answers that are still fresh.
     private func annotateFromCache(_ samples: [EgressSample], plan: EgressPlanner.Plan, now: Date) -> [EgressSample] {
-        let serviceOn = model.preferences.ipInfoService == .proxycheck
-        if !serviceOn { networkTypes.removeAll() }
-        return samples.map { sample in
+        samples.map { sample in
             var sample = sample
             guard let ip = sample.ip else { return sample }
-            if serviceOn, let cached = networkTypes[ip], Self.isFresh(cached.at, found: cached.kind != nil, now: now) {
+            if let cached = networkTypes[ip], Self.isFresh(cached.at, found: cached.kind != nil, now: now) {
                 sample.networkType = cached.kind
             }
             if sample.isCurrent, sample.hasIPv6 == nil, let key = ipv6Key(sample, plan: plan),
@@ -272,8 +270,8 @@ final class EgressMonitor: EgressActions {
         }
     }
 
-    /// Asks the IP info service for the network type of egress IPs it has no fresh answer for (only when the
-    /// service is on, only public addresses) and tests whether the current egress reaches IPv6.
+    /// Asks the IP info service for the network type of egress IPs it has no fresh answer for (only public
+    /// addresses) and tests whether the current egress reaches IPv6.
     private func annotate(_ samples: [EgressSample], plan: EgressPlanner.Plan, surge: any SurgeClient, now: Date) async -> [EgressSample] {
         var samples = samples
         // Surge takes about 15 s to give up on a policy without IPv6, so the test runs alongside the lookups.
@@ -285,23 +283,21 @@ final class EgressMonitor: EgressActions {
         let ipv6Target = ipv6Test?.target
         async let ipv6 = Self.reachesIPv6(through: ipv6Target, surge: surge)
 
-        if model.preferences.ipInfoService == .proxycheck {
-            let missing = Set(samples.compactMap(\.ip).filter { ip in
-                guard EgressIPInfo.isPublic(ip) else { return false }
-                guard let cached = networkTypes[ip] else { return true }
-                return !Self.isFresh(cached.at, found: cached.kind != nil, now: now)
-            })
-            let lookup = serviceLookup
-            let answers = await withTaskGroup(of: (String, String?).self) { group in
-                for ip in missing { group.addTask { (ip, await lookup(ip)?.kind) } }
-                var answers: [String: String?] = [:]
-                for await (ip, kind) in group { answers.updateValue(kind, forKey: ip) }
-                return answers
-            }
-            for (ip, kind) in answers { networkTypes[ip] = (kind, now) }
-            for index in samples.indices {
-                if let ip = samples[index].ip, let cached = networkTypes[ip] { samples[index].networkType = cached.kind }
-            }
+        let missing = Set(samples.compactMap(\.ip).filter { ip in
+            guard EgressIPInfo.isPublic(ip) else { return false }
+            guard let cached = networkTypes[ip] else { return true }
+            return !Self.isFresh(cached.at, found: cached.kind != nil, now: now)
+        })
+        let lookup = serviceLookup
+        let answers = await withTaskGroup(of: (String, String?).self) { group in
+            for ip in missing { group.addTask { (ip, await lookup(ip)?.kind) } }
+            var answers: [String: String?] = [:]
+            for await (ip, kind) in group { answers.updateValue(kind, forKey: ip) }
+            return answers
+        }
+        for (ip, kind) in answers { networkTypes[ip] = (kind, now) }
+        for index in samples.indices {
+            if let ip = samples[index].ip, let cached = networkTypes[ip] { samples[index].networkType = cached.kind }
         }
         // Only a definite answer is kept (an hour, either way); an unknown one is asked again next check.
         if let ipv6Test, let reachable = await ipv6 {

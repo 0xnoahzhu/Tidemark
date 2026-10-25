@@ -647,12 +647,14 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(EgressFormat.surgeMode("System proxy · something new") == "系统代理 · something new")
     }
 
-    /// The lookup card names the IP info service and where to turn it off, and says where reverse DNS comes from.
-    @Test func namesTheIPInfoServiceAndWhereToTurnItOff() {
-        let on = EgressFormat.sourcesNote(service: .proxycheck)
-        #expect(on.contains("proxycheck.io"))
-        let off = EgressFormat.sourcesNote(service: .off)
-        #expect(off.contains("proxycheck.io") && off != on)
+    /// The lookup card says where its facts come from, as the design does.
+    @Test func namesWhereTheLookupsFactsComeFrom() {
+        Localizer.shared.preference = .english
+        #expect(EgressFormat.sourcesNote == "Country and ASN come from Surge's own GeoIP database. Type and reverse DNS come from the IP info service set in Settings.")
+        Localizer.shared.preference = .chinese
+        defer { Localizer.shared.preference = .english }
+        guard Localizer.shared.bundle != nil else { return }
+        #expect(EgressFormat.sourcesNote == "国家和 ASN 来自 Surge 自带的 GeoIP 数据库，类型和反向解析来自设置里配置的 IP 信息服务。")
     }
 
     @Test func translatesEveryReasonTheMonitorWrites() throws {

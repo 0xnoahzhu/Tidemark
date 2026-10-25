@@ -8,8 +8,6 @@ final class Preferences {
     enum ShowIn: String, CaseIterable, Sendable { case menuBarAndDock, menuBarOnly }
     enum Appearance: String, CaseIterable, Sendable { case system, light, dark }
     enum Language: String, CaseIterable, Sendable { case system, english, chinese }
-    /// Service asked for the network type (hosting, residential…) of egress IPs and looked-up IPs.
-    enum IPInfoService: String, CaseIterable, Sendable { case proxycheck, off }
 
     /// Write batching presets offered in Settings › Database ("200 · 1 s").
     struct BatchPreset: Hashable, Sendable {
@@ -49,9 +47,6 @@ final class Preferences {
     var glass: Double { didSet { set(glass, "general.glass") } }
     var language: Language { didSet { set(language.rawValue, "general.language") } }
     var openAtLogin: Bool { didSet { set(openAtLogin, "general.openAtLogin") } }
-    /// Off until the user picks a service: it is sent every public egress IP, DIRECT's (this Mac's own
-    /// address) included.
-    var ipInfoService: IPInfoService { didSet { set(ipInfoService.rawValue, "general.ipInfoService") } }
 
     // MARK: Requests view
     var hideAppleServices: Bool { didSet { set(hideAppleServices, "requests.hideApple") } }
@@ -87,7 +82,6 @@ final class Preferences {
         glass = defaults.object(forKey: "general.glass") as? Double ?? 40
         language = defaults.string(forKey: "general.language").flatMap(Language.init(rawValue:)) ?? .system
         openAtLogin = defaults.object(forKey: "general.openAtLogin") as? Bool ?? true
-        ipInfoService = defaults.string(forKey: "general.ipInfoService").flatMap(IPInfoService.init(rawValue:)) ?? .off
 
         hideAppleServices = defaults.object(forKey: "requests.hideApple") as? Bool ?? false
         monitoredOnly = defaults.object(forKey: "requests.monitoredOnly") as? Bool ?? false

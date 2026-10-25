@@ -31,16 +31,6 @@
         }
       }
     },
-    "Adds the network type (hosting, residential…) to egress IPs and IPs you look up. Only those addresses are sent, this Mac's own public IP (DIRECT) among them. Off, the default, keeps lookups to Surge's own GeoIP data." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "为出口 IP 和你查询的 IP 补充网络类型（机房、家庭宽带等），只会发送这些地址，其中包括本机自己的公网 IP（DIRECT）。默认关闭，此时只使用 Surge 自带的 GeoIP 数据。"
-          }
-        }
-      }
-    },
     "Allow Tidemark in System Settings › General › Login Items to finish turning this on." : {
       "localizations" : {
         "zh-Hans" : {
@@ -221,16 +211,6 @@
         }
       }
     },
-    "IP info service" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "IP 信息服务"
-          }
-        }
-      }
-    },
     "If the database is unreachable" : {
       "localizations" : {
         "zh-Hans" : {
@@ -347,16 +327,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未连接"
-          }
-        }
-      }
-    },
-    "Off" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "关闭"
           }
         }
       }

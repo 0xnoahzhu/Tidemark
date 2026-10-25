@@ -24,8 +24,6 @@ enum EgressIPInfo {
         var organization: String?
     }
 
-    static let serviceName = "proxycheck.io"
-
     static func serviceURL(for ip: String) -> URL? {
         var components = URLComponents(string: "https://proxycheck.io/v2/")
         components?.path += ip

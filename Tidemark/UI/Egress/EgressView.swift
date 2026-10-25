@@ -286,7 +286,6 @@ private struct EgressChangesCard: View {
 
 private struct EgressLookupCard: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.openSettings) private var openSettings
     /// The current egress: its IP is the field's placeholder and is looked up when nothing was typed.
     var current: EgressSample?
 
@@ -322,25 +321,16 @@ private struct EgressLookupCard: View {
                     KeyValueRow(tr("Reverse DNS", "Egress"), result?.reverseDNS ?? "—", mono: true, labelWidth: 84)
                 }
                 .redacted(reason: isLookingUp ? .placeholder : [])
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(EgressFormat.sourcesNote(service: model.preferences.ipInfoService))
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.ink2)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button(tr("Open Settings…", "Egress")) {
-                        model.nav.settingsTab = .general
-                        openSettings()
-                    }
-                    .buttonStyle(.link)
+                Text(EgressFormat.sourcesNote)
                     .font(.system(size: 11))
-                    .help(tr("The IP info service is in Settings › General", "Egress"))
-                }
+                    .foregroundStyle(Theme.ink2)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         // Until something is typed, the card describes the current egress IP: what the last check knows
-        // right away, then a full lookup (once per IP while the app runs) when an IP info service is set;
-        // the egress monitor sends the egress IP to that service anyway.
+        // right away, then a full lookup (once per IP while the app runs); the egress monitor sends the
+        // egress IP to the IP info service anyway.
         .task(id: suggestion) {
             guard query.trimmingCharacters(in: .whitespaces).isEmpty, let current, let ip = current.ip,
                   result?.ip != ip else { return }
@@ -349,7 +339,7 @@ private struct EgressLookupCard: View {
                 return
             }
             result = EgressFormat.lookupSeed(from: current)
-            if model.preferences.ipInfoService != .off { lookUp() }
+            lookUp()
         }
     }
 
@@ -522,16 +512,9 @@ enum EgressFormat {
         return mode.components(separatedBy: " · ").map { tr($0, "SurgeCLI") }.joined(separator: " · ")
     }
 
-    /// Where the lookup's facts come from, naming the IP info service (off by default) and where to turn it on or off.
-    static func sourcesNote(service: Preferences.IPInfoService) -> String {
-        switch service {
-        case .proxycheck:
-            trf("Country and ASN come from Surge's own GeoIP database, reverse DNS from this Mac's resolver. Type comes from %@: Tidemark sends it its own egress IPs and the IPs you look up. You can turn it off in Settings › General.",
-                "Egress", EgressIPInfo.serviceName)
-        case .off:
-            trf("Country and ASN come from Surge's own GeoIP database, reverse DNS from this Mac's resolver. Type needs an IP info service, which is off: choose %@ in Settings › General.",
-                "Egress", EgressIPInfo.serviceName)
-        }
+    /// Where the lookup's facts come from, in the design's words.
+    static var sourcesNote: String {
+        tr("Country and ASN come from Surge's own GeoIP database. Type and reverse DNS come from the IP info service set in Settings.", "Egress")
     }
 
     /// What the lookup card can show for the current egress before (or without) a lookup.

@@ -239,9 +239,8 @@ struct EgressPlannerTests {
 struct EgressMonitorTests {
     let scratch = TestDefaults()
 
-    func makeModel(surge: any SurgeClient, database: CaptureFakeDatabase = CaptureFakeDatabase(), ipInfo: Preferences.IPInfoService = .off) -> AppModel {
+    func makeModel(surge: any SurgeClient, database: CaptureFakeDatabase = CaptureFakeDatabase()) -> AppModel {
         let model = AppModel(preferences: Preferences(defaults: scratch.make()))
-        model.preferences.ipInfoService = ipInfo
         model.surge = surge
         model.database = database
         return model
@@ -432,22 +431,16 @@ struct EgressMonitorTests {
                 "Tidemark's own deadline is not an answer")
     }
 
-    @Test func asksTheIPInfoServiceOnlyWhenOnAndOnlyForPublicEgressIPs() async {
+    /// The IP info service is always on, and only ever sees public addresses.
+    @Test func asksTheIPInfoServiceOnlyForPublicEgressIPs() async {
         let surge = autoTestSurge()
         surge.update { s in
             s.externalIPs["DIRECT"] = "100.80.1.2"   // carrier-grade NAT: never sent
         }
-        let model = makeModel(surge: surge, ipInfo: .off)
+        let model = makeModel(surge: surge)
         let spy = EgressServiceSpy()
         let monitor = makeMonitor(model, service: spy)
 
-        await monitor.checkAll()
-        #expect(spy.ips.isEmpty)
-        #expect(model.egress.samples.allSatisfy { $0.networkType == nil })
-        _ = await monitor.lookup(ip: "1.1.1.1")
-        #expect(spy.ips.isEmpty, "a lookup does not reach the service while it is off")
-
-        model.preferences.ipInfoService = .proxycheck
         await monitor.checkAll()
         #expect(Set(spy.ips) == ["139.180.141.22", "154.21.88.6"])
         #expect(model.egress.current?.networkType == "hosting")
@@ -462,22 +455,6 @@ struct EgressMonitorTests {
         #expect(result.country == "US", "the ISO code")
         _ = await monitor.lookup(ip: "192.168.1.1")
         #expect(spy.ips.last == "1.1.1.1", "private addresses are not sent")
-    }
-
-    /// The service would receive this Mac's own public IP (the DIRECT egress), so nothing is sent until the
-    /// user picks it in Settings.
-    @Test func aFreshInstallSendsNothingToTheIPInfoService() async {
-        let surge = autoTestSurge()
-        let model = AppModel(preferences: Preferences(defaults: scratch.make()))
-        model.surge = surge
-        model.database = CaptureFakeDatabase()
-        #expect(model.preferences.ipInfoService == .off)
-        let spy = EgressServiceSpy()
-        let monitor = makeMonitor(model, service: spy)
-
-        await monitor.checkAll()
-        #expect(!model.egress.samples.isEmpty)
-        #expect(spy.ips.isEmpty)
     }
 
     @Test func notesNetworkChangesFromSurgesView() async {
@@ -534,7 +511,7 @@ struct EgressMonitorTests {
     @Test func looksUpIPs() async {
         let surge = EgressFakeSurge()
         surge.update { $0.geo["8.8.8.8"] = SurgeGeoIP(address: "8.8.8.8", country: "us", asn: 15169, organization: "Google LLC") }
-        let model = makeModel(surge: surge, ipInfo: .proxycheck)
+        let model = makeModel(surge: surge)
         let spy = EgressServiceSpy(answer: nil)
         let monitor = makeMonitor(model, service: spy)
         monitor.reverseLookup = { $0 == "8.8.8.8" ? "dns.google" : nil }

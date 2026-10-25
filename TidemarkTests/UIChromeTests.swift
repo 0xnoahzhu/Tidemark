@@ -195,17 +195,6 @@ struct UIChromeTests {
         }
     }
 
-    @Test func ipInfoServiceNames() {
-        withLanguage(.english) {
-            #expect(SettingsGeneralPane.ipInfoServiceName(.proxycheck) == "proxycheck.io")
-            #expect(SettingsGeneralPane.ipInfoServiceName(.off) == "Off")
-        }
-        withLanguage(.chinese) {
-            #expect(SettingsGeneralPane.ipInfoServiceName(.proxycheck) == "proxycheck.io")
-            #expect(SettingsGeneralPane.ipInfoServiceName(.off) == "关闭")
-        }
-    }
-
     // MARK: Commands
 
     /// File › New Site Probe starts from an empty URL bar with no saved session selected, unless a probe runs.
