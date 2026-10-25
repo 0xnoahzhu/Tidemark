@@ -165,8 +165,15 @@ extension PostgresDatabase {
         }
     }
 
+    /// Fails when `connection` is closed: its session (settings, advisory locks) ended with it, and PostgresNIO
+    /// never answers a statement sent after a connection finished closing.
+    private static func checkOpen(_ connection: PostgresConnection) throws {
+        if connection.isClosed { throw DatabaseError.unreachable(.connectionClosed(target: nil)) }
+    }
+
     /// Puts the session back the way the pool configured it and releases the migration lock.
     private static func endMigrationSession(_ connection: PostgresConnection) async throws {
+        try checkOpen(connection)
         for statement in ["RESET statement_timeout", "RESET lock_timeout", "RESET search_path"] {
             try await connection.query(PostgresQuery(unsafeSQL: statement), logger: logger)
         }
@@ -371,6 +378,7 @@ extension PostgresDatabase {
 
     /// Puts the session back the way the pool configured it and releases the index lock.
     private static func endIndexSession(_ connection: PostgresConnection, schema: String) async throws {
+        try checkOpen(connection)
         for statement in ["RESET statement_timeout", "RESET lock_timeout", "RESET search_path", "RESET maintenance_work_mem"] {
             try await connection.query(PostgresQuery(unsafeSQL: statement), logger: logger)
         }
@@ -397,7 +405,7 @@ extension PostgresDatabase {
             } catch {
                 // Drop what the failed build left behind now rather than at the next attempt.
                 await withTaskCancellationShield {
-                    if (try? await indexIsInvalid(name, on: connection, schema: schema)) == true {
+                    if !connection.isClosed, (try? await indexIsInvalid(name, on: connection, schema: schema)) == true {
                         _ = try? await connection.query(drop, logger: logger)
                     }
                 }

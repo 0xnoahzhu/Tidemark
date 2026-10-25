@@ -444,8 +444,11 @@ final class PostgresDatabase: TidemarkDatabase {
     }
 
     /// Rolls back even when the task is cancelled; a connection that cannot roll back is closed so it
-    /// never returns to the pool inside an open transaction.
+    /// never returns to the pool inside an open transaction. A closed connection is left alone: its
+    /// transaction ended with it, and PostgresNIO never answers a statement sent after a connection finished
+    /// closing (`LeasedCall`).
     static func rollback(_ connection: PostgresConnection) async {
+        guard !connection.isClosed else { return }
         await withTaskCancellationShield {
             do {
                 try await connection.query("ROLLBACK", logger: logger)
