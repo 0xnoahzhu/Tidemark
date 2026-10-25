@@ -169,10 +169,6 @@ final class CaptureEngine {
         started = true
         model.live.recording = true
         notifier.onView = { [weak self] appID, ids in self?.openAlerts(appID: appID, ids: ids) }
-        notifier.onMute = { [weak self] pattern, id in
-            guard let self else { return }
-            Task { await self.mute(pattern, dismissingAlert: id) }
-        }
         notifier.install()
         observedPreferences = PreferenceValues(model.preferences)
         observedScope = model.devices.scope
@@ -303,7 +299,7 @@ final class CaptureEngine {
         if let retire = retireDatabase { Task.detached { await retire(old) } }
     }
 
-    /// Apps, installs, mutes, inventory, alerts, probe sessions and counters (devices are registered and loaded
+    /// Apps, installs, inventory, alerts, probe sessions and counters (devices are registered and loaded
     /// by `connectDatabase` before writes resume).
     private func loadSharedState() async {
         do {
@@ -315,10 +311,6 @@ final class CaptureEngine {
         }
         if let installs = try? await database.installs() { model.catalog.installs = installs }
         await updateInstalls(force: true)
-        if let mutes = try? await database.mutes() {
-            model.alerts.mutes = mutes
-            await pipeline.setMutes(mutes)
-        }
         do {
             try await pipeline.loadKnownHosts()
         } catch {
@@ -337,12 +329,11 @@ final class CaptureEngine {
         await refreshToday()
     }
 
-    /// The apps, mutes and inventory saved by the last run, when PostgreSQL is unreachable at launch.
+    /// The apps and inventory saved by the last run, when PostgreSQL is unreachable at launch.
     private func restoreSavedState() async {
         guard model.catalog.apps.isEmpty, let snapshot = await pipeline.restoreSnapshot() else { return }
         Self.log.info("PostgreSQL is unreachable; using the shared state saved \(snapshot.savedAt, privacy: .public)")
         model.catalog.apps = snapshot.apps
-        model.alerts.mutes = snapshot.mutes
         await pushApps()
     }
 
@@ -780,14 +771,12 @@ final class CaptureEngine {
     }
 
     /// New alerts: into the Notifications list (whichever Mac found them) and as system notifications, the ones
-    /// other Macs found included. Alerts from other Macs are skipped when their host is muted or their app is
-    /// archived (or gone) here; pausing an app's monitoring on this Mac only stops this Mac's own alerts.
+    /// other Macs found included. Alerts from other Macs are skipped when their app is archived (or gone) here;
+    /// pausing an app's monitoring on this Mac only stops this Mac's own alerts.
     private func receive(_ alerts: [AlertItem], fromOtherMac: Bool) {
         for alert in alerts.sorted(by: { $0.id < $1.id }) {
             if fromOtherMac {
                 guard let app = model.catalog.app(alert.appID), !app.isArchived else { continue }
-                let muted = model.alerts.isMuted(alert.value) || (alert.host.map { model.alerts.isMuted($0) } ?? false)
-                guard !muted else { continue }
             }
             if !model.alerts.items.contains(where: { $0.id == alert.id }) {
                 model.alerts.items.insert(alert, at: 0)
@@ -850,16 +839,12 @@ final class CaptureEngine {
         if stats != model.catalog.stats { model.catalog.stats = stats }
     }
 
-    /// Apps and mutes changed on other Macs (added, archived, deleted, muted). A list read while this Mac
-    /// changed its apps is dropped (the next refresh reads it again).
+    /// Apps changed on other Macs (added, archived, deleted). A list read while this Mac changed its apps is
+    /// dropped (the next refresh reads it again).
     func refreshSharedState() async {
         guard databaseReady else { return }
         let generation = catalogGeneration
         if let apps = try? await database.apps(), generation == catalogGeneration, apps != model.catalog.apps { await applyCatalog(apps) }
-        if let mutes = try? await database.mutes(), Set(mutes) != Set(model.alerts.mutes) {
-            model.alerts.mutes = mutes
-            await pipeline.setMutes(mutes)
-        }
     }
 
     /// Loads the inventory of an app another Mac added once its wait is over (see `applyCatalog`).

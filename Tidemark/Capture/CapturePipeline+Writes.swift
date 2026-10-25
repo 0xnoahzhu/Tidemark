@@ -432,11 +432,11 @@ extension CapturePipeline {
         return now.timeIntervalSince(last) >= snapshotInterval
     }
 
-    /// Saves apps, mutes and the inventory index for a launch without the database.
+    /// Saves apps and the inventory index for a launch without the database.
     func saveSnapshot(now: Date) {
         guard knownLoaded, !allApps.isEmpty || known.count > 0 else { return }
         lastSnapshotAt = now
-        sidecar.saveSnapshot(CaptureStateSnapshot(savedAt: now, apps: allApps, mutes: mutes, known: known.exported))
+        sidecar.saveSnapshot(CaptureStateSnapshot(savedAt: now, apps: allApps, known: known.exported))
     }
 }
 

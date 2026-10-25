@@ -171,34 +171,6 @@ extension CaptureEngine: CaptureActions {
         }
     }
 
-    func mute(_ pattern: String, dismissingAlert: Int64?) async {
-        let pattern = pattern.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !pattern.isEmpty else { return }
-        if !model.alerts.mutes.contains(pattern) { model.alerts.mutes.append(pattern) }
-        await pipeline.setMutes(model.alerts.mutes)
-        do {
-            try await database.addMute(pattern)
-        } catch {
-            Self.log.error("Adding mute failed: \(error.localizedDescription, privacy: .public)")
-        }
-        guard let id = dismissingAlert else { return }
-        if let index = model.alerts.items.firstIndex(where: { $0.id == id }) {
-            if model.alerts.items[index].isUnread { model.alerts.unreadCount = max(0, model.alerts.unreadCount - 1) }
-            model.alerts.items.remove(at: index)
-        }
-        try? await database.deleteAlert(id)
-    }
-
-    func unmute(_ pattern: String) async {
-        model.alerts.mutes.removeAll { $0 == pattern }
-        await pipeline.setMutes(model.alerts.mutes)
-        do {
-            try await database.removeMute(pattern)
-        } catch {
-            Self.log.error("Removing mute failed: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
     // MARK: Devices and database
 
     func renameThisMac(_ name: String) async {

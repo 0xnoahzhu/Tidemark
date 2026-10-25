@@ -16,14 +16,6 @@ struct FoundationTests {
         #expect(!HostName.isIPAddress("999.1.1.1"))
     }
 
-    @Test func matchesMutePatterns() {
-        let patterns = ["*.apple.com", "api.notion.com"]
-        #expect(AlertState.matches("gateway.icloud.apple.com", patterns: patterns))
-        #expect(AlertState.matches("apple.com", patterns: patterns))
-        #expect(AlertState.matches("API.notion.com", patterns: patterns))
-        #expect(!AlertState.matches("notapple.com", patterns: patterns))
-    }
-
     @Test func formatsGeo() {
         let geo = GeoInfo(countryCode: "us", asn: 13335, organization: "Cloudflare, Inc.")
         #expect(geo.display == "US · AS13335 Cloudflare")

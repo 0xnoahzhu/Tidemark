@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Per-Mac settings, persisted in `UserDefaults`. Shared settings (apps, mutes) live in PostgreSQL.
+/// Per-Mac settings, persisted in `UserDefaults`. Shared settings (the monitored apps) live in PostgreSQL.
 @MainActor
 @Observable
 final class Preferences {

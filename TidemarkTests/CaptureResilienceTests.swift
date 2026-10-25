@@ -496,7 +496,6 @@ struct CaptureResilienceTests {
             let pipeline = makePipeline(database: database, directory: temp.url)
             await pipeline.setApps([raycast], paused: [])
             try await pipeline.loadKnownHosts()
-            await pipeline.setMutes(["*.muted.example"])
             await pipeline.beginSession(1_000)
             // PostgreSQL went away; Tidemark quits before it comes back.
             await pipeline.ingest(nodeRequest(id: 1, host: "api.notion.com"), now: base)
@@ -507,7 +506,6 @@ struct CaptureResilienceTests {
         let pipeline = makePipeline(database: database, directory: temp.url)
         let snapshot = try #require(await pipeline.restoreSnapshot(), "the shared state is kept for an offline launch")
         #expect(snapshot.apps.map(\.id) == [raycast.id])
-        #expect(snapshot.mutes == ["*.muted.example"])
         #expect(snapshot.known[raycast.id]?.contains("domain:api.notion.com") == true)
 
         await pipeline.setDatabaseOnline(true)

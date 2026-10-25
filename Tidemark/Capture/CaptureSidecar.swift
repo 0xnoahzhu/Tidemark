@@ -2,12 +2,12 @@ import Foundation
 import os
 
 /// Shared state saved locally so capture keeps attributing requests and detecting first contact when
-/// PostgreSQL is unreachable at launch: the app catalog, the mute patterns and every app's inventory.
+/// PostgreSQL is unreachable at launch: the app catalog and every app's inventory. (A file of an earlier version
+/// also holds mute patterns, which decoding ignores: Tidemark has no mutes.)
 struct CaptureStateSnapshot: Codable, Sendable {
     var savedAt: Date
     /// Every app, archived ones included.
     var apps: [MonitoredApp]
-    var mutes: [String]
     /// appID → `domain:x` / `ip:x` (the form `CaptureKnownHosts(loaded:)` reads).
     var known: [AppID: Set<String>]
 }

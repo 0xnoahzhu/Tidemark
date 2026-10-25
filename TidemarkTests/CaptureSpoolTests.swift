@@ -114,9 +114,16 @@ struct CaptureSpoolTests {
         let temp = CaptureTempDirectory()
         let sidecar = CaptureSidecar(directory: temp.url)
         let app = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
-        sidecar.saveSnapshot(CaptureStateSnapshot(savedAt: .distantPast, apps: [app], mutes: ["*.example.com"], known: [app.id: ["domain:a.com"]]))
+        sidecar.saveSnapshot(CaptureStateSnapshot(savedAt: .distantPast, apps: [app], known: [app.id: ["domain:a.com"]]))
         let snapshot = try #require(sidecar.loadSnapshot())
-        #expect(snapshot.apps == [app] && snapshot.mutes == ["*.example.com"] && snapshot.known == [app.id: ["domain:a.com"]])
+        #expect(snapshot.apps == [app] && snapshot.known == [app.id: ["domain:a.com"]])
+
+        // An earlier version also saved its mute patterns: the file still loads, without them.
+        var saved = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: sidecar.snapshotURL)) as? [String: Any])
+        saved["mutes"] = ["*.apple.com", "*.icloud.com", "*.mzstatic.com"]
+        try JSONSerialization.data(withJSONObject: saved).write(to: sidecar.snapshotURL)
+        let earlier = try #require(sidecar.loadSnapshot())
+        #expect(earlier.apps == [app] && earlier.known == [app.id: ["domain:a.com"]])
 
         var batch = CaptureWriteBuffer.Batch()
         batch.newHosts = [AppHost(appID: app.id, kind: .domain, value: "a.com", site: "a.com", firstSeen: .distantPast, lastSeen: .distantPast,

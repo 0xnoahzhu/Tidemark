@@ -130,8 +130,6 @@ final class NoopCaptureActions: CaptureActions {
     func monitorCandidates() async -> [AppCandidate] { [] }
     func markAlertsRead(_ ids: [Int64]) async {}
     func markAllAlertsRead(appID: AppID?) async {}
-    func mute(_ pattern: String, dismissingAlert: Int64?) async {}
-    func unmute(_ pattern: String) async {}
     func renameThisMac(_ name: String) async {}
     func testDatabaseConnection() async -> Result<String, Error> { .failure(DatabaseError.notConfigured) }
 }

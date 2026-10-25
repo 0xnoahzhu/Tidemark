@@ -210,7 +210,6 @@ actor CapturePipeline {
     /// Every app (archived ones included), for the local snapshot.
     var allApps: [MonitoredApp] = []
     var paused: Set<AppID> = []
-    var mutes: [String] = []
     var known = CaptureKnownHosts()
     var knownLoaded = false
     /// New apps whose inventory (and backfill) is still loading → give up waiting at this time.
@@ -348,8 +347,6 @@ actor CapturePipeline {
         inventoryLoadAfter[appID] = loadingAfter
     }
 
-    func setMutes(_ patterns: [String]) { mutes = patterns }
-
     /// Pausing drops every event (no writes, no alerts); requests first seen while paused stay ignored.
     func setRecording(_ on: Bool) {
         recording = on
@@ -388,7 +385,6 @@ actor CapturePipeline {
         guard !knownLoaded, let snapshot = sidecar.loadSnapshot() else { return nil }
         known = CaptureKnownHosts(loaded: snapshot.known, classifier: classifier)
         knownLoaded = true
-        mutes = snapshot.mutes
         return snapshot
     }
 
@@ -913,7 +909,7 @@ actor CapturePipeline {
         guard recording, !isOwn(record), let appID = record.appID, let app = monitored[appID], !paused.contains(appID) else { return }
         // A late IP only adds IP information; its domain was already evaluated (and touched) with the request.
         if !includeDomain, !record.isIPLiteral, !known.containsDomain(record.host, appID: appID) { return }
-        var contact = CaptureFirstContactDetector.evaluate(record: record, app: app, known: &known, classifier: classifier, mutes: mutes)
+        var contact = CaptureFirstContactDetector.evaluate(record: record, app: app, known: &known, classifier: classifier)
         if entry.backfilled { contact.touches.removeAll() } else if !includeDomain { contact.touches.removeAll { $0.kind == .domain } }
         if !includeDomain, entry.alertDrafted {
             // At most one alert per request, however late its IP resolved: the domain alert covered it.

@@ -119,8 +119,7 @@ enum CaptureFirstContactDetector {
         record: RequestRecord,
         app: MonitoredApp,
         known: inout CaptureKnownHosts,
-        classifier: any SiteClassifying,
-        mutes: [String]
+        classifier: any SiteClassifying
     ) -> CaptureFirstContact {
         var result = CaptureFirstContact(hosts: [], touches: [], alert: nil)
         let host = record.host.lowercased()
@@ -145,7 +144,7 @@ enum CaptureFirstContactDetector {
                 entry.firstDeviceID = record.deviceID
                 result.hosts.append(entry)
                 let wanted = app.alertRule == .anyHost || (app.alertRule == .site && scope == .site)
-                if wanted, !AlertState.matches(host, patterns: mutes) {
+                if wanted {
                     result.alert = CaptureAlertDraft(
                         appID: app.id, kind: .domain, scope: scope, value: host, site: site, host: host, ip: ip,
                         geo: record.geo, processName: process, isDirect: false, requestKey: record.key
@@ -167,8 +166,7 @@ enum CaptureFirstContactDetector {
                 known.insert(kind: .ip, value: ip, appID: app.id, site: nil)
                 entry.firstDeviceID = record.deviceID
                 result.hosts.append(entry)
-                let muted = AlertState.matches(ip, patterns: mutes) || (!isIPLiteral && AlertState.matches(host, patterns: mutes))
-                if app.alertNewIP, !muted {
+                if app.alertNewIP {
                     var draft = CaptureAlertDraft(
                         appID: app.id, kind: .ip, scope: .ip, value: ip, site: nil, host: isIPLiteral ? nil : host, ip: ip,
                         geo: record.geo, processName: process, isDirect: isIPLiteral, requestKey: record.key

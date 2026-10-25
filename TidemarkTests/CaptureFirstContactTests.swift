@@ -21,7 +21,7 @@ struct CaptureFirstContactTests {
         let raycast = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
         var known = CaptureKnownHosts(loaded: [raycast.id: ["backend.raycast.com", "ip:76.76.21.21"]], classifier: classifier)
         let contact = CaptureFirstContactDetector.evaluate(record: record(host: "api.notion.com", ip: "104.18.22.110", app: raycast),
-                                                           app: raycast, known: &known, classifier: classifier, mutes: [])
+                                                           app: raycast, known: &known, classifier: classifier)
         #expect(contact.hosts.map(\.id) == ["domain:api.notion.com", "ip:104.18.22.110"])
         #expect(contact.hosts.first?.site == "notion.com")
         #expect(contact.hosts.first?.policy == "Proxy › HK-01")
@@ -38,7 +38,7 @@ struct CaptureFirstContactTests {
         let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
         var known = CaptureKnownHosts(loaded: [cursor.id: ["domain:objects.githubusercontent.com", "185.199.108.133"]], classifier: classifier)
         let contact = CaptureFirstContactDetector.evaluate(record: record(host: "raw.githubusercontent.com", ip: "185.199.108.133", app: cursor),
-                                                           app: cursor, known: &known, classifier: classifier, mutes: [])
+                                                           app: cursor, known: &known, classifier: classifier)
         #expect(contact.alert?.scope == .host)
         #expect(contact.alert?.value == "raw.githubusercontent.com")
         #expect(contact.hosts.map(\.kind) == [.domain])
@@ -49,12 +49,12 @@ struct CaptureFirstContactTests {
         let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app", rule: .site, alertNewIP: false)
         var known = CaptureKnownHosts(loaded: [cursor.id: ["api2.cursor.sh"]], classifier: classifier)
         let sameSite = CaptureFirstContactDetector.evaluate(record: record(host: "api3.cursor.sh", ip: "104.18.18.125", app: cursor),
-                                                            app: cursor, known: &known, classifier: classifier, mutes: [])
+                                                            app: cursor, known: &known, classifier: classifier)
         #expect(sameSite.hosts.count == 2, "still recorded")
         #expect(sameSite.alert == nil, "new host under a known site is only marked NEW")
 
         let newSite = CaptureFirstContactDetector.evaluate(record: record(host: "api.openai.com", ip: "162.159.140.245", app: cursor),
-                                                           app: cursor, known: &known, classifier: classifier, mutes: [])
+                                                           app: cursor, known: &known, classifier: classifier)
         #expect(newSite.alert?.scope == .site)
     }
 
@@ -62,7 +62,7 @@ struct CaptureFirstContactTests {
         let docker = CaptureFixtures.app("Docker", path: "/Applications/Docker.app", rule: .off, alertNewIP: false)
         var known = CaptureKnownHosts()
         let contact = CaptureFirstContactDetector.evaluate(record: record(host: "index.docker.io", ip: "54.198.86.24", app: docker),
-                                                           app: docker, known: &known, classifier: classifier, mutes: [])
+                                                           app: docker, known: &known, classifier: classifier)
         #expect(contact.hosts.count == 2)
         #expect(contact.alert == nil)
     }
@@ -71,7 +71,7 @@ struct CaptureFirstContactTests {
         let docker = CaptureFixtures.app("Docker", path: "/Applications/Docker.app")
         var known = CaptureKnownHosts(loaded: [docker.id: ["production.cloudflare.docker.com", "104.16.99.215"]], classifier: classifier)
         let contact = CaptureFirstContactDetector.evaluate(record: record(host: "production.cloudflare.docker.com", ip: "104.16.98.215", app: docker),
-                                                           app: docker, known: &known, classifier: classifier, mutes: [])
+                                                           app: docker, known: &known, classifier: classifier)
         #expect(contact.alert?.scope == .ip)
         #expect(contact.alert?.value == "104.16.98.215")
         #expect(contact.alert?.host == "production.cloudflare.docker.com")
@@ -83,7 +83,7 @@ struct CaptureFirstContactTests {
         let wechat = CaptureFixtures.app("WeChat", path: "/Applications/WeChat.app")
         var known = CaptureKnownHosts(loaded: [wechat.id: ["szextshort.weixin.qq.com"]], classifier: classifier)
         let contact = CaptureFirstContactDetector.evaluate(record: record(host: "157.148.69.80", ip: "157.148.69.80", app: wechat, process: "WeChat"),
-                                                           app: wechat, known: &known, classifier: classifier, mutes: [])
+                                                           app: wechat, known: &known, classifier: classifier)
         #expect(contact.hosts.map(\.id) == ["ip:157.148.69.80"])
         #expect(contact.hosts.first?.isDirect == true)
         #expect(contact.hosts.first?.hosts == [])
@@ -91,24 +91,27 @@ struct CaptureFirstContactTests {
         #expect(contact.alert?.host == nil)
     }
 
-    @Test func mutedHostsAreRecordedButDontAlert() {
+    /// Nothing is muted: the hosts earlier versions silenced by default (`*.apple.com`, `*.icloud.com`,
+    /// `*.mzstatic.com`) alert like any other, and so do their IPs.
+    @Test func appleHostsAlertLikeAnyOther() {
         let app = CaptureFixtures.app("Safari", path: "/Applications/Safari.app")
         var known = CaptureKnownHosts()
         let contact = CaptureFirstContactDetector.evaluate(record: record(host: "gateway.icloud.com", ip: "17.248.186.67", app: app),
-                                                           app: app, known: &known, classifier: classifier, mutes: ["*.icloud.com"])
+                                                           app: app, known: &known, classifier: classifier)
         #expect(contact.hosts.count == 2)
-        #expect(contact.alert == nil, "a muted host also silences its IP")
+        #expect(contact.alert?.value == "gateway.icloud.com")
+        #expect(contact.fallback?.value == "17.248.186.67")
 
-        let byIP = CaptureFirstContactDetector.evaluate(record: record(host: "203.0.113.9", ip: "203.0.113.9", app: app),
-                                                        app: app, known: &known, classifier: classifier, mutes: ["203.0.113.9"])
-        #expect(byIP.hosts.count == 1 && byIP.alert == nil)
+        let byIP = CaptureFirstContactDetector.evaluate(record: record(host: "17.253.144.10", ip: "17.253.144.10", app: app),
+                                                        app: app, known: &known, classifier: classifier)
+        #expect(byIP.hosts.count == 1 && byIP.alert?.value == "17.253.144.10")
     }
 
     @Test func aKnownHostAndIPOnlyTouch() {
         let app = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
         var known = CaptureKnownHosts(loaded: [app.id: ["api.github.com", "20.205.243.168"]], classifier: classifier)
         let contact = CaptureFirstContactDetector.evaluate(record: record(host: "API.github.com", ip: "20.205.243.168", app: app),
-                                                           app: app, known: &known, classifier: classifier, mutes: [])
+                                                           app: app, known: &known, classifier: classifier)
         #expect(contact.hosts.isEmpty && contact.alert == nil)
         #expect(contact.touches.count == 2)
     }
@@ -117,8 +120,8 @@ struct CaptureFirstContactTests {
         let app = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
         var known = CaptureKnownHosts()
         let r = record(host: "api.linear.app", ip: "104.18.32.12", app: app)
-        let first = CaptureFirstContactDetector.evaluate(record: r, app: app, known: &known, classifier: classifier, mutes: [])
-        let second = CaptureFirstContactDetector.evaluate(record: r, app: app, known: &known, classifier: classifier, mutes: [])
+        let first = CaptureFirstContactDetector.evaluate(record: r, app: app, known: &known, classifier: classifier)
+        let second = CaptureFirstContactDetector.evaluate(record: r, app: app, known: &known, classifier: classifier)
         #expect(first.alert != nil && first.hosts.count == 2)
         #expect(second.alert == nil && second.hosts.isEmpty && second.touches.count == 2)
     }
@@ -127,7 +130,7 @@ struct CaptureFirstContactTests {
         let app = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
         var known = CaptureKnownHosts()
         let r = record(host: "api.linear.app", ip: "104.18.32.12", app: app)
-        let contact = CaptureFirstContactDetector.evaluate(record: r, app: app, known: &known, classifier: classifier, mutes: [])
+        let contact = CaptureFirstContactDetector.evaluate(record: r, app: app, known: &known, classifier: classifier)
         #expect(contact.alert?.kind == .domain)
         let fallback = try #require(contact.fallback)
         #expect(fallback.kind == .ip && fallback.value == "104.18.32.12" && fallback.fallbackFor == "domain:api.linear.app")
@@ -155,7 +158,7 @@ struct CaptureFirstContactTests {
         let app = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
         var known = CaptureKnownHosts()
         let contact = CaptureFirstContactDetector.evaluate(record: record(host: "repo42.cursor.sh", ip: nil, app: app),
-                                                           app: app, known: &known, classifier: classifier, mutes: [])
+                                                           app: app, known: &known, classifier: classifier)
         let draft = try #require(contact.alert)
         let item = draft.item(deviceID: device, requestRowID: 42, createdAt: .distantPast)
         #expect(item.kind == .domain && item.scope == .site && item.value == "repo42.cursor.sh" && item.site == "cursor.sh")

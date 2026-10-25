@@ -76,17 +76,14 @@ struct CaptureBurstGrouper {
     }
 }
 
-/// Posts first-contact notifications and handles their actions ("View", "Mute Host").
+/// Posts first-contact notifications and handles their one action, "View" (also what clicking one does).
 @MainActor
 final class CaptureNotifier: NSObject {
     static let categoryIdentifier = "tidemark.alert"
     static let viewAction = "tidemark.alert.view"
-    static let muteAction = "tidemark.alert.mute"
 
     /// Opens an app's inventory for these alerts (marking them read).
     var onView: ((AppID, [Int64]) -> Void)?
-    /// Mutes a host or IP, dismissing an alert.
-    var onMute: ((String, Int64?) -> Void)?
     /// Hands a notification to Notification Center; tests replace it so nothing reaches the screen.
     var deliver: (UNNotificationRequest) -> Void = { UNUserNotificationCenter.current().add($0) }
 
@@ -101,9 +98,8 @@ final class CaptureNotifier: NSObject {
         installed = true
         center.delegate = self
         let view = UNNotificationAction(identifier: Self.viewAction, title: tr("View", "Capture"), options: [.foreground])
-        let mute = UNNotificationAction(identifier: Self.muteAction, title: tr("Mute Host", "Capture"), options: [])
         center.setNotificationCategories([
-            UNNotificationCategory(identifier: Self.categoryIdentifier, actions: [view, mute], intentIdentifiers: [], options: [])
+            UNNotificationCategory(identifier: Self.categoryIdentifier, actions: [view], intentIdentifiers: [], options: [])
         ])
         let center = self.center
         Task { _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge]) }
@@ -116,7 +112,7 @@ final class CaptureNotifier: NSObject {
             add(identifier: identifier, text: Text(
                 headline: CaptureAlertText.title(appName: appName, alert: alert),
                 details: CaptureAlertText.details(alert: alert, deviceName: deviceName),
-                silent: false, appID: alert.appID, alertIDs: [alert.id], muteValue: alert.value
+                silent: false, appID: alert.appID, alertIDs: [alert.id]
             ))
         case .aggregate(let identifier, let first, let extra):
             let values = extra.map { $0.scope == .site ? ($0.site ?? $0.value) : $0.value }
@@ -125,7 +121,7 @@ final class CaptureNotifier: NSObject {
             add(identifier: identifier, text: Text(
                 headline: CaptureAlertText.title(appName: appName, alert: first),
                 details: CaptureAlertText.details(alert: first, deviceName: deviceName) + "\n" + more,
-                silent: true, appID: alert.appID, alertIDs: [first.id] + extra.map(\.id), muteValue: first.value
+                silent: true, appID: alert.appID, alertIDs: [first.id] + extra.map(\.id)
             ))
         }
     }
@@ -137,7 +133,6 @@ final class CaptureNotifier: NSObject {
         var silent: Bool
         var appID: AppID
         var alertIDs: [Int64]
-        var muteValue: String
     }
 
     /// Lays the text out like the design's banner: "Tidemark" on top (with the time beside it), the headline, then
@@ -155,12 +150,12 @@ final class CaptureNotifier: NSObject {
         } else {
             content.sound = .default
         }
-        content.userInfo = Self.userInfo(appID: text.appID, alertIDs: text.alertIDs, muteValue: text.muteValue, alertID: text.alertIDs.first ?? 0)
+        content.userInfo = Self.userInfo(appID: text.appID, alertIDs: text.alertIDs)
         deliver(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
     }
 
-    private static func userInfo(appID: AppID, alertIDs: [Int64], muteValue: String, alertID: Int64) -> [String: Any] {
-        ["appID": appID.uuidString, "alertIDs": alertIDs.map { NSNumber(value: $0) }, "mute": muteValue, "alertID": NSNumber(value: alertID)]
+    private static func userInfo(appID: AppID, alertIDs: [Int64]) -> [String: Any] {
+        ["appID": appID.uuidString, "alertIDs": alertIDs.map { NSNumber(value: $0) }]
     }
 
     /// Brings the main window forward. The engine cannot call `openWindow`, so it orders the existing
@@ -177,10 +172,8 @@ final class CaptureNotifier: NSObject {
         }
     }
 
-    fileprivate func handle(action: String, appID: AppID?, alertIDs: [Int64], muteValue: String?, alertID: Int64?) {
+    fileprivate func handle(action: String, appID: AppID?, alertIDs: [Int64]) {
         switch action {
-        case Self.muteAction:
-            if let muteValue { onMute?(muteValue, alertID) }
         case Self.viewAction, UNNotificationDefaultActionIdentifier:
             if let appID { onView?(appID, alertIDs) }
             Self.showMainWindow()
@@ -200,8 +193,6 @@ extension CaptureNotifier: UNUserNotificationCenterDelegate {
         let action = response.actionIdentifier
         let appID = (info["appID"] as? String).flatMap(UUID.init(uuidString:))
         let alertIDs = (info["alertIDs"] as? [NSNumber])?.map(\.int64Value) ?? []
-        let muteValue = info["mute"] as? String
-        let alertID = (info["alertID"] as? NSNumber)?.int64Value
-        await handle(action: action, appID: appID, alertIDs: alertIDs, muteValue: muteValue, alertID: alertID)
+        await handle(action: action, appID: appID, alertIDs: alertIDs)
     }
 }

@@ -129,21 +129,6 @@ struct CaptureEngineTests {
         #expect(CaptureEngine.normalizedBundlePath("/Applications//Cursor.app/") == "/Applications/Cursor.app")
     }
 
-    @Test func mutesAndDismissesAnAlert() async {
-        let database = CaptureFakeDatabase()
-        let (engine, model) = makeEngine(database: database)
-        model.alerts.items = [AlertItem(id: 7, deviceID: UUID(), appID: UUID(), kind: .ip, scope: .ip, value: "104.16.98.215", site: nil,
-                                        host: nil, ip: "104.16.98.215", geo: nil, processName: "docker", isDirect: false, requestRowID: nil,
-                                        createdAt: .now, readAt: nil)]
-        model.alerts.unreadCount = 1
-        await engine.mute("104.16.98.215", dismissingAlert: 7)
-        #expect(model.alerts.mutes == ["104.16.98.215"])
-        #expect(model.alerts.items.isEmpty && model.alerts.unreadCount == 0)
-        #expect(await database.mutesList == ["104.16.98.215"])
-        await engine.unmute("104.16.98.215")
-        #expect(model.alerts.mutes.isEmpty)
-    }
-
     @Test func marksAlertsRead() async {
         let (engine, model) = makeEngine()
         let alerts = (1...3).map { id in
@@ -319,14 +304,14 @@ struct CaptureEngineTests {
 
     // MARK: Alerts and notifications
 
-    @Test func alertsFromOtherMacsSkipMutedHostsAndArchivedApps() async {
+    /// Alerts other Macs found are skipped only for an app archived here; nothing is muted, Apple's hosts included.
+    @Test func alertsFromOtherMacsSkipOnlyArchivedApps() async {
         let database = CaptureFakeDatabase()
         let (engine, model) = makeEngine(database: database)
         let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
         var docker = CaptureFixtures.app("Docker", path: "/Applications/Docker.app")
         docker.archivedAt = .now
         await database.setApps([cursor, docker])
-        await database.setMutes(["*.muted.example"])
         #expect(await engine.connectDatabase())
 
         let other = UUID()
@@ -334,10 +319,11 @@ struct CaptureEngineTests {
             AlertItem(id: id, deviceID: other, appID: app.id, kind: .domain, scope: .host, value: value, site: nil, host: value, ip: nil,
                       geo: nil, processName: "node", isDirect: false, requestRowID: nil, createdAt: .now, readAt: nil)
         }
-        await database.setOtherMacAlerts([alert(1, cursor, "ok.example"), alert(2, cursor, "x.muted.example"), alert(3, docker, "y.example")])
+        await database.setOtherMacAlerts([alert(1, cursor, "ok.example"), alert(2, cursor, "gateway.icloud.com"), alert(3, docker, "y.example")])
         await engine.pollOtherMacAlerts()
-        #expect(model.alerts.items.map(\.value) == ["ok.example"])
-        #expect(model.alerts.unreadCount == 1)
+        #expect(model.alerts.items.map(\.value) == ["gateway.icloud.com", "ok.example"])
+        #expect(model.alerts.unreadCount == 2)
+        #expect(notifications.value.last?.content.body.contains("gateway.icloud.com") == true, "notified too")
     }
 
     /// Every alert becomes a system notification on every Mac: this Mac's and the ones other Macs found, which
@@ -371,6 +357,8 @@ struct CaptureEngineTests {
         #expect(posted.map(\.title) == ["Tidemark", "Tidemark"])
         #expect(posted.map(\.subtitle) == ["Cursor contacted a new host", "Docker connected to a new IP"])
         #expect(posted.map(\.body) == ["api2.cursor.sh · via com.docker.backend", "Mac mini (Office) · 104.16.98.215 · via com.docker.backend"])
+        // A notification only knows how to open its alerts: there is nothing to mute.
+        #expect(posted.map { Set($0.userInfo.keys.compactMap { $0 as? String }) } == [["appID", "alertIDs"], ["appID", "alertIDs"]])
         #expect(model.alerts.items.map(\.id) == [2, 1])
     }
 
