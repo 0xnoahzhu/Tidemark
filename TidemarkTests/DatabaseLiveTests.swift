@@ -139,6 +139,64 @@ struct DatabaseLiveTests {
         }
     }
 
+    @Test func callsEndOnceTheirConnectionIsClosedEvenWhenTheBodyIsStuck() async throws {
+        try await withTestDatabase { db in
+            // PostgresNIO never answers a statement sent after its connection finished closing. These bodies carry
+            // on past the close (in a cancellation shield, like a rollback) and get stuck on such a statement for
+            // good; the calls end anyway.
+            let clock = ContinuousClock()
+            let start = clock.now
+            let expired = await Self.failure(within: .seconds(10)) {
+                _ = try await db.withConnection(limit: .client(.milliseconds(300))) { connection in
+                    await withTaskCancellationShield { try? await Task.sleep(for: .milliseconds(600)) }
+                    _ = try await connection.query("SELECT 1", logger: PostgresDatabase.logger).collect()
+                }
+            }
+            guard case .timedOut(.noReply(_, let limit))? = expired as? DatabaseError else {
+                Issue.record("Expected .timedOut(.noReply), got \(String(describing: expired))")
+                return
+            }
+            #expect(limit == .milliseconds(300))
+            #expect(start.duration(to: clock.now) < .seconds(2))
+
+            // Capture gave up on a writer call: it ends as soon as its connection is closed.
+            let write = Task {
+                try await db.withConnection(on: .writer) { connection in
+                    await withTaskCancellationShield { try? await Task.sleep(for: .milliseconds(600)) }
+                    _ = try await connection.query("SELECT 1", logger: PostgresDatabase.logger).collect()
+                }
+            }
+            try await Task.sleep(for: .milliseconds(200))
+            let cancelledAt = clock.now
+            write.cancel()
+            let cancelled = await Self.failure(within: .seconds(10)) { try await write.value }
+            #expect(cancelled is CancellationError, "\(String(describing: cancelled))")
+            #expect(cancelledAt.duration(to: clock.now) < .seconds(1))
+
+            // The pools replaced the closed connections.
+            for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await db.ping() }
+            for _ in 0..<PostgresDatabase.mainPoolSize { _ = try await db.mutes() }
+        }
+    }
+
+    @Test func aTransactionWhoseConnectionClosedSendsNoRollback() async throws {
+        try await withTestDatabase { db in
+            // The connection closed under the transaction (the server, the network, a call limit): the transaction
+            // ended with it, and a ROLLBACK sent now would never be answered.
+            struct ConnectionLost: Error {}
+            let failure = await Self.failure(within: .seconds(10)) {
+                try await db.withTransaction(on: .writer) { connection in
+                    _ = try await connection.query("INSERT INTO mutes (pattern) VALUES ('lost.example')", logger: PostgresDatabase.logger).collect()
+                    try await connection.close()
+                    throw ConnectionLost()
+                }
+            }
+            #expect(failure is DatabaseError, "\(String(describing: failure))")
+            #expect(!(try await db.mutes()).contains("lost.example"))
+            for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await db.ping() }
+        }
+    }
+
     @Test func pingReportsServerVersion() async throws {
         try await withTestDatabase { db in
             let ping = try await db.ping()
@@ -1489,6 +1547,17 @@ struct DatabaseLiveTests {
             """).reduce(into: [String: Bool]()) { result, row in
             let read = PostgresRowReader(row)
             result[try read("name", as: String.self)] = try read("valid", as: Bool.self)
+        }
+    }
+
+    /// What `operation` threw (nil when it returned), or `CaptureTimeoutError` when it did not end within `limit`:
+    /// a call that hangs fails its test instead of holding up the suite.
+    private static func failure(within limit: Duration, _ operation: @escaping @Sendable () async throws -> Void) async -> (any Error)? {
+        do {
+            try await CaptureTimeout.unstructured(limit, operation)
+            return nil
+        } catch {
+            return error
         }
     }
 
