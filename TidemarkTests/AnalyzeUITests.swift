@@ -606,7 +606,7 @@ private final class SlowStopProbeActions: ProbeActions {
     /// Every catalog compiles into the app with a Chinese translation for each key.
     @Test func chineseCatalogsAreComplete() throws {
         let lproj = try #require(Bundle.main.path(forResource: "zh-Hans", ofType: "lproj"))
-        for table in ["AppDetail", "Inventory", "SiteProbe", "Egress"] {
+        for table in ["AppDetail", "Inventory", "SiteProbe", "Egress", "Capture"] {
             let url = URL(fileURLWithPath: lproj).appendingPathComponent("\(table).strings")
             let strings = try #require(NSDictionary(contentsOf: url) as? [String: String], "missing \(table).strings")
             #expect(strings.count > 30)
