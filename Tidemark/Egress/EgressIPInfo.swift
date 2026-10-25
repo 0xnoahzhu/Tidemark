@@ -7,8 +7,8 @@ import Synchronization
 ///
 /// The service is proxycheck.io (`https://proxycheck.io/v2/<ip>?vpn=1&asn=1`): HTTPS, no API key needed for
 /// light use (about 100 lookups a day), and its `type` field distinguishes hosting/datacenter networks
-/// from residential, business and wireless ones. It is asked only when Settings › IP info service is on,
-/// only for Tidemark's own egress IPs and for IPs the user looks up, and never for private, loopback,
+/// from residential, business and wireless ones. It is always on (there is no setting for it) and asked only
+/// for Tidemark's own egress IPs and for IPs the user looks up, never for private, loopback,
 /// link-local, shared (CGNAT), Surge fake-IP, documentation, multicast or reserved addresses. Requests time
 /// out after 5 s and failures simply leave the type empty.
 enum EgressIPInfo {
