@@ -44,8 +44,9 @@ services on `AppModel` (`model.database`, `model.capture`, `model.probeActions`,
 
 All Surge access goes through `surge-cli --raw` (JSON output). The executable lives at
 `/Applications/Surge.app/Contents/Applications/surge-cli` (also linked from `/usr/local/bin/surge-cli`).
-For a remote Surge, add `--remote host:port` and send the password on stdin with `--password-stdin`
-(never in argv).
+Tidemark reads this Mac's Surge: Settings offer no remote Surge. The client still supports one, adding
+`--remote host:port` and sending the password on stdin with `--password-stdin` (never in argv). A stream that
+ends or fails is always restarted, with backoff.
 
 * **Stream** — `watch request request-update real-time-speed environment reload shutdown`. First line is
   `{"result":"Event subscribed"}`. `request` and `request-update` events have the same shape
@@ -120,8 +121,11 @@ session):
    104.16.98.215", or "connected straight to" when there was no hostname).
 3. Insert an alert unless the host/IP matches a mute pattern (`host`, `IP`, `*.example.com`). Muted hosts
    are still recorded. Entries stay marked NEW for 24 hours.
-4. Post a macOS notification (UserNotifications). Bursts are grouped: one notification per app per 30 s.
-   Alerts written by *other* Macs are polled and shown only if enabled.
+4. Post a macOS notification (UserNotifications), always: there are no notification settings. It reads like
+   the design's banner: "Tidemark", then "Raycast reached a new site" and "notion.com · first host
+   api.notion.com · via node". Bursts are grouped: one notification per app per 30 s. Alerts written by
+   *other* Macs are polled and posted on this Mac too, led by that Mac's name, unless their host is muted,
+   their app is archived or its monitoring is paused here.
 
 ## Database
 
@@ -182,12 +186,14 @@ migration runner and every time limit.
   [DATABASE.md › Connections](DATABASE.md#connections) lists the limits.
 * **Counts** — total rows use `pg_class.reltuples` plus rows written since; "today" is an indexed count.
 * **Retention** — none: requests are kept forever.
-* **Credentials** — the URL is stored without its password in `UserDefaults`; the password lives in the
-  Keychain. `TIDEMARK_DATABASE_URL` (environment) overrides both for development.
+* **Credentials** — Settings › Database has one URL field: a password typed into it goes to the Keychain and
+  the field shows it masked (`postgres://tide:••••••••@127.0.0.1:5432/tidemark`). The URL is stored without
+  its password in `UserDefaults`. `TIDEMARK_DATABASE_URL` (environment) overrides both for development.
 
 ## Multi-Mac
 
-Every row carries `device_id`. Each Mac records and alerts on its own requests. The sidebar's Mac menu
+Every row carries `device_id`. Each Mac records and alerts on its own requests, and every Mac posts the
+notifications of every Mac's alerts. The sidebar's Mac menu
 scopes every page to one Mac or all. The live table merges this Mac's stream with rows other Macs wrote
 (polled by `updated_at` through `requestsWritten(after:)`, with a few seconds of overlap). "Mark All as
 Read" only touches the selected Mac's rows. Apps are shared by bundle path; each Mac reports in `app_installs` whether the
