@@ -3,7 +3,7 @@
   "strings" : {
     "%1$@ connected straight to %2$@" : {
       "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 直接连接了 %2$@" } }
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 直接用 IP 连接了 %2$@" } }
       }
     },
     "%1$@ connected to %2$@" : {

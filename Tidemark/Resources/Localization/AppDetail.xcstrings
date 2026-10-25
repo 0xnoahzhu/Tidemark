@@ -6,7 +6,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@（其中 %2$lld 个直连）"
+            "value" : "%1$@（其中 %2$lld 个仅用 IP 访问）"
           }
         }
       }
@@ -246,7 +246,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "直连 IP"
+            "value" : "纯 IP"
           }
         }
       }
@@ -316,7 +316,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "直连"
+            "value" : "仅 IP"
           }
         }
       }

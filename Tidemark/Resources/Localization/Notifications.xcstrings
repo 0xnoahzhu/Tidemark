@@ -7,7 +7,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ 直接连接了 %2$@"
+            "value" : "%1$@ 直接用 IP 连接了 %2$@"
           }
         }
       }
