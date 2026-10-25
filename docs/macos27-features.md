@@ -711,9 +711,9 @@ actor InsightGenerator {
 ```
 
 **Rules**
-- Insights are opt-in, through a toggle in Settings > Notifications that shows `variant.displayName`. They run on-device only.
+- Insights run on-device only. Not adopted as planned: Settings have no Notifications tab or switch for insights, and notifications never carry them, since the design shows neither.
 - In the UI they are labelled "Generated on this Mac" and phrased as "likely". They never affect first-contact detection, alerts or mutes.
-- Never delay an alert waiting for a model response. Post the notification first and enrich it later.
+- Never delay an alert waiting for a model response.
 - Background requests use non-streaming `respond`; the SDK docs say this reduces `rateLimited` errors. The inspector may call `prewarm()` when it opens.
 - Facts go in the prompt from `HostContext`. Do not use tools: they add latency and gain nothing, because Tidemark already has the facts.
 - The answer language follows `Localizer.shared.languageCode` (the in-app language), not `Locale.current`.

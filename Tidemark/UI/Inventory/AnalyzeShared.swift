@@ -185,7 +185,7 @@ enum AnalyzeFormat {
 enum AnalyzeMuteState: Equatable {
     case unmuted
     case muted
-    /// Matched by a wildcard pattern (`*.apple.com`); it can only be unmuted in Settings.
+    /// Matched by a wildcard pattern (`*.apple.com`), which Tidemark offers no way to unmute.
     case mutedByRule
 
     @MainActor
