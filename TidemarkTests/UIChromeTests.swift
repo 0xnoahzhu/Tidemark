@@ -220,13 +220,30 @@ struct UIChromeTests {
 
     // MARK: Settings helpers
 
+    /// The URL field holds the password: typed into the URL it goes to the Keychain, the stored URL never has it,
+    /// and the field shows it as a mask, which keeps it.
     @Test func databaseURLKeepsThePasswordOut() {
-        let split = SettingsDatabaseURL.split("postgresql://tide:s%40cret@127.0.0.1:5432/tidemark")
-        #expect(split.url == "postgresql://tide@127.0.0.1:5432/tidemark")
-        #expect(split.password == "s@cret")
+        let typed = SettingsDatabaseURL.split("postgresql://tide:s%40cret@127.0.0.1:5432/tidemark")
+        #expect(typed.url == "postgresql://tide@127.0.0.1:5432/tidemark")
+        #expect(typed.password == .typed("s@cret"))
+        #expect(SettingsDatabaseURL.split("postgres://tide:a%2541@h/db").password == .typed("a%41"), "decoded once")
+
         let plain = SettingsDatabaseURL.split("postgresql://localhost:5432/tidemark")
         #expect(plain.url == "postgresql://localhost:5432/tidemark")
-        #expect(plain.password == nil)
+        #expect(plain.password == SettingsDatabaseURL.Password.none)
+        #expect(SettingsDatabaseURL.split("not a url").password == .kept, "a typo never drops the saved password")
+
+        let masked = SettingsDatabaseURL.masked("postgres://tide@127.0.0.1:5432/tidemark", hasPassword: true)
+        #expect(masked == "postgres://tide:••••••••@127.0.0.1:5432/tidemark")
+        #expect(SettingsDatabaseURL.split(masked).url == "postgres://tide@127.0.0.1:5432/tidemark")
+        #expect(SettingsDatabaseURL.split(masked).password == .kept)
+        #expect(SettingsDatabaseURL.split("postgres://tide:•••••@127.0.0.1:5432/tidemark").password == .kept, "an edited mask")
+        #expect(SettingsDatabaseURL.masked("postgres://tide@127.0.0.1:5432/tidemark", hasPassword: false) == "postgres://tide@127.0.0.1:5432/tidemark")
+
+        // Without a user name the mask still round-trips to the stored URL.
+        let userless = SettingsDatabaseURL.masked("postgresql://localhost:5432/tidemark", hasPassword: true)
+        #expect(userless == "postgresql://:••••••••@localhost:5432/tidemark")
+        #expect(SettingsDatabaseURL.split(userless).url == "postgresql://localhost:5432/tidemark")
     }
 
     @Test func databaseFormatting() {
@@ -234,21 +251,22 @@ struct UIChromeTests {
             #expect(SettingsDatabaseFormat.seconds(1) == "1")
             #expect(SettingsDatabaseFormat.seconds(0.5) == "0.5")
             #expect(SettingsDatabaseFormat.batchLabel(.init(rows: 200, interval: 1)) == "200 · 1 s")
+            #expect(SettingsDatabaseFormat.batchNote(.init(rows: 200, interval: 1)) == "Every 200 rows or 1 second, whichever comes first")
+            #expect(SettingsDatabaseFormat.batchNote(.init(rows: 100, interval: 0.5)) == "Every 100 rows or 0.5 seconds, whichever comes first")
             #expect(SettingsDatabaseFormat.milliseconds(.milliseconds(2)) == 2)
         }
         withLanguage(.chinese) {
             #expect(SettingsDatabaseFormat.batchLabel(.init(rows: 200, interval: 1)) == "200 · 1 秒")
+            #expect(SettingsDatabaseFormat.batchNote(.init(rows: 200, interval: 1)) == "每 200 行或每 1 秒写一次，先到为准")
         }
     }
 
-    /// The Database pane opens with the three-line table list in view: one Mac (or none yet) fits 700 pt,
-    /// each further Mac adds a row, and the pane stops growing at a height a 13-inch display still shows.
-    @Test func databasePaneGrowsWithTheMacs() {
-        #expect(SettingsDatabaseFormat.paneHeight(macCount: 0) == 700)
-        #expect(SettingsDatabaseFormat.paneHeight(macCount: 1) == 700)
-        #expect(SettingsDatabaseFormat.paneHeight(macCount: 2) == 744)
-        #expect(SettingsDatabaseFormat.paneHeight(macCount: 3) == 788)
-        #expect(SettingsDatabaseFormat.paneHeight(macCount: 12) == 800)
+    /// The Language pop-up offers English and 简体中文; following the system shows the language in use.
+    @Test func languagePopUpShowsTheLanguageInUse() {
+        #expect(SettingsGeneralPane.shownLanguage(.system, isChinese: false) == .english)
+        #expect(SettingsGeneralPane.shownLanguage(.system, isChinese: true) == .chinese)
+        #expect(SettingsGeneralPane.shownLanguage(.english, isChinese: true) == .english)
+        #expect(SettingsGeneralPane.shownLanguage(.chinese, isChinese: false) == .chinese)
     }
 
     @Test func addAppLabels() {

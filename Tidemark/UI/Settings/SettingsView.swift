@@ -41,9 +41,11 @@ struct SettingsView: View {
 
 // MARK: - Shared pieces
 
-/// Fixed pane width; each pane picks its own height so the window resizes between tabs.
+/// Fixed pane width; each pane is as tall as its content so the window resizes between tabs.
 enum SettingsLayout {
     static let width: CGFloat = 660
+    /// Tallest a pane opens, which a 13-inch display still shows; its content scrolls beyond.
+    static let maxHeight: CGFloat = 800
 }
 
 /// The design's Settings tab icons: a 26 pt rounded tile in the tab's color holding a white glyph
@@ -135,29 +137,118 @@ enum SettingsTabIcon {
     }
 }
 
+/// A pane laid out as in the design: 18 pt above, 26 pt at the sides, 24 pt below, groups 16 pt apart. The pane
+/// is as tall as its content and scrolls past `SettingsLayout.maxHeight`.
+struct SettingsPage<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    @State private var contentHeight: CGFloat?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) { content }
+                .padding(EdgeInsets(top: 18, leading: 26, bottom: 24, trailing: 26))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { contentHeight = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(width: SettingsLayout.width, height: min(contentHeight ?? SettingsLayout.maxHeight / 2, SettingsLayout.maxHeight))
+    }
+}
+
+/// A heading (`surge-cli location`, 12 pt semibold) over its content, 7 pt apart.
+struct SettingsGroup<Content: View>: View {
+    var title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// White card with 10 pt corners and a hairline border; its rows are separated by hairlines.
+struct SettingsCard<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Group(subviews: content) { rows in
+                ForEach(rows.indices, id: \.self) { index in
+                    if index > 0 {
+                        Rectangle().fill(Theme.line).frame(height: 0.5)
+                    }
+                    rows[index]
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+    }
+}
+
+/// A card row: the title (12.5 pt) and an optional note (11 pt, secondary) on the left, the control on the right.
+struct SettingsRow<Control: View>: View {
+    var title: String
+    var note: String?
+    var noteFont: Font = .system(size: 11)
+    /// 9 pt in General's cards, 10 pt in the others.
+    var verticalPadding: CGFloat = 10
+    @ViewBuilder var control: Control
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.ink)
+                if let note {
+                    Text(note)
+                        .font(noteFont)
+                        .foregroundStyle(Theme.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            control
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, verticalPadding)
+    }
+}
+
+extension View {
+    /// The design's text field box: card background, hairline inner border, rounded corners.
+    func settingsField(height: CGFloat = 30, cornerRadius: CGFloat = 8, padding: CGFloat = 10) -> some View {
+        self
+            .padding(.horizontal, padding)
+            .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+    }
+}
+
 /// `● Connected · PostgreSQL 18.3 · 2 ms` status line under a connection field.
 struct SettingsStatusLine: View {
     enum Tone { case ok, pending, failed, neutral }
 
     var tone: Tone
     var text: String
-    var detail: String?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             StatusDot(color: color, size: 7, pulsing: tone == .pending)
                 .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(text)
-                    .foregroundStyle(tone == .failed ? Theme.failed : Theme.ink2)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let detail, !detail.isEmpty {
-                    Text(detail)
-                        .foregroundStyle(Theme.ink3)
-                        .lineLimit(2)
-                }
-            }
+            Text(text)
+                .foregroundStyle(tone == .failed ? Theme.failed : Theme.ink2)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .font(.system(size: 12))
     }

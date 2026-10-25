@@ -5,9 +5,8 @@ struct SettingsDatabasePane: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
 
+    /// The URL field's text: the saved URL with a mask where the Keychain password goes.
     @State private var urlDraft = ""
-    @State private var passwordDraft = ""
-    @State private var hasStoredPassword = false
     @State private var nameDraft = ""
     @State private var testing = false
     @State private var testResult: Result<String, Error>?
@@ -15,13 +14,11 @@ struct SettingsDatabasePane: View {
     @State private var schemaVersion: Int?
 
     var body: some View {
-        Form {
-            connectionSection
-            macsSection
-            writingSection
+        SettingsPage {
+            connectionGroup
+            macsGroup
+            writingCard
         }
-        .formStyle(.grouped)
-        .frame(width: SettingsLayout.width, height: SettingsDatabaseFormat.paneHeight(macCount: model.devices.devices.count))
         .onAppear(perform: load)
         .onChange(of: model.devices.thisDevice?.name) { _, name in
             if nameDraft.isEmpty, let name { nameDraft = name }
@@ -31,32 +28,24 @@ struct SettingsDatabasePane: View {
 
     // MARK: Connection
 
-    private var connectionSection: some View {
-        Section {
-            LabeledContent(tr("URL", "Settings")) {
-                TextField(text: $urlDraft, prompt: Text(verbatim: "postgresql://user@127.0.0.1:5432/tidemark")) {
-                    Text(tr("URL", "Settings"))
-                }
-                .labelsHidden()
-                .multilineTextAlignment(.trailing)
-                .font(Theme.mono(12))
-                .autocorrectionDisabled()
-                .onSubmit(testConnection)
+    /// One URL field, password included: what is typed there goes to the Keychain and comes back masked.
+    private var connectionGroup: some View {
+        SettingsGroup(title: tr("PostgreSQL connection URL", "Settings")) {
+            TextField(text: $urlDraft, prompt: Text(verbatim: "postgres://user@127.0.0.1:5432/tidemark")) {
+                Text(tr("PostgreSQL connection URL", "Settings"))
             }
-            SecureField(text: $passwordDraft, prompt: Text(hasStoredPassword ? tr("Saved in the Keychain", "Settings") : tr("Optional", "Settings"))) {
-                Text(tr("Password", "Settings"))
-            }
+            .labelsHidden()
+            .textFieldStyle(.plain)
+            .font(Theme.mono(12))
+            .autocorrectionDisabled()
             .onSubmit(testConnection)
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            .settingsField()
+            HStack(spacing: 8) {
                 connectionStatus
                 Spacer(minLength: 8)
                 Button(tr("Test Connection", "Settings"), action: testConnection)
                     .disabled(testing)
             }
-        } header: {
-            Text(tr("PostgreSQL connection URL", "Settings"))
-        } footer: {
-            SettingsNote(text: tr("The password is kept in the Keychain, never in the URL.", "Settings"))
         }
     }
 
@@ -97,12 +86,11 @@ struct SettingsDatabasePane: View {
 
     // MARK: Macs
 
-    private var macsSection: some View {
-        Section {
+    private var macsGroup: some View {
+        SettingsGroup(title: tr("Macs writing to this database", "Settings")) {
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                VStack(spacing: 0) {
-                    ForEach(Array(sortedDevices.enumerated()), id: \.element.id) { index, device in
-                        if index > 0 { Divider() }
+                SettingsCard {
+                    ForEach(sortedDevices) { device in
                         SettingsDeviceRow(device: device, isThisMac: device.id == model.devices.thisDeviceID, now: context.date)
                     }
                     if sortedDevices.isEmpty {
@@ -110,17 +98,24 @@ struct SettingsDatabasePane: View {
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.ink2)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 6)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
                     }
                 }
             }
-            TextField(text: $nameDraft, prompt: Text(Self.computerName)) {
+            HStack(spacing: 8) {
                 Text(tr("Name this Mac", "Settings"))
+                    .foregroundStyle(Theme.ink2)
+                    .fixedSize()
+                TextField(text: $nameDraft, prompt: Text(Self.computerName)) {
+                    Text(tr("Name this Mac", "Settings"))
+                }
+                .labelsHidden()
+                .textFieldStyle(.plain)
+                .onSubmit(renameThisMac)
+                .settingsField(height: 26, cornerRadius: 7, padding: 9)
             }
-            .onSubmit(renameThisMac)
-        } header: {
-            Text(tr("Macs writing to this database", "Settings"))
-        } footer: {
+            .font(.system(size: 12))
             SettingsNote(text: tr("Every row is tagged with the Mac it came from, so several Macs can share one database. Each Mac records and alerts on its own apps. Use the Mac menu at the top of the sidebar to look at one Mac's data.", "Settings"))
         }
     }
@@ -138,36 +133,31 @@ struct SettingsDatabasePane: View {
 
     // MARK: Writing
 
-    private var writingSection: some View {
-        Section {
-            Picker(selection: batchBinding) {
-                ForEach(batchOptions, id: \.self) { preset in
-                    Text(SettingsDatabaseFormat.batchLabel(preset)).tag(preset)
+    private var writingCard: some View {
+        SettingsCard {
+            SettingsRow(title: tr("Write in batches", "Settings"), note: SettingsDatabaseFormat.batchNote(model.preferences.batchPreset)) {
+                Picker(tr("Write in batches", "Settings"), selection: batchBinding) {
+                    ForEach(batchOptions, id: \.self) { preset in
+                        Text(SettingsDatabaseFormat.batchLabel(preset)).tag(preset)
+                    }
                 }
-            } label: {
-                Text(tr("Write in batches", "Settings"))
-                Text(trf("Every %lld rows or %@ s, whichever comes first", "Settings", model.preferences.batchRows, SettingsDatabaseFormat.seconds(model.preferences.batchInterval)))
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
             }
-            .pickerStyle(.menu)
-
-            LabeledContent {
+            SettingsRow(title: tr("If the database is unreachable", "Settings"),
+                        note: trf("Buffer up to %@ rows on disk and replay them on reconnect", "Settings", Fmt.count(model.preferences.spoolLimit))) {
                 Text(trf("%@ buffered", "Settings", Fmt.count(model.live.bufferedRows)))
                     .font(Theme.mono(11))
                     .foregroundStyle(model.live.bufferedRows > 0 ? Theme.amberInk : Theme.ink2)
                     .contentTransition(.numericText())
-            } label: {
-                Text(tr("If the database is unreachable", "Settings"))
-                Text(trf("Buffer up to %@ rows on disk and replay them on reconnect", "Settings", Fmt.count(model.preferences.spoolLimit)))
             }
-
-            LabeledContent {
+            SettingsRow(title: tr("Tables", "Settings"),
+                        note: tables.isEmpty ? tr("Not connected", "Settings") : tables.joined(separator: " · "),
+                        noteFont: tables.isEmpty ? .system(size: 11) : Theme.mono(11)) {
                 Text(schemaVersion.map { trf("schema v%lld", "Settings", $0) } ?? "—")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.ink2)
-            } label: {
-                Text(tr("Tables", "Settings"))
-                Text(tables.isEmpty ? tr("Not connected", "Settings") : tables.joined(separator: " · "))
-                    .font(Theme.mono(11))
             }
         }
     }
@@ -185,9 +175,12 @@ struct SettingsDatabasePane: View {
     // MARK: Actions
 
     private func load() {
-        urlDraft = model.preferences.databaseURL
-        hasStoredPassword = Keychain.read(account: Keychain.databaseAccount)?.isEmpty == false
+        urlDraft = SettingsDatabaseURL.masked(model.preferences.databaseURL, hasPassword: Self.hasStoredPassword)
         nameDraft = model.devices.thisDevice?.name ?? ""
+    }
+
+    private static var hasStoredPassword: Bool {
+        Keychain.read(account: Keychain.databaseAccount)?.isEmpty == false
     }
 
     private func loadSchema() async {
@@ -198,8 +191,8 @@ struct SettingsDatabasePane: View {
         schemaVersion = version
     }
 
-    /// Saves the URL (moving an embedded password to the Keychain) and the password draft.
-    /// Returns `true` when the saved URL or password changed.
+    /// Saves the URL field: the URL without its password to the preferences and the password to the Keychain
+    /// (the mask keeps the saved one, a URL without a password removes it). Returns `true` when either changed.
     private func commitConnection() -> Bool {
         let parts = SettingsDatabaseURL.split(urlDraft.trimmingCharacters(in: .whitespacesAndNewlines))
         var changed = false
@@ -207,15 +200,22 @@ struct SettingsDatabasePane: View {
             model.preferences.databaseURL = parts.url
             changed = true
         }
-        urlDraft = parts.url
-        if let password = parts.password ?? (passwordDraft.isEmpty ? nil : passwordDraft) {
-            if password != Keychain.read(account: Keychain.databaseAccount) {
+        let stored = Keychain.read(account: Keychain.databaseAccount)
+        switch parts.password {
+        case .kept:
+            break
+        case .typed(let password):
+            if password != stored {
                 Keychain.write(password, account: Keychain.databaseAccount)
                 changed = true
             }
-            passwordDraft = ""
-            hasStoredPassword = true
+        case .none:
+            if stored?.isEmpty == false {
+                Keychain.write(nil, account: Keychain.databaseAccount)
+                changed = true
+            }
         }
+        urlDraft = SettingsDatabaseURL.masked(parts.url, hasPassword: Self.hasStoredPassword)
         return changed
     }
 
@@ -272,7 +272,8 @@ private struct SettingsDeviceRow: View {
                 .foregroundStyle(activity.online ? Color(oklch: 0.55, 0.13, 150) : Theme.ink3)
                 .monospacedDigit()
         }
-        .padding(.vertical, 6)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
     }
 
     private var subtitle: String {
@@ -294,16 +295,16 @@ private struct SettingsDeviceRow: View {
 /// Formatting for the Database pane.
 @MainActor
 enum SettingsDatabaseFormat {
-    /// Pane height that opens with every row visible, the three-line table list included: one Mac fits in
-    /// 700 pt and each further Mac adds a row, up to a height that still fits a 13-inch display (the form
-    /// scrolls beyond that).
-    nonisolated static func paneHeight(macCount: Int) -> CGFloat {
-        min(700 + 44 * CGFloat(max(macCount - 1, 0)), 800)
-    }
-
     /// `200 · 1 s`
     static func batchLabel(_ preset: Preferences.BatchPreset) -> String {
         trf("%lld · %@ s", "Settings", preset.rows, seconds(preset.interval))
+    }
+
+    /// `Every 200 rows or 1 second, whichever comes first`
+    static func batchNote(_ preset: Preferences.BatchPreset) -> String {
+        preset.interval == 1
+            ? trf("Every %lld rows or 1 second, whichever comes first", "Settings", preset.rows)
+            : trf("Every %lld rows or %@ seconds, whichever comes first", "Settings", preset.rows, seconds(preset.interval))
     }
 
     /// `1`, `0.5`
@@ -317,11 +318,40 @@ enum SettingsDatabaseFormat {
     }
 }
 
-/// Splits a pasted PostgreSQL URL into the URL kept in preferences and the password kept in the Keychain.
+/// The URL field's text and what it means for the URL kept in the preferences and the password kept in the
+/// Keychain. The field shows the saved password as a mask: `postgres://tide:••••••••@127.0.0.1:5432/tidemark`.
 enum SettingsDatabaseURL {
-    static func split(_ raw: String) -> (url: String, password: String?) {
-        guard var components = URLComponents(string: raw), let password = components.password else { return (raw, nil) }
+    /// What the field says about the Keychain password.
+    enum Password: Equatable {
+        /// The mask (or what is left of it): keep the saved password.
+        case kept
+        /// A password typed into the URL.
+        case typed(String)
+        /// A URL without a password: there is none.
+        case none
+    }
+
+    static let mask = "••••••••"
+    /// ASCII stand-in for the mask while `URLComponents` builds the string (it would percent-encode the dots).
+    private static let placeholder = "TIDEMARKPASSWORD"
+
+    /// The saved URL with the mask where the saved password goes.
+    static func masked(_ url: String, hasPassword: Bool) -> String {
+        guard hasPassword, var components = URLComponents(string: url), components.scheme != nil else { return url }
+        components.password = placeholder
+        guard let string = components.string, let range = string.range(of: ":\(placeholder)@") else { return url }
+        return string.replacingCharacters(in: range, with: ":\(mask)@")
+    }
+
+    /// Splits the field's text into the URL to keep (without a password) and what happens to the password. Text
+    /// that is not a URL keeps the saved password, so a typo never loses it.
+    static func split(_ raw: String) -> (url: String, password: Password) {
+        guard var components = URLComponents(string: raw), components.scheme != nil else { return (raw, .kept) }
+        let password = components.password
         components.password = nil
-        return (components.string ?? raw, password.removingPercentEncoding ?? password)
+        if components.user?.isEmpty == true { components.user = nil }
+        let url = components.string ?? raw
+        guard let password, !password.isEmpty else { return (url, .none) }
+        return (url, password.allSatisfy { $0 == "•" } ? .kept : .typed(password))
     }
 }

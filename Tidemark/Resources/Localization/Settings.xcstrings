@@ -31,16 +31,6 @@
         }
       }
     },
-    "Allow Tidemark in System Settings › General › Login Items to finish turning this on." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请在系统设置 › 通用 › 登录项中允许 Tidemark，才能完成开启。"
-          }
-        }
-      }
-    },
     "Appearance" : {
       "localizations" : {
         "zh-Hans" : {
@@ -161,12 +151,22 @@
         }
       }
     },
-    "Every %lld rows or %@ s, whichever comes first" : {
+    "Every %lld rows or %@ seconds, whichever comes first" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "每 %lld 行或每 %@ 秒写一次，先到为准"
+          }
+        }
+      }
+    },
+    "Every %lld rows or 1 second, whichever comes first" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每 %lld 行或每 1 秒写一次，先到为准"
           }
         }
       }
@@ -341,42 +341,12 @@
         }
       }
     },
-    "Open Login Items…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开登录项…"
-          }
-        }
-      }
-    },
     "Open at login" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "登录时打开"
-          }
-        }
-      }
-    },
-    "Optional" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可选"
-          }
-        }
-      }
-    },
-    "Password" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "密码"
           }
         }
       }
@@ -397,16 +367,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "记录已暂停"
-          }
-        }
-      }
-    },
-    "Saved in the Keychain" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已存入钥匙串"
           }
         }
       }
@@ -471,16 +431,6 @@
         }
       }
     },
-    "The password is kept in the Keychain, never in the URL." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "密码保存在钥匙串里，不会写进连接地址。"
-          }
-        }
-      }
-    },
     "This Mac" : {
       "localizations" : {
         "zh-Hans" : {
@@ -497,16 +447,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "磨砂"
-          }
-        }
-      }
-    },
-    "URL" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "地址"
           }
         }
       }

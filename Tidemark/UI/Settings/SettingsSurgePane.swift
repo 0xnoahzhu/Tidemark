@@ -8,44 +8,38 @@ struct SettingsSurgePane: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
 
-    /// The command Tidemark keeps running, shown in the Subscription block.
-    static let subscriptionCommand = "$ surge-cli --raw watch request request-update real-time-speed environment reload shutdown"
+    /// The subscription as the design shows it.
+    static let subscriptionCommand = "$ surge-cli --raw watch request"
 
     var body: some View {
-        Form {
-            Section {
+        SettingsPage {
+            SettingsGroup(title: tr("surge-cli location", "Settings")) {
                 HStack(spacing: 8) {
                     Text(model.preferences.surgeCLIPath)
                         .font(Theme.mono(11.5))
                         .lineLimit(1)
                         .truncationMode(.head)
                         .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                         .help(model.preferences.surgeCLIPath)
+                        .settingsField()
                     Button(tr("Choose…", "Settings"), action: chooseCLI)
+                        .controlSize(.large)
                 }
                 status
-            } header: {
-                Text(tr("surge-cli location", "Settings"))
             }
 
-            Section {
-                Text(Self.subscriptionCommand)
+            SettingsGroup(title: tr("Subscription", "Settings")) {
+                Text(verbatim: Self.subscriptionCommand)
                     .font(Theme.mono(12))
                     .foregroundStyle(Color(oklch: 0.88, 0.08, 165))
                     .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color(oklch: 0.2, 0.01, 250), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 SettingsNote(text: tr("Each event arrives as one line of JSON. Tidemark reads the process, its parent, host, remote IP, policy and rule, then writes the row. If the stream drops, it reconnects and carries on.", "Settings"))
-            } header: {
-                Text(tr("Subscription", "Settings"))
             }
         }
-        .formStyle(.grouped)
-        .frame(width: SettingsLayout.width, height: 600)
     }
 
     // MARK: Status

@@ -1,4 +1,5 @@
 import AppKit
+import os
 import ServiceManagement
 import SwiftUI
 
@@ -8,46 +9,27 @@ struct SettingsGeneralPane: View {
     @Environment(Localizer.self) private var localizer
 
     @State private var loginStatus = SMAppService.mainApp.status
-    @State private var loginError: String?
 
     var body: some View {
-        Form {
-            Section {
-                showInPicker
-                appearancePicker
-                glassSlider
-                languagePicker
-            } header: {
-                brandHeader
+        SettingsPage {
+            brandHeader
+            SettingsCard {
+                SettingsRow(title: tr("Show in", "Settings"), verticalPadding: 9) { showInPicker }
+                SettingsRow(title: tr("Appearance", "Settings"), verticalPadding: 9) { appearancePicker }
+                SettingsRow(title: tr("Liquid Glass", "Settings"),
+                            note: tr("Follows System Settings › Appearance until you move it here.", "Settings"),
+                            verticalPadding: 9) { glassSlider }
+                SettingsRow(title: tr("Language", "Settings"), verticalPadding: 9) { languagePicker }
             }
-
-            Section {
-                Toggle(isOn: loginBinding) {
-                    Text(tr("Open at login", "Settings"))
-                    Text(tr("Starts recording right away and monitors every app except archived ones.", "Settings"))
-                }
-                if loginStatus == .requiresApproval {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(tr("Allow Tidemark in System Settings › General › Login Items to finish turning this on.", "Settings"))
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Theme.amberInk)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer()
-                        Button(tr("Open Login Items…", "Settings")) {
-                            SMAppService.openSystemSettingsLoginItems()
-                        }
-                    }
-                }
-                if let loginError {
-                    Text(loginError)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.failed)
-                        .textSelection(.enabled)
+            SettingsCard {
+                SettingsRow(title: tr("Open at login", "Settings"),
+                            note: tr("Starts recording right away and monitors every app except archived ones.", "Settings")) {
+                    Toggle(tr("Open at login", "Settings"), isOn: loginBinding)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
                 }
             }
         }
-        .formStyle(.grouped)
-        .frame(width: SettingsLayout.width, height: 470)
         .onAppear { loginStatus = SMAppService.mainApp.status }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             loginStatus = SMAppService.mainApp.status
@@ -69,12 +51,12 @@ struct SettingsGeneralPane: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Theme.ink)
                 Text(trf("Version %@ · keeps every Surge request in PostgreSQL", "Settings", Self.version))
-                    .font(.system(size: 11.5, weight: .regular))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(Theme.ink2)
             }
         }
-        .padding(.bottom, 8)
-        .textCase(nil)
+        .padding(.top, 2)
+        .padding(.bottom, 4)
     }
 
     static var version: String {
@@ -83,85 +65,82 @@ struct SettingsGeneralPane: View {
 
     // MARK: Rows
 
-    // The segmented pickers put their label in LabeledContent and size only the control to fit, so they end
-    // at the row's trailing edge like the slider, the menus and the switch (a fixed-size Picker shrinks the
-    // whole row, label included, and stops short of the edge).
-
     private var showInPicker: some View {
-        LabeledContent(tr("Show in", "Settings")) {
-            Picker(tr("Show in", "Settings"), selection: Binding(
-                get: { model.preferences.showIn },
-                set: { value in
-                    model.preferences.showIn = value
-                    AppBootstrap.applyActivationPolicy(value)
-                    // Changing the activation policy can deactivate the app; keep Settings in front.
-                    Task { @MainActor in NSApp.activate() }
-                }
-            )) {
-                Text(tr("Menu Bar & Dock", "Settings")).tag(Preferences.ShowIn.menuBarAndDock)
-                Text(tr("Menu Bar Only", "Settings")).tag(Preferences.ShowIn.menuBarOnly)
+        Picker(tr("Show in", "Settings"), selection: Binding(
+            get: { model.preferences.showIn },
+            set: { value in
+                model.preferences.showIn = value
+                AppBootstrap.applyActivationPolicy(value)
+                // Changing the activation policy can deactivate the app; keep Settings in front.
+                Task { @MainActor in NSApp.activate() }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+        )) {
+            Text(tr("Menu Bar & Dock", "Settings")).tag(Preferences.ShowIn.menuBarAndDock)
+            Text(tr("Menu Bar Only", "Settings")).tag(Preferences.ShowIn.menuBarOnly)
         }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
     }
 
     private var appearancePicker: some View {
-        LabeledContent(tr("Appearance", "Settings")) {
-            Picker(tr("Appearance", "Settings"), selection: Binding(
-                get: { model.preferences.appearance },
-                set: { value in
-                    model.preferences.appearance = value
-                    AppBootstrap.applyAppearance(value)
-                }
-            )) {
-                Text(tr("System", "Settings")).tag(Preferences.Appearance.system)
-                Text(tr("Light", "Settings")).tag(Preferences.Appearance.light)
-                Text(tr("Dark", "Settings")).tag(Preferences.Appearance.dark)
+        Picker(tr("Appearance", "Settings"), selection: Binding(
+            get: { model.preferences.appearance },
+            set: { value in
+                model.preferences.appearance = value
+                AppBootstrap.applyAppearance(value)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+        )) {
+            Text(tr("System", "Settings")).tag(Preferences.Appearance.system)
+            Text(tr("Light", "Settings")).tag(Preferences.Appearance.light)
+            Text(tr("Dark", "Settings")).tag(Preferences.Appearance.dark)
         }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
     }
 
+    /// A plain 150 pt track between the two end labels, as in the design (no tick marks).
     private var glassSlider: some View {
         @Bindable var preferences = model.preferences
-        return LabeledContent {
-            // A plain 150 pt track between the two end labels, as in the design (no tick marks).
-            HStack(spacing: 8) {
-                Text(tr("Clear", "Settings"))
-                Slider(value: $preferences.glass, in: 0...100) {
-                    Text(tr("Liquid Glass", "Settings"))
-                }
-                .labelsHidden()
-                .frame(width: 150)
-                Text(tr("Tinted", "Settings"))
+        return HStack(spacing: 8) {
+            Text(tr("Clear", "Settings"))
+            Slider(value: $preferences.glass, in: 0...100) {
+                Text(tr("Liquid Glass", "Settings"))
             }
-            .font(.system(size: 11))
-            .foregroundStyle(Theme.ink2)
-        } label: {
-            Text(tr("Liquid Glass", "Settings"))
-            Text(tr("Follows System Settings › Appearance until you move it here.", "Settings"))
+            .labelsHidden()
+            .frame(width: 150)
+            Text(tr("Tinted", "Settings"))
         }
+        .font(.system(size: 11))
+        .foregroundStyle(Theme.ink2)
+        .fixedSize()
     }
 
-    /// A form menu row: not fixed-size, so its pop-up ends at the trailing edge.
+    /// English or 简体中文, as in the design. Until one is picked Tidemark follows the system's language, and the
+    /// pop-up shows the one that gives.
     private var languagePicker: some View {
         Picker(tr("Language", "Settings"), selection: Binding(
-            get: { model.preferences.language },
+            get: { Self.shownLanguage(model.preferences.language, isChinese: localizer.isChinese) },
             set: { value in
                 model.preferences.language = value
                 Localizer.shared.preference = value
             }
         )) {
-            Text(tr("System", "Settings")).tag(Preferences.Language.system)
-            Divider()
             Text(verbatim: "English").tag(Preferences.Language.english)
             Text(verbatim: "简体中文").tag(Preferences.Language.chinese)
         }
         .pickerStyle(.menu)
+        .labelsHidden()
+        .frame(width: 128)
+    }
+
+    /// The pop-up's choice for the stored preference: following the system shows the language in use.
+    static func shownLanguage(_ preference: Preferences.Language, isChinese: Bool) -> Preferences.Language {
+        switch preference {
+        case .system: isChinese ? .chinese : .english
+        case .english, .chinese: preference
+        }
     }
 
     // MARK: Login item
@@ -173,13 +152,13 @@ struct SettingsGeneralPane: View {
         )
     }
 
+    /// A failure leaves the switch where the system has it (the design shows no message for it).
     private func setOpenAtLogin(_ on: Bool) {
-        loginError = nil
         do {
             try SettingsLoginItem.set(on)
             model.preferences.openAtLogin = on
         } catch {
-            loginError = error.localizedDescription
+            SettingsLoginItem.log.error("Changing the login item failed: \(error.localizedDescription, privacy: .public)")
         }
         loginStatus = SMAppService.mainApp.status
     }
@@ -188,10 +167,7 @@ struct SettingsGeneralPane: View {
 /// Registers Tidemark as a login item with `SMAppService`.
 @MainActor
 enum SettingsLoginItem {
-    static var isEnabled: Bool {
-        let status = SMAppService.mainApp.status
-        return status == .enabled || status == .requiresApproval
-    }
+    static let log = Logger(subsystem: "io.tidemark.Tidemark", category: "settings")
 
     static func set(_ on: Bool) throws {
         let service = SMAppService.mainApp

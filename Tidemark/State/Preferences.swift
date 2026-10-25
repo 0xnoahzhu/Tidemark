@@ -119,12 +119,5 @@ final class Preferences {
         return components.string ?? databaseURL
     }
 
-    /// Display form with the password masked: `postgres://tide:••••••••@127.0.0.1:5432/tidemark`.
-    var databaseURLMasked: String {
-        guard var components = URLComponents(string: databaseURL) else { return databaseURL }
-        if Keychain.read(account: Keychain.databaseAccount)?.isEmpty == false { components.password = "••••••••" }
-        return components.string?.removingPercentEncoding ?? databaseURL
-    }
-
     private func set(_ value: Any, _ key: String) { defaults.set(value, forKey: key) }
 }
