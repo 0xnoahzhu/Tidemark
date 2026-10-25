@@ -598,14 +598,31 @@ private final class SlowStopProbeActions: ProbeActions {
 
     @Test func translatesSurgeModesAlsoWithoutTheOutboundMode() {
         #expect(EgressFormat.surgeMode("Enhanced mode · rule-based") == tr("Enhanced mode · rule-based", "SurgeCLI"))
-        #expect(EgressFormat.surgeMode("Enhanced mode") == tr("Enhanced mode", "Egress"))
-        #expect(EgressFormat.surgeMode("System proxy") == tr("System proxy", "Egress"))
+        #expect(EgressFormat.surgeMode("Enhanced mode") == tr("Enhanced mode", "SurgeCLI"))
+        #expect(EgressFormat.surgeMode("System proxy") == tr("System proxy", "SurgeCLI"))
         #expect(EgressFormat.surgeMode("Rule-based") == tr("Rule-based", "SurgeCLI"))
         #expect(EgressFormat.surgeMode("Something new") == "Something new")
 
+        // Every value `SurgeOutputParser.surgeMode` can return is in the SurgeCLI table.
         let lproj = Bundle.main.path(forResource: "zh-Hans", ofType: "lproj").map { URL(fileURLWithPath: $0) }
-        let chinese = lproj.flatMap { NSDictionary(contentsOf: $0.appendingPathComponent("Egress.strings")) as? [String: String] }
-        #expect(chinese?["Enhanced mode"] != nil && chinese?["System proxy"] != nil)
+        let chinese = lproj.flatMap { NSDictionary(contentsOf: $0.appendingPathComponent("SurgeCLI.strings")) as? [String: String] } ?? [:]
+        var modes: Set<String> = []
+        for mode in ["rule", "proxy", "direct", nil] {
+            for (enhanced, systemProxy) in [(true, false), (false, true), (false, false)] {
+                let status = SurgeStatus(mode: mode, features: ["enhanced-mode": enhanced, "system-proxy": systemProxy])
+                if let text = SurgeOutputParser.surgeMode(for: status) { modes.insert(text) }
+            }
+        }
+        #expect(modes.contains("Enhanced mode") && modes.contains("System proxy"))
+        for mode in modes {
+            #expect(chinese[mode] != nil, "\(mode)")
+        }
+
+        Localizer.shared.preference = .chinese
+        defer { Localizer.shared.preference = .english }
+        guard Localizer.shared.bundle != nil else { return }
+        #expect(EgressFormat.surgeMode("Enhanced mode") == "增强模式")
+        #expect(EgressFormat.surgeMode("System proxy · something new") == "系统代理 · something new")
     }
 
     /// The lookup card names the IP info service and where to turn it off, and says where reverse DNS comes from.

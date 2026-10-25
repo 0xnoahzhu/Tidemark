@@ -508,17 +508,13 @@ enum EgressFormat {
         return english ? text : tr("The check failed", "Egress")
     }
 
-    /// Surge's outbound-mode description: the combinations are translated in the `SurgeCLI` table; a part on
-    /// its own (`Enhanced mode` when Surge reports no outbound mode) piece by piece.
+    /// Surge's outbound-mode description (`SurgeOutputParser.surgeMode`), translated in the `SurgeCLI` table:
+    /// as a whole (`Enhanced mode · rule-based`, `Enhanced mode` when Surge reports no outbound mode), else piece
+    /// by piece, so a mode the table does not know keeps its known parts translated.
     static func surgeMode(_ mode: String) -> String {
         let whole = tr(mode, "SurgeCLI")
         guard whole == mode else { return whole }
-        return mode.components(separatedBy: " · ").map { part in
-            let surge = tr(part, "SurgeCLI")
-            if surge != part { return surge }
-            return surgeModeKeys[part.lowercased()].map { tr($0, "Egress") } ?? part
-        }
-        .joined(separator: " · ")
+        return mode.components(separatedBy: " · ").map { tr($0, "SurgeCLI") }.joined(separator: " · ")
     }
 
     /// Where the lookup's facts come from, naming the IP info service (on by default) and where to turn it off.
@@ -600,9 +596,6 @@ enum EgressFormat {
         "http request timeout": "Timed out", "policy does not exist": "Policy not found",
         "no outgoing interface": "No outgoing interface",
     ]
-
-    /// Parts of Surge's mode description that the `SurgeCLI` table only has in combination.
-    private static let surgeModeKeys: [String: String] = ["enhanced mode": "Enhanced mode", "system proxy": "System proxy"]
 
     /// Interface kinds from `NWPathMonitor` that the `SurgeCLI` table does not have.
     private static let interfaceKeys: [String: String] = [

@@ -161,16 +161,6 @@
         }
       }
     },
-    "Enhanced mode" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "增强模式"
-          }
-        }
-      }
-    },
     "Ethernet" : {
       "localizations" : {
         "zh-Hans" : {
@@ -527,16 +517,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Surge 重启"
-          }
-        }
-      }
-    },
-    "System proxy" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "系统代理"
           }
         }
       }

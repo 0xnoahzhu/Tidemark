@@ -1,6 +1,11 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Enhanced mode" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "增强模式" } }
+      }
+    },
     "Enhanced mode · rule-based" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "增强模式 · 规则分流" } }
@@ -14,6 +19,11 @@
     "Enhanced mode · direct" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "增强模式 · 直连" } }
+      }
+    },
+    "System proxy" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统代理" } }
       }
     },
     "System proxy · rule-based" : {
