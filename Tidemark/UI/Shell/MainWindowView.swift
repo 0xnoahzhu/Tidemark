@@ -13,7 +13,10 @@ struct MainWindowView: View {
             ShellSidebar()
                 .navigationSplitViewColumnWidth(min: 220, ideal: 244, max: 320)
         } detail: {
+            // Pages wrap text to their width; a minimum height that followed it would change while a column
+            // resizes and send the split view into update-constraints passes until AppKit aborts.
             ShellDetail(page: nav.page)
+                .frame(minHeight: 0, maxHeight: .infinity)
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 1000, minHeight: 640)

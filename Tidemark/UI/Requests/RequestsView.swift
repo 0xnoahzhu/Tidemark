@@ -18,7 +18,11 @@ struct RequestsView: View {
             get: { nav.selectedRequest != nil },
             set: { if !$0 { nav.selectedRequest = nil } }
         )) {
+            // The inspector's minimum size must not follow its content: its host title and URL wrap, so a
+            // width-dependent minimum height changes on every pass while the column opens, and AppKit aborts
+            // after more update-constraints passes than the window has views. `inspectorColumnWidth` sets the width.
             RequestsInspectorHost(history: history)
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .inspectorColumnWidth(min: 280, ideal: 316, max: 440)
         }
         .navigationTitle(tr("Requests", "Requests"))
