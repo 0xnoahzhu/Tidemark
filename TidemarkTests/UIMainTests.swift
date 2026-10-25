@@ -440,10 +440,18 @@ struct RequestsHistoryModelTests {
     }
 
     @Test func reportsErrors() async {
+        Localizer.shared.preference = .english
         let history = RequestsHistoryModel()
         await history.load(RequestQuery(), database: RequestsStubDatabase())
-        #expect(history.errorMessage != nil)
+        #expect(history.errorMessage == "PostgreSQL is unreachable: connection refused")
         #expect(history.rows.isEmpty)
+        #expect(!history.canLoadMore)
+
+        // The failure reads in a language chosen after it.
+        Localizer.shared.preference = .chinese
+        defer { Localizer.shared.preference = .english }
+        guard Localizer.shared.bundle != nil else { return }
+        #expect(history.errorMessage == "连不上 PostgreSQL：connection refused")
     }
 
     @Test func zoomsIntoAnInterval() async {

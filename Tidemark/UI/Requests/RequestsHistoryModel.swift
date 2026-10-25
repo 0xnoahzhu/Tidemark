@@ -16,11 +16,15 @@ final class RequestsHistoryModel {
     private(set) var policies: [String] = []
     private(set) var isLoading = false
     private(set) var isLoadingMore = false
-    private(set) var errorMessage: String?
+    /// Why the last load failed, nil after one succeeded.
+    private(set) var failure: (any Error)?
     /// The query the rows belong to (offset 0). Its `interval` is set while the chart is zoomed.
     private(set) var query = RequestQuery()
 
-    var canLoadMore: Bool { Int64(rows.count) < totalCount && !isLoadingMore && errorMessage == nil }
+    var canLoadMore: Bool { Int64(rows.count) < totalCount && !isLoadingMore && failure == nil }
+
+    /// `failure` in the UI language, described when it is shown so it follows a change of language.
+    var errorMessage: String? { failure.map { CaptureEngine.message(for: $0) } }
 
     /// Runs `query` from the first page and refreshes the histogram.
     func load(_ query: RequestQuery, database: any TidemarkDatabase) async {
@@ -42,7 +46,7 @@ final class RequestsHistoryModel {
             totalCount = result.totalCount
             elapsed = result.elapsed
             self.histogram = histogram
-            errorMessage = nil
+            failure = nil
         } catch is CancellationError {
             return
         } catch {
@@ -50,7 +54,7 @@ final class RequestsHistoryModel {
             rows = []
             totalCount = 0
             histogram = nil
-            errorMessage = error.localizedDescription
+            failure = error
         }
     }
 
@@ -69,7 +73,7 @@ final class RequestsHistoryModel {
             totalCount = result.totalCount
             elapsed = result.elapsed
         } catch {
-            if !Task.isCancelled { errorMessage = error.localizedDescription }
+            if !Task.isCancelled { failure = error }
         }
     }
 

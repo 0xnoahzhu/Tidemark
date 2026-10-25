@@ -16,7 +16,8 @@ struct AppDetailRequestsTab: View {
     @State private var expanded: RequestKey?
     @State private var history: [RequestRecord] = []
     @State private var historyLoaded = false
-    @State private var historyFailure: String?
+    /// Why the history could not be loaded, described while rendering so it follows the UI language.
+    @State private var historyFailure: (any Error)?
     /// Bumped once fresh rows have aged out, so their tint fades even when nothing new arrives.
     @State private var freshTick = 0
 
@@ -168,7 +169,7 @@ struct AppDetailRequestsTab: View {
         let text: String = if live {
             trf("No requests from %@ in the last few minutes.", "AppDetail", app.name)
         } else if let historyFailure {
-            historyFailure
+            CaptureEngine.message(for: historyFailure)
         } else if historyLoaded {
             trf("No stored requests from %@ match.", "AppDetail", app.name)
         } else {
@@ -208,7 +209,7 @@ struct AppDetailRequestsTab: View {
         } catch {
             if Task.isCancelled { return }
             history = []
-            historyFailure = error.localizedDescription
+            historyFailure = error
         }
         historyLoaded = true
     }
