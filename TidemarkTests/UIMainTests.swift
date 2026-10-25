@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import Tidemark
 
@@ -263,6 +264,75 @@ struct RequestsTableLayoutTests {
     /// "Open <App>" from a request (inspector and row menu) shows the app's Domains & IPs, as in the design.
     @Test func openingAnAppShowsItsDomainsAndIPs() {
         #expect(RequestsPresentation.openAppTab == .inventory)
+    }
+}
+
+/// The live table's backfill and a History page reach the table as hundreds of rows in one update. With
+/// NSTableView's estimated row heights, which SwiftUI turns on, more than 200 rows arriving at a table without
+/// cached row heights re-enter AppKit's row height cache, which AppKit logs (and will assert on).
+@MainActor
+struct RequestsTableRowHeightTests {
+    typealias F = UIMainFixtures
+
+    @Test func hundredsOfRowsArriveWithoutReenteringTheTable() async throws {
+        #expect(UserDefaults.standard.object(forKey: TableRowHeightDefaults.canEstimateRowHeightsKey) as? Bool == false)
+
+        let suite = "tidemark-tests-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: suite)!))
+        func liveTable(_ rows: [RequestRecord]) -> RequestsTable {
+            RequestsTable(model: model, rows: rows, selection: .constant(nil), timeStyle: .clock, now: .now)
+        }
+        let host = NSHostingView(rootView: liveTable([]))
+        // Never ordered in: the table updates and lays out off screen.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 500), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        try await Self.waitUntil { host.layoutSubtreeIfNeeded(); return Self.table(in: host) != nil }
+        let table = try #require(Self.table(in: host))
+
+        let marker = "tidemark-row-heights-\(UUID().uuidString)"
+        let output = await Self.capturingStandardError {
+            NSLog("%@", marker)
+            // Fresh rows, so the row tint runs too.
+            host.rootView = liveTable((1...300).map { F.record(id: $0, startedAt: .now) })
+            try? await Self.waitUntil { host.layoutSubtreeIfNeeded(); return table.numberOfRows == 300 }
+        }
+        #expect(output.contains(marker), "NSLog reaches standard error, so the check below can see AppKit's warning")
+        #expect(table.numberOfRows == 300)
+        #expect(!output.contains("reentrant operation"))
+    }
+
+    private static func table(in view: NSView) -> NSTableView? {
+        if let table = view as? NSTableView { return table }
+        return view.subviews.lazy.compactMap { table(in: $0) }.first
+    }
+
+    private static func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+        for _ in 0..<250 where !condition() {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    /// What the process writes to standard error (NSLog included) while `body` runs; it is passed on afterwards.
+    private static func capturingStandardError(_ body: @MainActor () async -> Void) async -> String {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tidemark-stderr-\(UUID().uuidString).log")
+        guard FileManager.default.createFile(atPath: url.path, contents: nil),
+              let file = try? FileHandle(forWritingTo: url) else { return "" }
+        defer { try? FileManager.default.removeItem(at: url) }
+        fflush(nil)
+        let saved = dup(STDERR_FILENO)
+        dup2(file.fileDescriptor, STDERR_FILENO)
+        await body()
+        fflush(nil)
+        dup2(saved, STDERR_FILENO)
+        close(saved)
+        try? file.close()
+        let output = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        FileHandle.standardError.write(Data(output.utf8))
+        return output
     }
 }
 
