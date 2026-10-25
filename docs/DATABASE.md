@@ -126,10 +126,14 @@ row comparison only when it is a btree over those columns). A poll reads page af
 shorter than the limit, at most ten pages; a poll that stopped there lets the next one carry on from where it
 stopped. A row written again gets a later `updated_at` and is read again.
 
-Positions come from the server only: the first one is the server's clock (`SELECT now()`) less a minute, so
-the Macs' clocks never take part. Because `updated_at` is the writing transaction's start, a transaction that
-commits late adds rows just behind a position already read: each poll that starts afresh steps back 3 s and
-skips the `(id, updated_at)` positions it already returned.
+Positions come from the server only, so the Macs' clocks never take part: each poll first reads the server's
+clock (`SELECT now()`). The first poll starts a minute before it, and so does a poll whose position fell further
+behind (after a sleep, an outage or a burst too large to keep up with): the rows in between are skipped, since
+the live table only shows recent rows, and no page reads more than about a minute of writes. A poll that read
+everything moves its position up to the server's clock, so while the other Macs write nothing a poll reads only
+the last few seconds of this Mac's own rows. Because `updated_at` is the writing transaction's start, a
+transaction that commits late adds rows just behind a position already read: each poll that starts afresh steps
+back 3 s and skips the `(id, updated_at)` positions it already returned.
 
 ## Useful queries
 
