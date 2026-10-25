@@ -136,8 +136,9 @@ actor CapturePipeline {
     let maintenanceBudget: Duration = .seconds(660)
     /// A failed maintenance statement is tried again after this long, or after the next reconnect.
     let maintenanceRetryInterval: TimeInterval = 600
-    /// Margin on `dump active`'s time for a remote Surge, whose clock may differ from this Mac's.
-    let remoteClockMargin: TimeInterval = 60
+    /// A remote Surge's `dump active` closes only rows that started this long before the newest start it lists
+    /// (that Surge's clock, which may also step back a little).
+    let remoteListingMargin: TimeInterval = 5
     /// Requests an empty `dump active` listing may end at most. More than that still active (in this pipeline
     /// or in PostgreSQL) is likelier a listing that failed than that many connections ending together.
     let emptyListingLimit = 20
@@ -518,15 +519,27 @@ actor CapturePipeline {
     /// (`activeListingProblem`), and an empty one closes nothing either once PostgreSQL holds more than
     /// `emptyListingLimit` of the rows it would close. `undecodable` counts the records surge-cli listed that
     /// could not be decoded.
+    ///
+    /// Rows that started after the listing was taken are not in it and are left alone. A local Surge shares
+    /// this Mac's clock, so that is `fetchedAt`. A remote Surge's clock may differ from this Mac's, so its
+    /// listing is compared on that Surge's own clock: every listed request started before the listing, and so
+    /// did every request that started before one of them; an empty listing then closes nothing.
     func closeVanished(_ listing: [SurgeRequest], undecodable: Int = 0, fetchedAt: Date, epoch expected: Int) {
         guard expected == epoch, session != 0 else { return }
         if let problem = activeListingProblem(listing, undecodable: undecodable, fetchedAt: fetchedAt) {
             Self.log.error("Not closing requests that dump active left out: \(problem, privacy: .public)")
             return
         }
-        let margin = settings.isRemote ? remoteClockMargin : 0
+        var startedBefore = fetchedAt
+        if settings.isRemote {
+            guard let newest = listing.compactMap({ CaptureRecordMapper.date($0.startDate) }).max() else {
+                Self.log.info("Not closing requests of the remote Surge: dump active gave no start time to compare with")
+                return
+            }
+            startedBefore = newest.addingTimeInterval(-remoteListingMargin)
+        }
         let close = VanishedClose(deviceID: settings.deviceID, session: session, keeping: Set(listing.map(\.id)),
-                                  startedBefore: fetchedAt.addingTimeInterval(-margin), at: fetchedAt, emptyListing: listing.isEmpty)
+                                  startedBefore: startedBefore, at: fetchedAt, emptyListing: listing.isEmpty)
         vanishedCloses.removeAll { $0.deviceID == close.deviceID && $0.session == close.session }
         vanishedCloses.append(close)
     }
