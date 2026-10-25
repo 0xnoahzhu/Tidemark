@@ -197,6 +197,32 @@ struct DatabaseLiveTests {
         }
     }
 
+    @Test func callsEndSoonAfterSomethingElseClosedTheirConnection() async throws {
+        try await withTestDatabase { db in
+            // The body closes its connection itself, as the server, the network or the pool shutting down would,
+            // then sends a statement that is never answered: the call fails within about two checks, not at its limit.
+            let clock = ContinuousClock()
+            for pool in [PostgresDatabase.Pool.main, .writer] {
+                let start = clock.now
+                let failure = await Self.failure(within: .seconds(20)) {
+                    _ = try await db.withConnection(on: pool, limit: .client(.seconds(30))) { connection in
+                        try await connection.close()
+                        _ = try await connection.query("SELECT 1", logger: PostgresDatabase.logger).collect()
+                    }
+                }
+                guard case .unreachable(.connectionClosed)? = failure as? DatabaseError else {
+                    Issue.record("Expected .unreachable(.connectionClosed), got \(String(describing: failure))")
+                    return
+                }
+                #expect(start.duration(to: clock.now) < PostgresDatabase.closedConnectionCheck * 2 + .seconds(2))
+            }
+
+            // The pools replaced the closed connections.
+            for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await db.ping() }
+            for _ in 0..<PostgresDatabase.mainPoolSize { _ = try await db.mutes() }
+        }
+    }
+
     @Test func pingReportsServerVersion() async throws {
         try await withTestDatabase { db in
             let ping = try await db.ping()
