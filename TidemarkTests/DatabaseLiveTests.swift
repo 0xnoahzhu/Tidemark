@@ -1,5 +1,6 @@
 import Foundation
 import PostgresNIO
+import Synchronization
 import Testing
 @testable import Tidemark
 
@@ -220,6 +221,35 @@ struct DatabaseLiveTests {
             // The pools replaced the closed connections.
             for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await db.ping() }
             for _ in 0..<PostgresDatabase.mainPoolSize { _ = try await db.mutes() }
+        }
+    }
+
+    @Test func aConnectionItsCallClosedIsNeverLeasedAgain() async throws {
+        try await withTestDatabase { db in
+            // A call that closed its connection hands it back once the close completed, when the pool (which watches
+            // the same close) has dropped it. Handed back earlier, the connection could be leased again at once, and
+            // the next call would fail or wait for a reply that never comes.
+            final class Flag: Sendable {
+                private let value = Atomic(false)
+                var isSet: Bool { value.load(ordering: .acquiring) }
+                func set() { value.store(true, ordering: .releasing) }
+            }
+            for _ in 0..<20 {
+                let closed = Flag()
+                let expired = await Self.failure(within: .seconds(10)) {
+                    _ = try await db.withConnection(on: .writer, limit: .client(.milliseconds(200))) { connection in
+                        connection.closeFuture.whenComplete { _ in closed.set() }
+                        _ = try await connection.query("SELECT pg_sleep(2)", logger: PostgresDatabase.logger).collect()
+                    }
+                }
+                guard case .timedOut(.noReply)? = expired as? DatabaseError else {
+                    Issue.record("Expected .timedOut(.noReply), got \(String(describing: expired))")
+                    return
+                }
+                #expect(closed.isSet, "The call returned before its connection finished closing")
+                let ping = await Self.failure(within: .seconds(10)) { _ = try await db.ping() }
+                #expect(ping == nil, "\(String(describing: ping))")
+            }
         }
     }
 
