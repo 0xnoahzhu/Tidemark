@@ -121,7 +121,7 @@ struct CaptureSessionTests {
         let epoch = await pipeline.beginSession(1_000)
         await pipeline.ingest(curl(7, start: requestStart), now: base)
         // PostgreSQL is not reachable yet when the stream's backfill lists the active requests.
-        await pipeline.closeVanished([6], fetchedAt: base, epoch: epoch)
+        await pipeline.closeVanished([curl(6, start: requestStart)], fetchedAt: base, epoch: epoch)
         await pipeline.tick(now: base.addingTimeInterval(1))
         #expect(await database.vanishedCloses.isEmpty)
 
@@ -135,6 +135,66 @@ struct CaptureSessionTests {
 
         await pipeline.tick(now: base.addingTimeInterval(3))
         #expect(await database.vanishedCloses.count == 1, "closed once")
+    }
+
+    @Test func aListingWithUnreadableRecordsClosesNothing() async {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        for id in [5, 6] as [Int64] { await database.preinsertRow(activeRow(id)) }
+        let pipeline = makePipeline(database: database, directory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        let epoch = await pipeline.beginSession(1_000)
+        // Request 5 may well be the record surge-cli printed but that could not be decoded.
+        let listing = [curl(6, start: requestStart)]
+        #expect(await pipeline.activeListingProblem(listing, undecodable: 1, fetchedAt: base) != nil)
+        await pipeline.closeVanished(listing, undecodable: 1, fetchedAt: base, epoch: epoch)
+        await pipeline.tick(now: base.addingTimeInterval(1))
+        #expect(await database.vanishedCloses.isEmpty)
+        #expect(await database.rows[activeRow(5).key]?.state == .active)
+    }
+
+    @Test func anEmptyListingNextToManyActiveRequestsClosesNothing() async {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let pipeline = makePipeline(database: database, directory: temp.url)
+        let epoch = await pipeline.beginSession(1_000)
+        // The stream reported 25 open connections before the listing, which lists none of them.
+        for id in 1...25 { await pipeline.ingest(curl(Int64(id), start: requestStart), now: base) }
+        #expect(await pipeline.activeListingProblem([], undecodable: 0, fetchedAt: base.addingTimeInterval(1)) != nil)
+        await pipeline.closeVanished([], fetchedAt: base.addingTimeInterval(1), epoch: epoch)
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.tick(now: base.addingTimeInterval(2))
+        #expect(await database.vanishedCloses.isEmpty)
+        #expect(await database.vanishedCounts == 0)
+        // Reported after the listing, they are no reason to distrust it.
+        #expect(await pipeline.activeListingProblem([], undecodable: 0, fetchedAt: base) == nil)
+    }
+
+    @Test func anEmptyListingClosesOnlyAFewRowsLeftActive() async {
+        // An earlier run left 25 rows active: an empty listing would end every one of them.
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        for id in 1...25 { await database.preinsertRow(activeRow(Int64(id))) }
+        let pipeline = makePipeline(database: database, directory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        var epoch = await pipeline.beginSession(1_000)
+        await pipeline.closeVanished([], fetchedAt: base, epoch: epoch)
+        await pipeline.tick(now: base.addingTimeInterval(1))
+        #expect(await database.vanishedCounts == 1)
+        #expect(await database.vanishedCloses.isEmpty, "more rows than an empty listing may end: none closed")
+        #expect(await database.rows.values.allSatisfy { $0.state == .active })
+        await pipeline.tick(now: base.addingTimeInterval(2))
+        #expect(await database.vanishedCounts == 1, "dropped, not retried")
+
+        // A few rows left active by a session are closed by an empty listing as usual.
+        let few = CaptureFakeDatabase()
+        for id in 1...3 { await few.preinsertRow(activeRow(Int64(id), session: 2_000)) }
+        await pipeline.setServices(surge: CaptureFakeSurge(), database: few)
+        epoch = await pipeline.beginSession(2_000, now: base.addingTimeInterval(3))
+        await pipeline.closeVanished([], fetchedAt: base.addingTimeInterval(3), epoch: epoch)
+        await pipeline.tick(now: base.addingTimeInterval(4))
+        #expect(await few.vanishedCloses.count == 1)
+        #expect(await few.rows.values.allSatisfy { $0.state == .completed })
     }
 
     @Test func pendingFirstContactsAreEvaluatedBeforeASessionEnds() async throws {

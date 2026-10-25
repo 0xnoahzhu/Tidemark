@@ -131,7 +131,7 @@ struct CaptureLiveTests {
             await relaunched.setDatabaseOnline(true)
             let epoch = await relaunched.beginSession(session)
             await relaunched.ingestBackfill([open(1)], epoch: epoch, now: base.addingTimeInterval(60))
-            await relaunched.closeVanished([1], fetchedAt: base.addingTimeInterval(60), epoch: epoch)
+            await relaunched.closeVanished([open(1)], fetchedAt: base.addingTimeInterval(60), epoch: epoch)
             await relaunched.tick(now: base.addingTimeInterval(62))
             rows = try await states()
             #expect(rows[1]?.state == "active" && rows[1]?.completed == false, "still open: still active")

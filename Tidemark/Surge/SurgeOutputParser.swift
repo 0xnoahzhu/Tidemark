@@ -73,8 +73,14 @@ enum SurgeOutputParser {
 
     /// `dump recent` / `dump active` → `{"requests":[…]}`. Records that fail to decode are skipped.
     static func requests(from data: Data, command: String) throws(SurgeError) -> [SurgeRequest] {
+        try requestListing(from: data, command: command).requests
+    }
+
+    /// `requests(from:command:)`, also counting the records that were skipped.
+    static func requestListing(from data: Data, command: String) throws(SurgeError) -> SurgeRequestListing {
         let list = try decode(RequestList.self, from: data, command: command)
-        return list.requests.compactMap(\.value).map(normalized)
+        let requests = list.requests.compactMap(\.value).map(normalized)
+        return SurgeRequestListing(requests: requests, undecodable: list.requests.count - requests.count)
     }
 
     /// Surge reports "not yet" as `0` (`completedDate`, `setupCompletedDate`) and has no PID for requests

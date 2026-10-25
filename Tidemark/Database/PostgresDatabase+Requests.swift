@@ -112,17 +112,9 @@ extension PostgresDatabase {
     /// before the request started. `requests_active_idx` (v3) keeps the statement to the few rows still
     /// active; its time limit stays below capture's per-write bound.
     func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64 {
-        try await withTransaction(statementTimeout: Self.sessionCloseTimeout) { connection in
-            try await connection.query("""
-                WITH closed AS (
-                    UPDATE requests SET state = 'completed', updated_at = now(),
-                        completed_at = COALESCE(completed_at, GREATEST(started_at, LEAST(updated_at, \(date)::timestamptz)))
-                    WHERE device_id = \(deviceID) AND state = 'active' AND surge_session < \(session)
-                    RETURNING 1
-                )
-                SELECT count(*) AS n FROM closed
-                """, logger: Self.logger).collect().first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
-        }
+        var sql = SQL()
+        Self.appendCloseActive(deviceID: deviceID, before: session, at: date, to: &sql)
+        return try await sessionClose(sql)
     }
 
     /// Marks `deviceID`'s rows of `session` that are still `active` but that Surge no longer lists completed,
@@ -130,22 +122,68 @@ extension PostgresDatabase {
     /// started at or after `startedBefore` are left alone. Reads only the session's active rows
     /// (`requests_active_idx`).
     func closeVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date, at date: Date) async throws -> Int64 {
+        var sql = SQL()
+        Self.appendCloseVanished(deviceID: deviceID, session: session, keeping: surgeIDs, startedBefore: startedBefore, at: date, to: &sql)
+        return try await sessionClose(sql)
+    }
+
+    /// The rows `closeVanishedRequests` would close, counted on the same index.
+    func countVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date) async throws -> Int64 {
+        var sql = SQL("SELECT count(*) AS n FROM requests")
+        Self.appendVanishedCondition(deviceID: deviceID, session: session, keeping: surgeIDs, startedBefore: startedBefore, to: &sql)
+        return try await rows(sql.query, statementTimeout: Self.sessionCloseTimeout).first
+            .map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
+    }
+
+    /// Runs a statement of `appendCloseActive` / `appendCloseVanished` and returns the rows it closed.
+    private func sessionClose(_ sql: SQL) async throws -> Int64 {
         try await withTransaction(statementTimeout: Self.sessionCloseTimeout) { connection in
-            try await connection.query("""
-                WITH closed AS (
-                    UPDATE requests SET state = 'completed', updated_at = now(),
-                        completed_at = COALESCE(completed_at, GREATEST(started_at, LEAST(updated_at, \(date)::timestamptz)))
-                    WHERE device_id = \(deviceID) AND surge_session = \(session) AND state = 'active'
-                      AND started_at < \(startedBefore) AND NOT (surge_id = ANY(\(surgeIDs)))
-                    RETURNING 1
-                )
-                SELECT count(*) AS n FROM closed
-                """, logger: Self.logger).collect().first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
+            try await connection.query(sql.query, logger: Self.logger).collect().first
+                .map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
         }
     }
 
-    /// Statement timeout of `closeActiveRequests` / `closeVanishedRequests`: below capture's 20 s bound per
-    /// write, so the server stops a statement capture gave up on.
+    /// Appends the `closeActiveRequests` statement. Its condition is `requests_active_idx`'s: the device, the
+    /// partial index's `state = 'active'` and a range of the index's Surge sessions.
+    static func appendCloseActive(deviceID: DeviceID, before session: Int64, at date: Date, to sql: inout SQL) {
+        let completion = completionEstimate(at: date, in: &sql)
+        let device = sql.bind(deviceID)
+        let before = sql.bind(session)
+        sql.append("WITH closed AS (UPDATE requests SET state = 'completed', updated_at = now(), completed_at = \(completion)")
+        sql.append(" WHERE device_id = \(device) AND state = 'active' AND surge_session < \(before)")
+        sql.append(" RETURNING 1) SELECT count(*) AS n FROM closed")
+    }
+
+    /// Appends the `closeVanishedRequests` statement.
+    static func appendCloseVanished(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date, at date: Date,
+                                    to sql: inout SQL) {
+        let completion = completionEstimate(at: date, in: &sql)
+        sql.append("WITH closed AS (UPDATE requests SET state = 'completed', updated_at = now(), completed_at = \(completion)")
+        appendVanishedCondition(deviceID: deviceID, session: session, keeping: surgeIDs, startedBefore: startedBefore, to: &sql)
+        sql.append(" RETURNING 1) SELECT count(*) AS n FROM closed")
+    }
+
+    /// ` WHERE …` for `deviceID`'s rows of `session` still active, started before `startedBefore` and not in
+    /// `surgeIDs`; `requests_active_idx` finds the session's active rows.
+    private static func appendVanishedCondition(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date,
+                                                to sql: inout SQL) {
+        let device = sql.bind(deviceID)
+        let surgeSession = sql.bind(session)
+        let before = sql.bind(startedBefore)
+        let kept = sql.bind(surgeIDs)
+        sql.append(" WHERE device_id = \(device) AND surge_session = \(surgeSession) AND state = 'active'")
+        sql.append(" AND started_at < \(before) AND NOT (surge_id = ANY(\(kept)::int8[]))")
+    }
+
+    /// `completed_at` of a request closed without having been seen to end: a stored completion is kept;
+    /// otherwise the row's last write by Tidemark (`updated_at`, its last observed change; in an `UPDATE` it
+    /// still holds the previous write), capped at `date` and never before the request started.
+    private static func completionEstimate(at date: Date, in sql: inout SQL) -> String {
+        "COALESCE(completed_at, GREATEST(started_at, LEAST(updated_at, \(sql.bind(date))::timestamptz)))"
+    }
+
+    /// Statement timeout of `closeActiveRequests` / `closeVanishedRequests` / `countVanishedRequests`: below
+    /// capture's 20 s bound per write, so the server stops a statement capture gave up on.
     static let sessionCloseTimeout: Duration = .seconds(15)
 
     private static func requestUpsertStatement(_ chunk: ArraySlice<RequestRecord>) throws -> PostgresQuery {

@@ -59,7 +59,11 @@ struct SurgeCLIClient: SurgeClientDetails {
     }
 
     func activeRequests() async throws -> [SurgeRequest] {
-        try await run(["dump", "active"]) { try SurgeOutputParser.requests(from: $0, command: $1) }
+        try await activeRequestListing().requests
+    }
+
+    func activeRequestListing() async throws -> SurgeRequestListing {
+        try await run(["dump", "active"]) { try SurgeOutputParser.requestListing(from: $0, command: $1) }
     }
 
     func dnsLookup(_ domain: String) async throws -> SurgeDNSLookup {

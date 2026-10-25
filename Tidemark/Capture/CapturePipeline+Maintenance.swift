@@ -66,11 +66,23 @@ extension CapturePipeline {
         for run in vanished {
             let close = run.effective
             do {
-                let closed = try await CaptureTimeout.unstructured(budget) {
-                    try await database.closeVanishedRequests(deviceID: close.deviceID, session: close.session, keeping: Array(close.keeping),
-                                                             startedBefore: close.startedBefore, at: close.at)
+                // An empty listing next to many rows it would end is likelier a listing that failed.
+                var vanishing: Int64 = 0
+                if close.emptyListing {
+                    vanishing = try await CaptureTimeout.unstructured(budget) {
+                        try await database.countVanishedRequests(deviceID: close.deviceID, session: close.session,
+                                                                 keeping: Array(close.keeping), startedBefore: close.startedBefore)
+                    }
                 }
-                if closed > 0 { Self.log.info("Closed \(closed) requests that ended while Tidemark was not watching") }
+                if vanishing > emptyListingLimit {
+                    Self.log.error("Not closing \(vanishing) active requests: dump active listed none of them")
+                } else {
+                    let closed = try await CaptureTimeout.unstructured(budget) {
+                        try await database.closeVanishedRequests(deviceID: close.deviceID, session: close.session, keeping: Array(close.keeping),
+                                                                 startedBefore: close.startedBefore, at: close.at)
+                    }
+                    if closed > 0 { Self.log.info("Closed \(closed) requests that ended while Tidemark was not watching") }
+                }
             } catch {
                 guard dropsFailedMaintenance(error, label: "Closing ended requests") else { return }
             }

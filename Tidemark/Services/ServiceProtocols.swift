@@ -151,6 +151,8 @@ protocol TidemarkDatabase: Sendable {
     /// `startedBefore` are left alone: they may be newer than the listing. Closes connections that ended
     /// while Tidemark was not running. Returns the rows changed.
     func closeVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date, at date: Date) async throws -> Int64
+    /// The number of rows `closeVanishedRequests` would close with the same arguments, without closing them.
+    func countVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date) async throws -> Int64
 
     // Processes
     /// Upserts by `(device_id, pid, start_time)`; links parents in chain order. Returns the leaf row ID.
@@ -244,6 +246,8 @@ extension TidemarkDatabase {
     func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64 { 0 }
 
     func closeVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date, at date: Date) async throws -> Int64 { 0 }
+
+    func countVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date) async throws -> Int64 { 0 }
 }
 
 /// One `(host or IP, source)` observation for the global inventory (`host_sources`).

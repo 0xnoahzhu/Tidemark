@@ -10,6 +10,23 @@ protocol SurgeClientDetails: SurgeClient {
     /// The policy the profile's `FINAL` rule names (`dump rule`), often a policy group; nil when the
     /// profile has no FINAL rule.
     func finalRulePolicy() async throws -> String?
+    /// `dump active` with the number of listed records that could not be decoded (`activeRequests()` skips
+    /// them silently).
+    func activeRequestListing() async throws -> SurgeRequestListing
+}
+
+extension SurgeClientDetails {
+    /// For clients that cannot tell: nothing was skipped.
+    func activeRequestListing() async throws -> SurgeRequestListing {
+        SurgeRequestListing(requests: try await activeRequests(), undecodable: 0)
+    }
+}
+
+/// A `dump recent` / `dump active` listing: the requests that decoded, and how many listed records did not.
+struct SurgeRequestListing: Hashable, Sendable {
+    var requests: [SurgeRequest]
+    /// Records surge-cli printed that could not be decoded; which requests they were is unknown.
+    var undecodable: Int
 }
 
 /// Where Surge's HTTP proxy listens, from `HTTP proxy listen on interface: 0.0.0.0, port: 6152`.

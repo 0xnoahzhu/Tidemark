@@ -1341,8 +1341,11 @@ struct DatabaseLiveTests {
             ])
             let lastWrite = try #require(try await db.requestsWritten(after: .start, excluding: nil, limit: 10).last?.writtenAt)
             // Surge still lists 1; 4 started after the listing; 5 belongs to another session.
+            #expect(try await db.countVanishedRequests(deviceID: mac.id, session: Fixture.session, keeping: [1], startedBefore: listedAt) == 2)
+            #expect(try await db.countVanishedRequests(deviceID: mac.id, session: Fixture.session, keeping: [], startedBefore: listedAt) == 3)
             #expect(try await db.closeVanishedRequests(deviceID: mac.id, session: Fixture.session, keeping: [1],
                                                        startedBefore: listedAt, at: listedAt) == 2)
+            #expect(try await db.countVanishedRequests(deviceID: mac.id, session: Fixture.session, keeping: [1], startedBefore: listedAt) == 0)
             let rows = try await db.queryRequests(RequestQuery(range: .all)).rows
             let states = Dictionary(uniqueKeysWithValues: rows.map { ($0.key.surgeID, $0.state) })
             #expect(states == [1: .active, 2: .completed, 3: .completed, 4: .active, 5: .active])

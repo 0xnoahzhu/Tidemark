@@ -470,15 +470,18 @@ final class CaptureEngine {
                 let backfill = Task { [surge, pipeline] in
                     let fetchedAt = Date.now
                     async let recent = try? surge.recentRequests()
-                    async let active = try? surge.activeRequests()
-                    let (recentRequests, activeRequests) = await (recent, active)
+                    async let active = try? Self.activeListing(surge)
+                    let (recentRequests, activeListing) = await (recent, active)
                     guard !Task.isCancelled else { return }
-                    await pipeline.ingestBackfill((recentRequests ?? []) + (activeRequests ?? []), epoch: epoch)
-                    // Requests that ended while the stream was away get no completion event.
-                    if let activeRequests {
-                        let ids = Set(activeRequests.map(\.id))
-                        await pipeline.reconcileActive(ids, fetchedAt: fetchedAt, epoch: epoch)
-                        await pipeline.closeVanished(ids, fetchedAt: fetchedAt, epoch: epoch)
+                    await pipeline.ingestBackfill((recentRequests ?? []) + (activeListing?.requests ?? []), epoch: epoch)
+                    // Requests that ended while the stream was away get no completion event. A listing that may
+                    // have missed live requests must not end them (a closed row is never reopened).
+                    if let activeListing {
+                        let listed = activeListing.requests
+                        if await pipeline.activeListingProblem(listed, undecodable: activeListing.undecodable, fetchedAt: fetchedAt) == nil {
+                            await pipeline.reconcileActive(Set(listed.map(\.id)), fetchedAt: fetchedAt, epoch: epoch)
+                        }
+                        await pipeline.closeVanished(listed, undecodable: activeListing.undecodable, fetchedAt: fetchedAt, epoch: epoch)
                     }
                 }
                 defer { backfill.cancel() }
@@ -495,6 +498,12 @@ final class CaptureEngine {
             attempt += 1
             try? await Task.sleep(for: .seconds(Self.backoff(attempt)))
         }
+    }
+
+    /// `dump active`, with the number of listed records that could not be decoded when the client can tell.
+    nonisolated static func activeListing(_ surge: any SurgeClient) async throws -> SurgeRequestListing {
+        if let detailed = surge as? any SurgeClientDetails { return try await detailed.activeRequestListing() }
+        return SurgeRequestListing(requests: try await surge.activeRequests(), undecodable: 0)
     }
 
     /// Re-reads Surge's start time: a restarted engine (that kept the watch alive) restarts the stream so the

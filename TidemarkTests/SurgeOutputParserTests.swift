@@ -33,6 +33,10 @@ struct SurgeOutputParserTests {
     @Test func decodesRecentRequestsSkippingBrokenRecords() throws {
         let requests = try SurgeOutputParser.requests(from: SurgeFixtures.data("surge-dump-recent.json"), command: "dump recent")
         #expect(requests.map(\.id) == [58433, 58419, 58440])
+        let listing = try SurgeOutputParser.requestListing(from: SurgeFixtures.data("surge-dump-recent.json"), command: "dump recent")
+        #expect(listing.requests == requests)
+        #expect(listing.undecodable == 1, "the record with a text ID is counted, not guessed")
+        #expect(try SurgeOutputParser.requestListing(from: Data(#"{"requests":[]}"#.utf8), command: "dump active").undecodable == 0)
 
         let completed = requests[0]
         #expect(completed.url == "api.anthropic.com:443")

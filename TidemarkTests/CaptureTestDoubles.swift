@@ -225,6 +225,8 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var appsDelay: Duration = .zero
     var closedSessions: [(deviceID: DeviceID, before: Int64, at: Date)] = []
     var vanishedCloses: [(deviceID: DeviceID, session: Int64, keeping: Set<Int64>, startedBefore: Date, at: Date)] = []
+    /// Number of `countVanishedRequests` calls.
+    var vanishedCounts = 0
     /// Number of request upsert statements (refused ones included).
     var requestWriteCalls = 0
     var knownHostsCalls = 0
@@ -375,6 +377,16 @@ actor CaptureFakeDatabase: TidemarkDatabase {
             closed += 1
         }
         return closed
+    }
+    func countVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date) async throws -> Int64 {
+        try check()
+        vanishedCounts += 1
+        if failingMaintenance { throw DatabaseError.unreachable("canceling statement due to statement timeout") }
+        let keeping = Set(surgeIDs)
+        return Int64(rows.count { key, row in
+            key.deviceID == deviceID && key.session == session && row.state == .active && !keeping.contains(key.surgeID)
+                && row.startedAt < startedBefore
+        })
     }
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage { RequestPage(rows: [], totalCount: 0, elapsed: .zero) }
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram { Histogram(start: .now, end: .now, counts: []) }

@@ -103,6 +103,8 @@ actor CapturePipeline {
         var keeping: Set<Int64>
         var startedBefore: Date
         var at: Date
+        /// The listing was empty: the close runs only while it ends at most `emptyListingLimit` rows.
+        var emptyListing = false
     }
 
     static let log = Logger(subsystem: "io.tidemark.Tidemark", category: "capture")
@@ -136,6 +138,9 @@ actor CapturePipeline {
     let maintenanceRetryInterval: TimeInterval = 600
     /// Margin on `dump active`'s time for a remote Surge, whose clock may differ from this Mac's.
     let remoteClockMargin: TimeInterval = 60
+    /// Requests an empty `dump active` listing may end at most. More than that still active (in this pipeline
+    /// or in PostgreSQL) is likelier a listing that failed than that many connections ending together.
+    let emptyListingLimit = 20
 
     // Dependencies
     var database: any TidemarkDatabase
@@ -508,13 +513,32 @@ actor CapturePipeline {
     /// longer lists them (connections that ended while Tidemark was not running). It runs as maintenance
     /// once PostgreSQL is reachable and the spool is replayed (spooled rows of a crashed run would otherwise
     /// come back active), and a newer listing of the same session replaces an older one.
-    func closeVanished(_ active: Set<Int64>, fetchedAt: Date, epoch expected: Int) {
+    ///
+    /// The merge never reopens a closed row, so a listing that may have missed live requests closes nothing
+    /// (`activeListingProblem`), and an empty one closes nothing either once PostgreSQL holds more than
+    /// `emptyListingLimit` of the rows it would close. `undecodable` counts the records surge-cli listed that
+    /// could not be decoded.
+    func closeVanished(_ listing: [SurgeRequest], undecodable: Int = 0, fetchedAt: Date, epoch expected: Int) {
         guard expected == epoch, session != 0 else { return }
+        if let problem = activeListingProblem(listing, undecodable: undecodable, fetchedAt: fetchedAt) {
+            Self.log.error("Not closing requests that dump active left out: \(problem, privacy: .public)")
+            return
+        }
         let margin = settings.isRemote ? remoteClockMargin : 0
-        let close = VanishedClose(deviceID: settings.deviceID, session: session, keeping: active,
-                                  startedBefore: fetchedAt.addingTimeInterval(-margin), at: fetchedAt)
+        let close = VanishedClose(deviceID: settings.deviceID, session: session, keeping: Set(listing.map(\.id)),
+                                  startedBefore: fetchedAt.addingTimeInterval(-margin), at: fetchedAt, emptyListing: listing.isEmpty)
         vanishedCloses.removeAll { $0.deviceID == close.deviceID && $0.session == close.session }
         vanishedCloses.append(close)
+    }
+
+    /// Why a `dump active` listing cannot tell which requests ended (nil when it can): records surge-cli listed
+    /// could not be decoded (which requests they were is unknown), or it lists nothing while this pipeline
+    /// holds more than `emptyListingLimit` requests the stream reported active before the listing.
+    func activeListingProblem(_ listing: [SurgeRequest], undecodable: Int, fetchedAt: Date) -> String? {
+        if undecodable > 0 { return "\(undecodable) of its records could not be read" }
+        guard listing.isEmpty else { return nil }
+        let active = entries.values.count { $0.record.state == .active && $0.lastSeen < fetchedAt }
+        return active > emptyListingLimit ? "it listed nothing while \(active) requests were active" : nil
     }
 
     /// One `request` / `request-update` event.
