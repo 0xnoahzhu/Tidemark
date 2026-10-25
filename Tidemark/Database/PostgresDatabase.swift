@@ -326,7 +326,8 @@ final class PostgresDatabase: TidemarkDatabase {
     /// (the pool replaces it) and the call fails with `.timedOut`. On the writer pool, cancelling the
     /// calling task closes the connection right away and throws `CancellationError`: the transaction rolls
     /// back instead of committing after the caller gave up (capture keeps or spools that work and writes
-    /// it again). On the main pool a cancelled call's statement runs to completion first.
+    /// it again). Either way the call ends once the connection is closed, even if `body` is stuck on it
+    /// (`LeasedCall`). On the main pool a cancelled call's statement runs to completion first.
     func withConnection<Result: Sendable>(
         on pool: Pool = .main,
         limit: CallLimit = .pool,
@@ -367,9 +368,10 @@ final class PostgresDatabase: TidemarkDatabase {
         }
     }
 
-    /// Runs `body` on a leased connection, closing the connection when `limit` passes first or, with
-    /// `closesOnCancel`, when the task is cancelled. The errors of `body` are mapped here, where it is known
-    /// how long the call held its connection (`isStatementTimeout`).
+    /// Runs `body` on a leased connection (`LeasedCall`), closing the connection when `limit` passes first or,
+    /// with `closesOnCancel`, when the task is cancelled; the call then ends as soon as the connection is
+    /// closed, whether `body` noticed or not. The errors of `body` are mapped here, where it is known how
+    /// long the call held its connection (`isStatementTimeout`).
     private static func run<Result: Sendable>(
         _ body: @escaping @Sendable (PostgresConnection) async throws -> Result,
         on connection: PostgresConnection,
@@ -378,31 +380,22 @@ final class PostgresDatabase: TidemarkDatabase {
         closesOnCancel: Bool,
         endpoint: PostgresConnectionURL?
     ) async throws -> Result {
-        let watchdog = ConnectionWatchdog(connection)
+        let call = LeasedCall<Result>(connection)
         let started = ContinuousClock.now
-        let timer = Task(name: "PostgreSQL call limit") {
-            do { try await Task.sleep(for: limit) } catch { return }
-            watchdog.close(.expired)
+        let outcome = await withTaskCancellationHandler {
+            await call.run(body, limit: limit)
+        } onCancel: {
+            call.cancel(closingConnection: closesOnCancel)
         }
-        defer {
-            watchdog.disarm()
-            timer.cancel()
-        }
-        do {
-            guard closesOnCancel else { return try await body(connection) }
-            return try await withTaskCancellationHandler {
-                try await body(connection)
-            } onCancel: {
-                watchdog.close(.cancelled)
-            }
-        } catch {
-            switch watchdog.reason {
-            case .expired:
-                throw DatabaseError.timedOut(.noReply(target: endpoint?.redacted, within: limit))
-            case .cancelled:
-                throw CancellationError()
-            case nil:
-                throw map(error, endpoint: endpoint, statementTimeout: statementTimeout, ranFor: started.duration(to: .now))
+        switch outcome {
+        case .finished(.success(let value), _):
+            return value
+        case .finished(.failure(let error), closedBy: nil):
+            throw map(error, endpoint: endpoint, statementTimeout: statementTimeout, ranFor: started.duration(to: .now))
+        case .finished(.failure, closedBy: let reason?), .abandoned(let reason):
+            switch reason {
+            case .expired: throw DatabaseError.timedOut(.noReply(target: endpoint?.redacted, within: limit))
+            case .cancelled: throw CancellationError()
             }
         }
     }
@@ -762,34 +755,171 @@ private enum LeaseOutcome<Value: Sendable>: Sendable {
     case abandoned
 }
 
-/// Closes a leased connection when its call limit passes or its task is cancelled, but never after the
-/// call finished: by then the connection may already serve another call.
-private final class ConnectionWatchdog: Sendable {
-    enum Reason: UInt8 {
-        case expired = 1
-        case cancelled = 2
+/// Why a call closed its connection.
+private enum CallCloseReason: Sendable {
+    /// The call limit passed.
+    case expired
+    /// The caller gave up (writer pool).
+    case cancelled
+}
+
+/// One call on a leased connection. `body` runs in a task of its own; the call closes the connection when
+/// its limit passes or, on the writer pool, when the caller gives up, but never after the call ended: by
+/// then the connection may already serve another call.
+///
+/// A call that closed its connection ends as soon as the connection is closed, even while `body` still
+/// waits: PostgresNIO never answers a statement sent after its connection finished closing (NIO drops the
+/// write into the torn-down channel pipeline without failing the statement, and the wait cannot be
+/// cancelled), so a `body` caught rolling back, cleaning up or between two statements would otherwise hold
+/// its caller forever, call limit or not. The abandoned `body` is cancelled and ends, or waits, on its own,
+/// on a dead connection.
+///
+/// A closed connection goes back to the pool only once its close future completed: the pool, which watches
+/// the same future, has then dropped it and never leases it again.
+private final class LeasedCall<Value: Sendable>: Sendable {
+    enum Outcome: Sendable {
+        /// `body` finished; `closedBy` tells why the call closed the connection meanwhile, if it did.
+        case finished(Result<Value, any Error>, closedBy: CallCloseReason?)
+        /// The call closed the connection, which is now closed, and `body` has not finished.
+        case abandoned(CallCloseReason)
     }
 
-    private static let armed: UInt8 = 0
-    private static let disarmed: UInt8 = 3
+    private struct State {
+        var continuation: CheckedContinuation<Outcome, Never>?
+        /// The outcome when the call ended before `run` installed the continuation (cancelled at once).
+        var early: Outcome?
+        var result: Result<Value, any Error>?
+        var reason: CallCloseReason?
+        var cancelled = false
+        /// Whether the connection's close future is watched, and whether it completed.
+        var watchingClose = false
+        var closed = false
+        var ended = false
+        var work: Task<Void, Never>?
+        var timer: Task<Void, Never>?
+    }
+
+    /// What to do outside the lock after an event.
+    private struct Step {
+        var resume: (CheckedContinuation<Outcome, Never>, Outcome)?
+        var cancel: [Task<Void, Never>] = []
+        var watchClose = false
+    }
 
     private let connection: PostgresConnection
-    private let state = Atomic<UInt8>(ConnectionWatchdog.armed)
+    private let state = Mutex(State())
 
     init(_ connection: PostgresConnection) { self.connection = connection }
 
-    /// Why the connection was closed, nil when it was not.
-    var reason: Reason? { Reason(rawValue: state.load(ordering: .acquiring)) }
-
-    func close(_ reason: Reason) {
-        guard state.compareExchange(expected: Self.armed, desired: reason.rawValue, ordering: .acquiringAndReleasing).exchanged else { return }
-        // The future-returning close: this runs synchronously (in a cancellation handler or a timer task).
-        let closing: EventLoopFuture<Void> = connection.close()
-        closing.whenComplete { _ in }
+    /// Runs `body`, closing the connection when `limit` passes first, and returns once the call ended.
+    func run(_ body: @escaping @Sendable (PostgresConnection) async throws -> Value, limit: Duration) async -> Outcome {
+        await withCheckedContinuation { continuation in
+            let early = state.withLock { state -> Outcome? in
+                if let early = state.early { return early }
+                state.continuation = continuation
+                return nil
+            }
+            if let early {
+                continuation.resume(returning: early)
+                return
+            }
+            let connection = connection
+            let work = Task(name: "PostgreSQL call") {
+                let result: Result<Value, any Error>
+                do { result = .success(try await body(connection)) } catch { result = .failure(error) }
+                self.finished(result)
+            }
+            let timer = Task(name: "PostgreSQL call limit") {
+                do { try await Task.sleep(for: limit) } catch { return }
+                self.close(.expired)
+            }
+            let cancel = state.withLock { state -> [Task<Void, Never>] in
+                if state.ended { return [work, timer] }
+                state.work = work
+                state.timer = timer
+                return state.cancelled ? [work] : []
+            }
+            for task in cancel { task.cancel() }
+        }
     }
 
-    /// The call finished; nothing closes the connection any more.
-    func disarm() {
-        _ = state.compareExchange(expected: Self.armed, desired: Self.disarmed, ordering: .acquiringAndReleasing)
+    /// The caller gave up: closes the connection first (so a `COMMIT` sent from now on cannot succeed),
+    /// then cancels `body`.
+    func cancel(closingConnection: Bool) {
+        if closingConnection { close(.cancelled) }
+        let work = state.withLock { state -> Task<Void, Never>? in
+            state.cancelled = true
+            return state.work
+        }
+        work?.cancel()
+    }
+
+    /// Closes the connection, unless the call ended, `body` finished or the connection is being closed.
+    func close(_ reason: CallCloseReason) {
+        let closes = state.withLock { state -> Bool in
+            guard !state.ended, state.result == nil, state.reason == nil else { return false }
+            state.reason = reason
+            state.watchingClose = true
+            return true
+        }
+        guard closes else { return }
+        // The future-returning close: this runs synchronously (in a cancellation handler or a timer task). Its
+        // future completes at once for a connection that is already closing, so the call watches the channel's
+        // close future instead, whose callbacks run after the pool's.
+        let _: EventLoopFuture<Void> = connection.close()
+        connection.closeFuture.whenComplete { _ in self.connectionClosed() }
+    }
+
+    private func finished(_ result: Result<Value, any Error>) {
+        let step = state.withLock { state -> Step in
+            state.result = result
+            return settle(&state)
+        }
+        perform(step)
+    }
+
+    private func connectionClosed() {
+        let step = state.withLock { state -> Step in
+            state.closed = true
+            return settle(&state)
+        }
+        perform(step)
+    }
+
+    /// Ends the call once it can end: `body` finished on a connection that is open (or whose close the pool
+    /// saw), or the call closed the connection and it is closed.
+    private func settle(_ state: inout State) -> Step {
+        var step = Step()
+        guard !state.ended else { return step }
+        let outcome: Outcome
+        if let result = state.result {
+            if !state.closed, state.reason != nil || connection.isClosed {
+                if !state.watchingClose {
+                    state.watchingClose = true
+                    step.watchClose = true
+                }
+                return step
+            }
+            outcome = .finished(result, closedBy: state.reason)
+        } else if let reason = state.reason, state.closed {
+            outcome = .abandoned(reason)
+        } else {
+            return step
+        }
+        state.ended = true
+        step.cancel = [state.timer, state.work].compactMap { $0 }
+        if let continuation = state.continuation {
+            state.continuation = nil
+            step.resume = (continuation, outcome)
+        } else {
+            state.early = outcome
+        }
+        return step
+    }
+
+    private func perform(_ step: Step) {
+        if step.watchClose { connection.closeFuture.whenComplete { _ in self.connectionClosed() } }
+        if case let (continuation, outcome)? = step.resume { continuation.resume(returning: outcome) }
+        for task in step.cancel { task.cancel() }
     }
 }
