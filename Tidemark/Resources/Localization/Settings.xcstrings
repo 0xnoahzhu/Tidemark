@@ -151,6 +151,16 @@
         }
       }
     },
+    "Enter a URL that starts with postgres:// or postgresql://." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请输入以 postgres:// 或 postgresql:// 开头的 URL。"
+          }
+        }
+      }
+    },
     "Every %lld rows or %@ seconds, whichever comes first" : {
       "localizations" : {
         "zh-Hans" : {

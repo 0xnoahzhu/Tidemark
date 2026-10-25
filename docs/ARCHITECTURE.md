@@ -186,9 +186,11 @@ migration runner and every time limit.
   [DATABASE.md › Connections](DATABASE.md#connections) lists the limits.
 * **Counts** — total rows use `pg_class.reltuples` plus rows written since; "today" is an indexed count.
 * **Retention** — none: requests are kept forever.
-* **Credentials** — Settings › Database has one URL field: a password typed into it goes to the Keychain and
-  the field shows it masked (`postgres://tide:••••••••@127.0.0.1:5432/tidemark`). The URL is stored without
-  its password in `UserDefaults`. `TIDEMARK_DATABASE_URL` (environment) overrides both for development.
+* **Credentials** — Settings › Database has one URL field: a password typed into it (in the user info or as
+  libpq's `password` parameter) goes to the Keychain and the field shows it masked
+  (`postgres://tide:••••••••@127.0.0.1:5432/tidemark`). The URL is stored without its password in
+  `UserDefaults`; text that is not a `postgres://` or `postgresql://` URL is not stored at all, since it could
+  hold a password. `TIDEMARK_DATABASE_URL` (environment) overrides both for development.
 
 ## Multi-Mac
 
