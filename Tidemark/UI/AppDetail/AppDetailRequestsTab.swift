@@ -320,7 +320,7 @@ struct AppDetailRequestCard: View {
                 if phases.isEmpty {
                     Text(verbatim: "—").foregroundStyle(Theme.ink3)
                 } else {
-                    TimingBar(phases: phases)
+                    TimingBar(phases: phases, barHeight: 7, showsLegend: false)
                 }
                 if let rowID = record.rowID {
                     Text(trf("Stored as row %@", "AppDetail", "#\(rowID)"))

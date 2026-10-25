@@ -49,10 +49,6 @@ final class Preferences {
     var language: Language { didSet { set(language.rawValue, "general.language") } }
     var openAtLogin: Bool { didSet { set(openAtLogin, "general.openAtLogin") } }
 
-    // MARK: Requests view
-    var hideAppleServices: Bool { didSet { set(hideAppleServices, "requests.hideApple") } }
-    var monitoredOnly: Bool { didSet { set(monitoredOnly, "requests.monitoredOnly") } }
-
     // MARK: Site probe
     var probeIsolated: Bool { didSet { set(probeIsolated, "probe.isolated") } }
     var probeTail: Bool { didSet { set(probeTail, "probe.tail") } }
@@ -83,9 +79,6 @@ final class Preferences {
         glass = defaults.object(forKey: "general.glass") as? Double ?? 40
         language = defaults.string(forKey: "general.language").flatMap(Language.init(rawValue:)) ?? .system
         openAtLogin = defaults.object(forKey: "general.openAtLogin") as? Bool ?? true
-
-        hideAppleServices = defaults.object(forKey: "requests.hideApple") as? Bool ?? false
-        monitoredOnly = defaults.object(forKey: "requests.monitoredOnly") as? Bool ?? false
 
         probeIsolated = defaults.object(forKey: "probe.isolated") as? Bool ?? true
         probeTail = defaults.object(forKey: "probe.tail") as? Bool ?? true

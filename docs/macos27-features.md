@@ -35,11 +35,11 @@ Features that would only add decoration are left out, and section 7 explains why
 | 4.5 | Liquid Glass shell and glass-amount slider | `glassEffect`/`Glass`, `GlassEffectContainer`, `ToolbarSpacer`, `scrollEdgeEffectStyle`, `safeAreaBar`, `Slider` ticks (26); `ToolbarItemVisibilityPriority(lowerThan:)`, `contentMarginsRemoved` (27) | `UI/Shell`, `UI/Requests`, `UI/MenuBar`, `UI/Settings` | M |
 | 4.6 | Site Probe on WebPage with a per-session proxy | `WebPage`/`WebView`, `NetworkListener`/`NetworkConnection` (26), `proxyConfigurations` (14); GPC, `alternateRequest`, `overrideReferrer`, `cookies(for:)`, `os_lockdown_mode_enabled` (27) | `Probe/`, `UI/SiteProbe` | L |
 | 4.7 | Notifications that group and act | `threadIdentifier`, `interruptionLevel`, `relevanceScore`, action icons (12); `appEntityIdentifiers` (27) | `Capture/` notifier | S |
-| 4.8 | On-device host insights (opt-in) | `SystemLanguageModel`, `@Generable` (26); `LanguageModelError`, `variant`, `Error.assetsUnavailable` (27) | `HostInsightProviding` implementation, inspector | M |
+| 4.8 | On-device host insights (opt-in) | `SystemLanguageModel`, `@Generable` (26); `LanguageModelError`, `variant`, `Error.assetsUnavailable` (27) | `HostInsightProviding` implementation | M |
 | 4.9 | Fast waterfall and histograms | `RectanglePlot`/`BarPlot` (15), `chartXSelection(range:)` (14), conditional `ChartContent` (27) | `UI/SiteProbe`, Requests histogram, sparklines | M |
 | 4.10 | macOS 27 controls | `.pickerStyle(.tabs)`, `.textFieldStyle(.bordered)` + `textInputBorderShape`, `alert(error:)` (27); `ButtonRole.confirm/.close` (26) | all pages, Settings, sheets | S |
 | 4.11 | App Intents core | `allowedExecutionTargets`, `CustomAppIntentErrorConvertible`, lazy `DisplayRepresentation` image, `SyncableEntity` (27); `supportedModes` (26) | new `Intents/` in the app target | M |
-| 4.12 | Export without blocking the UI | `fileExporter` + `WritableDocument` + `FileWrapperDocumentWriter` (27) | Requests, Domains & IPs, App detail | S |
+| 4.12 | Export without blocking the UI | `fileExporter` + `WritableDocument` + `FileWrapperDocumentWriter` (27) | Domains & IPs, App detail | S |
 | 4.13 | Launch at login | `SMAppService.mainApp` (13) | Settings > General, via 4.2 | S |
 
 ### Decisions
@@ -659,9 +659,9 @@ Status: Typechecked. In the snippet, `AlertItem` scope names and `trf` follow th
 - macOS 27: `SystemLanguageModel.variant.displayName` ("AFM 3 Core" / "AFM 3 Core Advanced"), `LanguageModelError`, `SystemLanguageModel.Error.assetsUnavailable` and `LanguageModelSession.Error.concurrentRequests`.
 - `GenerationOptions(samplingMode:temperature:maximumResponseTokens:)`, the `samplingMode` spelling, is back-deployed.
 
-**Where.** The repository already defines `HostInsightProviding`, `HostInsight`, `HostContext`, `HostCategory`, the `host_insights` table keyed by `(host, language)`, and `UI/Components/HostInsightView`. This item implements them.
+**Where.** The repository already defines `HostInsightProviding`, `HostInsight`, `HostContext`, `HostCategory` and the `host_insights` table keyed by `(host, language)`. This item implements them. The Requests inspector does not show insights: the design has no place for them, so its About this host section (`UI/Components/HostInsightView`) was removed.
 
-**Why.** Surge already supplies the facts: IPs, ASN and organisation, policy, first seen, request count. The model turns them into a category and one sentence, for example "AI inference API operated by Anysphere". That is useful in the inspector and, optionally, as a second line under a new-site alert. Because the cache is shared in Postgres, each host is classified once across all Macs.
+**Why.** Surge already supplies the facts: IPs, ASN and organisation, policy, first seen, request count. The model turns them into a category and one sentence, for example "AI inference API operated by Anysphere". That is useful as a second line under a new-site alert. Because the cache is shared in Postgres, each host is classified once across all Macs.
 
 ```swift
 @Generable
@@ -714,7 +714,7 @@ actor InsightGenerator {
 - Insights run on-device only. Not adopted as planned: Settings have no Notifications tab or switch for insights, and notifications never carry them, since the design shows neither.
 - In the UI they are labelled "Generated on this Mac" and phrased as "likely". They never affect first-contact detection, alerts or mutes.
 - Never delay an alert waiting for a model response.
-- Background requests use non-streaming `respond`; the SDK docs say this reduces `rateLimited` errors. The inspector may call `prewarm()` when it opens.
+- Background requests use non-streaming `respond`; the SDK docs say this reduces `rateLimited` errors.
 - Facts go in the prompt from `HostContext`. Do not use tools: they add latency and gain nothing, because Tidemark already has the facts.
 - The answer language follows `Localizer.shared.languageCode` (the in-app language), not `Locale.current`.
 - Track live availability by reading the observable `SystemLanguageModel.default.availability`, either in the view or through 4.2. This keeps `isAvailable` and `unavailableReason` current.
@@ -734,7 +734,7 @@ Status: Typechecked, including the `@Generable` enum. Model quality and capabili
 
 **Why**
 - **Vectorized plots.** One `RectanglePlot` draws hundreds of host bars from a single collection, which is much cheaper than `ForEach` with individual marks.
-- **Range selection.** Dragging across the histogram selects a time range that filters the Requests query.
+- **No selection on the Requests histogram.** The design draws it as a plain row of bars with axis labels, so it has no range selection, hover callout or highlighted bar under the pointer.
 - **Shared mark helpers (27).** A plain `@ViewBuilder` function can return `some ChartContent` with `if`/`switch`/`EmptyView`. The histogram, sparkline and waterfall can share mark helpers. The survey confirmed this compiles for 27 and is rejected for 26.
 
 ```swift
@@ -868,7 +868,7 @@ Status: Typechecked. `Recorder` stands for whatever reaches `AppModel.capture` f
 
 **APIs.** `View.fileExporter(isPresented:document:contentType:defaultFilename:onCompletion:onCancellation:)` for `WritableDocument`, plus `FileWrapperDocumentWriter` (SwiftUI, macOS 27). The `FileDocument` and `ReferenceFileDocument` exporter overloads are deprecated.
 
-**Where.** Requests > Export, the Domains & IPs export, and the App detail inventory export.
+**Where.** The Domains & IPs export and the App detail inventory export. Requests has no export: the design shows none. The snippet below uses a request query only to show the pattern.
 
 **Why.** SwiftUI takes a snapshot on the main actor, which here is just the `Sendable` filter. It then runs the writer in the background with coordinated file access, so the CSV or NDJSON query against PostgreSQL never blocks the UI.
 

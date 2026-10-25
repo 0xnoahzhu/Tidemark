@@ -1052,8 +1052,6 @@ struct DatabaseLiveTests {
             let storedIP = try #require(all.last)
             #expect(storedIP.geo == ipAlert.geo && storedIP.isDirect && storedIP.host == "" && storedIP.kind == .ip && storedIP.scope == .ip)
             #expect(all.first?.requestRowID == requestID)
-            #expect(try await db.alerts(filter: .ip, appID: nil, scope: .all, limit: 10).map(\.id) == [inserted[0].id])
-            #expect(try await db.alerts(filter: .domain, appID: nil, scope: .all, limit: 10).map(\.id) == [inserted[1].id])
             #expect(try await db.alerts(filter: .all, appID: docker.id, scope: .all, limit: 10).count == 1)
             #expect(try await db.alerts(filter: .all, appID: nil, scope: .device(mac.id), limit: 10).count == 1)
             #expect(try await db.alerts(filter: .all, appID: nil, scope: .all, limit: 1).count == 1)
@@ -1544,52 +1542,6 @@ struct DatabaseLiveTests {
         }
     }
 
-    @Test func explicitIntervalsAndKeysetPaging() async throws {
-        try await withTestDatabase { db in
-            let mac = Fixture.device("MacBook Pro")
-            try await db.upsertDevice(mac)
-            var rows: [RequestRecord] = []
-            for index in 0..<40 {
-                var row = Fixture.request(device: mac.id, id: Int64(index), host: "h\(index).example.com")
-                // Pairs share a start time, so paging must break ties by row ID.
-                row.startedAt = Fixture.now.addingTimeInterval(-Double(index / 2) * 60)
-                rows.append(row)
-            }
-            try await db.upsertRequests(rows)
-
-            // An explicit interval overrides the range, inclusive at both ends.
-            let window = DateInterval(start: Fixture.now.addingTimeInterval(-10 * 60), end: Fixture.now.addingTimeInterval(-5 * 60))
-            let inWindow = try await db.queryRequests(RequestQuery(range: .lastHour, interval: window))
-            #expect(inWindow.totalCount == 12)
-            // Rows 10…21 start between 5 and 10 minutes ago; 10/11 and 20/21 sit exactly on the ends.
-            #expect(Set(inWindow.rows.map(\.key.surgeID)) == Set(10...21))
-            let histogram = try await db.histogram(RequestQuery(range: .all, interval: window), buckets: 5)
-            #expect(Fixture.close(histogram.start, window.start) && Fixture.close(histogram.end, window.end))
-            #expect(histogram.counts.reduce(0, +) == 12)
-
-            // Keyset pages: no row twice and none skipped, even while newer rows keep arriving.
-            var query = RequestQuery(range: .all, limit: 7)
-            var page = try await db.queryRequests(query)
-            #expect(page.totalCount == 40)
-            var seen: [RequestRecord] = []
-            var lateID: Int64 = 1_000
-            while true {
-                seen += page.rows
-                guard page.rows.count == query.limit, let last = page.rows.last, let rowID = last.rowID else { break }
-                query.before = RequestCursor(startedAt: last.startedAt, rowID: rowID)
-                var late = Fixture.request(device: mac.id, id: lateID, host: "late.example.com")
-                late.startedAt = Fixture.now.addingTimeInterval(1)
-                lateID += 1
-                try await db.upsertRequests([late])
-                page = try await db.queryRequests(query)
-            }
-            #expect(seen.count == 40)
-            #expect(Set(seen.map(\.key.surgeID)) == Set(0..<40))
-            let order = seen.map { ($0.startedAt, $0.rowID ?? 0) }
-            #expect(zip(order, order.dropFirst()).allSatisfy { $0 > $1 })
-        }
-    }
-
     @Test func searchesAndOtherMacPollsUseTheirIndexes() async throws {
         try await withTestDatabase { db in
             let mac = Fixture.device("MacBook Pro")
@@ -1611,7 +1563,7 @@ struct DatabaseLiveTests {
                 }
             }
             var search = PostgresDatabase.SQL("EXPLAIN SELECT 1 FROM requests r")
-            PostgresDatabase.appendFilters(RequestQuery(range: .all, search: "cursor"), window: .init(lower: nil, upper: nil), searchApps: [app.id], to: &search)
+            PostgresDatabase.appendFilters(RequestQuery(range: .all, search: "cursor"), window: .init(lower: nil), searchApps: [app.id], to: &search)
             let searchPlan = try await plan(search)
             #expect(searchPlan.contains("requests_search_trgm_idx") && searchPlan.contains("requests_app_started_idx"), "\(searchPlan)")
             #expect(!searchPlan.contains("Seq Scan"), "\(searchPlan)")

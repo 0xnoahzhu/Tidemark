@@ -2,14 +2,11 @@ import Foundation
 
 /// View-independent logic of the Notifications page: filtering, day grouping and card wording.
 enum NotificationsPresentation {
-    /// Alerts matching a filter, newest first. The page offers the design's All / Unread switch; the kind
-    /// filters (`.domain`, `.ip`) stay available to code.
+    /// Alerts matching the design's All / Unread switch, newest first.
     static func filter(_ items: [AlertItem], by filter: AlertFilter) -> [AlertItem] {
         let matching: [AlertItem] = switch filter {
         case .all: items
         case .unread: items.filter(\.isUnread)
-        case .domain: items.filter { $0.kind == .domain }
-        case .ip: items.filter { $0.kind == .ip }
         }
         return matching.sorted { $0.createdAt > $1.createdAt }
     }
@@ -84,7 +81,4 @@ enum NotificationsPresentation {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty || trimmed == "Unknown"
     }
-
-    /// The value "Mute" acts on: the host for domain alerts, the IP for IP alerts.
-    static func muteValue(for alert: AlertItem) -> String { alert.value }
 }

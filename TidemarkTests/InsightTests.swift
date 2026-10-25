@@ -67,13 +67,6 @@ struct InsightVerdictTests {
         #expect(HostInsightVerdict.clampSentences("No ending punctuation", limit: 2) == "No ending punctuation")
     }
 
-    @Test func tintsEveryKnownCategory() {
-        for category in HostCategory.allCases {
-            #expect((HostInsightStyle.hue(for: category) == nil) == (category == .unknown))
-            #expect(!HostInsightStyle.label(for: category).isEmpty)
-        }
-    }
-
     @Test func guidesCategoryToKnownValues() throws {
         // The generation schema must constrain `category` to HostCategory raw values.
         let data = try JSONEncoder().encode(HostInsightVerdict.generationSchema)

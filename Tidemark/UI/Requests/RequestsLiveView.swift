@@ -46,8 +46,6 @@ struct RequestsLiveView: View {
             model.live.rows,
             scope: model.devices.scope,
             search: model.nav.requestSearch,
-            monitoredOnly: model.preferences.monitoredOnly,
-            hideAppleServices: model.preferences.hideAppleServices,
             identity: model.requestsIdentity(for:)
         )
     }
@@ -62,10 +60,6 @@ private struct RequestsLiveFooter: View {
         HStack(spacing: 8) {
             Text(trf("%1$@ most recent shown · %2$@ written this session", "Requests", Fmt.count(shown), Fmt.count(model.live.writtenThisSession)))
                 .contentTransition(.numericText())
-            if model.live.bufferedRows > 0 {
-                Text(trf("· %@ buffered", "Requests", Fmt.count(model.live.bufferedRows)))
-                    .foregroundStyle(Theme.warning)
-            }
             Spacer(minLength: 8)
             Text(verbatim: "surge-cli --raw watch request")
                 .font(Theme.mono(11))
@@ -88,7 +82,7 @@ private struct RequestsLiveEmptyState: View {
         if !search.isEmpty {
             EmptyState(systemImage: "magnifyingglass", title: trf("No requests match “%@”", "Requests", search), message: tr("The filter looks at host, remote IP, process and app.", "Requests"))
         } else if !model.live.rows.isEmpty {
-            EmptyState(systemImage: "line.3.horizontal.decrease.circle", title: tr("No requests match these filters", "Requests"), message: tr("Check the Mac menu in the sidebar and the filter options.", "Requests"))
+            EmptyState(systemImage: "line.3.horizontal.decrease.circle", title: tr("No requests match these filters", "Requests"), message: tr("Check the Mac menu in the sidebar.", "Requests"))
         } else if case .failed(let error) = model.live.surge {
             EmptyState(systemImage: "bolt.horizontal.circle", title: tr("Surge isn't connected", "Requests"), message: CaptureEngine.message(for: error))
         } else if !model.live.recording {

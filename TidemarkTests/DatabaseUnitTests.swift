@@ -148,13 +148,8 @@ struct DatabaseUnitTests {
 
     @Test func requestQueryTimeWindow() {
         let now = Date(timeIntervalSince1970: 1_761_300_000)
-        let day = PostgresDatabase.TimeWindow(RequestQuery(range: .last24Hours), now: now)
-        #expect(day.lower == now.addingTimeInterval(-86_400) && day.upper == nil)
-        #expect(PostgresDatabase.TimeWindow(RequestQuery(range: .all), now: now) == .init(lower: nil, upper: nil))
-        // A dragged interval overrides the range.
-        let dragged = DateInterval(start: now.addingTimeInterval(-600), end: now.addingTimeInterval(-300))
-        let window = PostgresDatabase.TimeWindow(RequestQuery(range: .lastHour, interval: dragged), now: now)
-        #expect(window.lower == dragged.start && window.upper == dragged.end)
+        #expect(PostgresDatabase.TimeWindow(RequestQuery(range: .last24Hours), now: now).lower == now.addingTimeInterval(-86_400))
+        #expect(PostgresDatabase.TimeWindow(RequestQuery(range: .all), now: now) == .init(lower: nil))
     }
 
     @Test func poolsCarrySessionLimits() {

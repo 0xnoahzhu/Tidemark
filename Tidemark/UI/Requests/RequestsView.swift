@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Requests page: the live table with its inspector, and the stored history.
+/// Requests page: the live table with its inspector, and the stored history (which has no inspector).
 struct RequestsView: View {
     @Environment(AppModel.self) private var model
     @State private var history = RequestsHistoryModel()
@@ -15,26 +15,25 @@ struct RequestsView: View {
             }
         }
         .inspector(isPresented: Binding(
-            get: { nav.selectedRequest != nil },
+            get: { nav.requestsLive && nav.selectedRequest != nil },
             set: { if !$0 { nav.selectedRequest = nil } }
         )) {
             // The inspector's minimum size must not follow its content: its host title and URL wrap, so a
             // width-dependent minimum height changes on every pass while the column opens, and AppKit aborts
             // after more update-constraints passes than the window has views. `inspectorColumnWidth` sets the width.
-            RequestsInspectorHost(history: history)
+            RequestsInspectorHost()
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .inspectorColumnWidth(min: 280, ideal: 316, max: 440)
         }
         .navigationTitle(tr("Requests", "Requests"))
         .navigationSubtitle(tr("Every request Surge sees, kept in PostgreSQL", "Requests"))
-        .searchable(text: $nav.requestSearch, placement: .toolbar, prompt: Text(tr("Filter host, IP, process", "Requests")))
         .toolbar { RequestsToolbar(model: model) }
         .onChange(of: nav.requestsLive) { nav.selectedRequest = nil }
     }
 }
 
-/// Live / History switch, filter options and the recording button. The filter field itself is the
-/// window's toolbar search field (`searchable`), which macOS places at the trailing edge.
+/// Live / History switch, the filter field and the recording button, in the design's order (`searchable`
+/// would put the filter field last).
 ///
 /// Toolbar items can be re-hosted in the overflow menu, so they get the model passed in rather than
 /// relying on the environment.
@@ -57,35 +56,21 @@ private struct RequestsToolbar: ToolbarContent {
         ToolbarSpacer(.fixed, placement: .primaryAction)
 
         ToolbarItem(placement: .primaryAction) {
-            RequestsFilterOptionsMenu(model: model)
+            ToolbarSearchField(text: $nav.requestSearch, prompt: tr("Filter host, IP, process", "Requests"))
+                .frame(width: 200)
         }
-        .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .automatic))
+        // Outlasts Live / History in a narrow window: the field has no usable form in the overflow menu.
+        .visibilityPriority(Self.searchPriority)
 
         ToolbarSpacer(.fixed, placement: .primaryAction)
 
         ToolbarItem(placement: .primaryAction) {
             RequestsRecordingButton(model: model)
         }
-        .visibilityPriority(ToolbarItemVisibilityPriority(higherThan: .high))
+        .visibilityPriority(ToolbarItemVisibilityPriority(higherThan: Self.searchPriority))
     }
-}
 
-/// "Monitored Only" and "Hide Apple Services" (Settings › Requests preferences).
-private struct RequestsFilterOptionsMenu: View {
-    var model: AppModel
-
-    var body: some View {
-        @Bindable var preferences = model.preferences
-        let active = preferences.monitoredOnly || preferences.hideAppleServices
-        Menu {
-            Toggle(tr("Monitored Only", "Requests"), isOn: $preferences.monitoredOnly)
-            Toggle(tr("Hide Apple Services", "Requests"), isOn: $preferences.hideAppleServices)
-        } label: {
-            Label(tr("Filter Options", "Requests"), systemImage: active ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease")
-        }
-        .menuIndicator(.hidden)
-        .help(tr("Filter Options", "Requests"))
-    }
+    private static let searchPriority = ToolbarItemVisibilityPriority(higherThan: .high)
 }
 
 /// `● Recording` with a pulsing red dot, or `■ Resume` while paused; asks before switching.
@@ -117,18 +102,15 @@ private struct RequestsRecordingButton: View {
     }
 }
 
-/// Resolves the selected request (live rows first, then history rows) and keeps showing the last
-/// version once it has scrolled out of the live buffer.
+/// Resolves the selected live request and keeps showing the last version once it has scrolled out of the
+/// live buffer.
 private struct RequestsInspectorHost: View {
     @Environment(AppModel.self) private var model
-    var history: RequestsHistoryModel
     @State private var cached: RequestRecord?
 
     var body: some View {
         let key = model.nav.selectedRequest
-        let current = key.flatMap { key in
-            model.live.rows.first { $0.key == key } ?? history.rows.first { $0.key == key }
-        }
+        let current = key.flatMap { key in model.live.rows.first { $0.key == key } }
         let record = current ?? (cached?.key == key ? cached : nil)
         Group {
             if let record {

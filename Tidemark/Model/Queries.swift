@@ -27,12 +27,10 @@ enum StatusFilter: String, CaseIterable, Sendable, Hashable {
     case failed
 }
 
-/// Filter applied to request queries (History view, app request history, CSV export).
+/// Filter applied to request queries (History view, app request history).
 struct RequestQuery: Hashable, Sendable {
     var scope: DeviceScope = .all
     var range: HistoryRange = .last24Hours
-    /// Explicit time window (dragged on the History chart); overrides `range` when set.
-    var interval: DateInterval? = nil
     var appID: AppID?
     /// Final policy name (`policy` column), nil = all.
     var policy: String?
@@ -41,15 +39,6 @@ struct RequestQuery: Hashable, Sendable {
     var search: String = ""
     var limit: Int = 500
     var offset: Int = 0
-    /// Keyset paging: only rows older than this cursor (newest-first order); used instead of `offset`
-    /// when paging through a table that keeps growing (CSV export).
-    var before: RequestCursor? = nil
-}
-
-/// Position in the newest-first request order: `(started_at, id)`.
-struct RequestCursor: Hashable, Sendable {
-    var startedAt: Date
-    var rowID: Int64
 }
 
 /// A page of request rows with the total match count and query timing.

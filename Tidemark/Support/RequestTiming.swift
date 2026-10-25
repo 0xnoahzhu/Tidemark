@@ -2,9 +2,9 @@ import Foundation
 
 /// A phase of a request's lifetime for the inspector's timing bar.
 struct TimingPhase: Hashable, Sendable {
+    /// The design's phases, in its order. Surge reports no time to first byte, so there is no Wait phase.
     enum Kind: String, CaseIterable, Sendable {
         case dns = "DNS"
-        case rule = "Rule"
         case connect = "Connect"
         case tls = "TLS"
         case transfer = "Transfer"
@@ -18,7 +18,8 @@ struct TimingPhase: Hashable, Sendable {
 ///
 /// Notes look like `12:07:22.102428 [TLS] TLS Client Hello SNI: api2.cursor.sh`. The first note of each
 /// category marks where that phase starts; the setup ends at `setupCompletedDate` and the transfer runs
-/// until `completedDate` (or now, for active connections).
+/// until `completedDate` (or now, for active connections). Each phase gets one segment, in the design's
+/// order, with the time of all its stretches.
 enum RequestTiming {
     struct Note: Hashable, Sendable {
         /// Seconds since midnight (local), as printed by Surge.
@@ -40,12 +41,13 @@ enum RequestTiming {
         return Note(secondsOfDay: h * 3600 + m * 60 + s, tag: tag, text: text)
     }
 
+    /// The rule decides which outbound connection Surge opens, so its notes start the Connect phase (the
+    /// design has no Rule phase).
     static func kind(forTag tag: String) -> TimingPhase.Kind? {
         switch tag.lowercased() {
         case "dns": .dns
-        case "rule": .rule
         case "tls": .tls
-        case "connector", "connection-pool", "socket", "proxy", "connect": .connect
+        case "rule", "connector", "connection-pool", "socket", "proxy", "connect": .connect
         default: nil
         }
     }
@@ -68,22 +70,17 @@ enum RequestTiming {
         }
         marks.sort { $0.1 < $1.1 }
 
-        var result: [TimingPhase] = []
+        var durations: [TimingPhase.Kind: TimeInterval] = [:]
+        // Before the first note Surge is still taking the connection in.
+        durations[.connect, default: 0] += max(0, (marks.first?.1 ?? setupEnd).timeIntervalSince(start))
         for (i, mark) in marks.enumerated() {
             let next = i + 1 < marks.count ? marks[i + 1].1 : setupEnd
-            let d = next.timeIntervalSince(mark.1)
-            if d > 0 { result.append(TimingPhase(kind: mark.0, duration: d)) }
+            durations[mark.0, default: 0] += max(0, next.timeIntervalSince(mark.1))
         }
-        let lead = (marks.first?.1 ?? setupEnd).timeIntervalSince(start)
-        if lead > 0 {
-            if let first = result.first, first.kind == .connect {
-                result[0].duration += lead
-            } else {
-                result.insert(TimingPhase(kind: .connect, duration: lead), at: 0)
-            }
+        durations[.transfer] = end.timeIntervalSince(setupEnd)
+        return TimingPhase.Kind.allCases.compactMap { kind in
+            guard let duration = durations[kind], duration > 0 else { return nil }
+            return TimingPhase(kind: kind, duration: duration)
         }
-        let transfer = end.timeIntervalSince(setupEnd)
-        if transfer > 0 { result.append(TimingPhase(kind: .transfer, duration: transfer)) }
-        return result
     }
 }

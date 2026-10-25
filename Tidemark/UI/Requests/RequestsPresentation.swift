@@ -8,28 +8,20 @@ enum RequestsPresentation {
     /// "Open <App>" on a request shows the app's Domains & IPs, as in the design and like a notification's View.
     static let openAppTab: AppTab = .inventory
 
-    /// Live rows for the current Mac scope, filter text and Requests view preferences.
+    /// Live rows for the current Mac scope and filter text.
     ///
     /// The filter matches host, remote IP, process and app name, case-insensitively.
     static func liveRows(
         _ rows: [RequestRecord],
         scope: DeviceScope,
         search: String,
-        monitoredOnly: Bool = false,
-        hideAppleServices: Bool = false,
         identity: (RequestRecord) -> AppIdentity
     ) -> [RequestRecord] {
         let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if case .all = scope, needle.isEmpty, !monitoredOnly, !hideAppleServices { return rows }
+        if case .all = scope, needle.isEmpty { return rows }
         return rows.filter { record in
             guard scope.includes(record.deviceID) else { return false }
-            if hideAppleServices, isAppleService(record) { return false }
-            if monitoredOnly || !needle.isEmpty {
-                let app = identity(record)
-                if monitoredOnly, !app.isMonitored { return false }
-                if !needle.isEmpty, !matches(record, needle: needle, appName: app.name) { return false }
-            }
-            return true
+            return needle.isEmpty || matches(record, needle: needle, appName: identity(record).name)
         }
     }
 
@@ -67,44 +59,26 @@ enum RequestsPresentation {
         return AppIdentity(name: unknownName, bundlePath: nil, letter: "?", hue: nil, isMonitored: false, appID: nil)
     }
 
-    /// Apple system daemons and Apple-operated hosts (Settings › Requests › Hide Apple services).
-    static func isAppleService(_ record: RequestRecord) -> Bool {
-        let systemPrefixes = ["/System/", "/usr/libexec/", "/usr/sbin/", "/Library/Apple/"]
-        if let path = record.chain.first?.path ?? record.processPath, systemPrefixes.contains(where: path.hasPrefix) {
-            return true
-        }
-        let host = record.host.lowercased()
-        return appleDomains.contains { host == $0 || host.hasSuffix("." + $0) }
-    }
-
-    private static let appleDomains = [
-        "apple.com", "icloud.com", "icloud-content.com", "apple-cloudkit.com", "mzstatic.com", "aaplimg.com",
-        "apple-dns.net", "cdn-apple.com", "apple.news", "itunes.com", "push.apple.com",
-    ]
-
     static func isFresh(_ record: RequestRecord, now: Date) -> Bool {
         now.timeIntervalSince(record.startedAt) < freshInterval
     }
 
     // MARK: Status
 
-    /// The inspector's status chip.
+    /// The inspector's status chip. As in the design, a request Surge failed or rejected reads "Failed" and a
+    /// tunnel reads "Tunnel" whether or not it is still open.
     enum Status: Equatable {
-        case active
         case tunnel
-        case completed
         case failed
-        case rejected
-
-        var isError: Bool { self == .failed || self == .rejected }
     }
 
-    static func status(of record: RequestRecord) -> Status {
+    /// Nil for any other request: the design's chip reads its HTTP status (`200 OK`), which Surge does not
+    /// report, so no chip is shown rather than a wording the design does not have.
+    static func status(of record: RequestRecord) -> Status? {
         switch record.state {
-        case .failed: .failed
-        case .rejected: .rejected
-        case .active: .active
-        case .completed: record.isTunnel ? .tunnel : .completed
+        case .failed, .rejected: .failed
+        case _ where record.isTunnel: .tunnel
+        case .active, .completed: nil
         }
     }
 
@@ -137,37 +111,12 @@ enum RequestsPresentation {
         return [ProcessLink(name: processName(of: record) ?? "", pid: record.pid ?? 0, path: record.processPath, startTime: nil)]
     }
 
-    /// `HostContext` handed to the on-device host insight. `appName` is nil when the sender is unknown.
-    static func hostContext(for record: RequestRecord, appName: String?) -> HostContext {
-        HostContext(
-            host: record.host,
-            appName: appName,
-            processName: processName(of: record),
-            port: record.port,
-            ips: record.remoteIP.map { [$0] } ?? [],
-            geo: record.geo,
-            policy: record.policyPath.isEmpty ? nil : record.policyDisplay,
-            firstSeen: record.isNew ? record.startedAt : nil,
-            requestCount: nil
-        )
-    }
-
     /// Pretty-printed JSON of a record for "Copy as JSON".
     static func json(for record: RequestRecord) -> String {
-        encode(record) ?? "{}"
-    }
-
-    /// One record as an object, several as an array.
-    static func json(for records: [RequestRecord]) -> String {
-        if records.count == 1 { return json(for: records[0]) }
-        return encode(records) ?? "[]"
-    }
-
-    private static func encode(_ value: some Encodable) -> String? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(value) else { return nil }
+        guard let data = try? encoder.encode(record) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
     }
 }

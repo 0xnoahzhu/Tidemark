@@ -453,10 +453,11 @@ private final class SlowStopProbeActions: ProbeActions {
 }
 
 @Suite @MainActor struct InventoryGroupTests {
-    private func entry(_ value: String, kind: HostKind = .domain, requests: Int64, geo: GeoInfo? = nil, source: String) -> InventoryEntry {
+    private func entry(_ value: String, kind: HostKind = .domain, requests: Int64, geo: GeoInfo? = nil, source: String,
+                       firstSeen: Date = .now) -> InventoryEntry {
         InventoryEntry(kind: kind, value: value,
                        sources: [InventorySource(title: source, path: "/Applications/\(source).app", appID: nil, probeSessionID: nil, bundlePath: nil)],
-                       firstSeen: .now, lastSeen: .now, requestCount: requests, geo: geo)
+                       firstSeen: firstSeen, lastSeen: .now, requestCount: requests, geo: geo)
     }
 
     @Test func groupsDomainsBySiteAndIPsByNetwork() {
@@ -481,18 +482,19 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(group.preview == "a  ·  b  ·  c  ·  d  ·  +2")
     }
 
-    @Test func filtersByKindAndSortsWithTheTableOrder() {
+    @Test func filtersByKindNewestFirst() {
+        let now = Date.now
         let entries = [
-            entry("api.github.com", requests: 10, source: "Cursor"),
-            entry("104.18.19.125", kind: .ip, requests: 30, source: "Cursor"),
-            entry("github.com", requests: 5, source: "Raycast"),
+            entry("github.com", requests: 5, source: "Raycast", firstSeen: now.addingTimeInterval(-60)),
+            entry("api.github.com", requests: 10, source: "Cursor", firstSeen: now.addingTimeInterval(-60)),
+            entry("104.18.19.125", kind: .ip, requests: 30, source: "Cursor", firstSeen: now),
+            entry("api.notion.com", requests: 1, source: "Raycast", firstSeen: now.addingTimeInterval(-3600)),
         ]
-        let byRequests = [KeyPathComparator(\InventoryEntry.requestCount, order: .reverse)]
-        #expect(InventoryPresentation.visible(entries, kind: nil, sortOrder: byRequests).map(\.value)
-                == ["104.18.19.125", "api.github.com", "github.com"])
-        #expect(InventoryPresentation.visible(entries, kind: .domain, sortOrder: [KeyPathComparator(\InventoryEntry.value)]).map(\.value)
-                == ["api.github.com", "github.com"])
-        #expect(InventoryPresentation.visible(entries, kind: .ip, sortOrder: byRequests).map(\.value) == ["104.18.19.125"])
+        // Newest first seen first, then by name.
+        #expect(InventoryPresentation.visible(entries, kind: nil).map(\.value)
+                == ["104.18.19.125", "api.github.com", "github.com", "api.notion.com"])
+        #expect(InventoryPresentation.visible(entries, kind: .domain).map(\.value) == ["api.github.com", "github.com", "api.notion.com"])
+        #expect(InventoryPresentation.visible(entries, kind: .ip).map(\.value) == ["104.18.19.125"])
     }
 }
 

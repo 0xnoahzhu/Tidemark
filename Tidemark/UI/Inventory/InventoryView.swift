@@ -1,23 +1,20 @@
-import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
 /// Global Domains & IPs page, deduplicated across every app and probe.
 ///
-/// A sortable table lists each domain and IP once with the processes (and probes) that reached it;
+/// A table lists each domain and IP once, newest first, with the processes (and probes) that reached it;
 /// "Group by site" folds domains into their registrable domain and IPs into their network.
 struct InventoryView: View {
     @Environment(AppModel.self) private var model
 
     @State private var entries: [InventoryEntry] = []
-    /// `entries` filtered by kind and sorted, and their site / network groups. Recomputed only when the
-    /// entries, the sort order, the kind or the grouping change, not on every selection click.
+    /// `entries` filtered by kind and in the table's order, and their site / network groups. Recomputed only
+    /// when the entries, the kind or the grouping change.
     @State private var visible: [InventoryEntry] = []
     @State private var groups: [InventoryGroup] = []
     @State private var domainCount = 0
     @State private var loaded = false
-    @State private var sortOrder = [KeyPathComparator(\InventoryEntry.firstSeen, order: .reverse)]
-    @State private var selection: Set<InventoryEntry.ID> = []
     @State private var exportDocument: AnalyzeCSVDocument?
     @State private var isExporting = false
     @State private var exportError: (any Error)?
@@ -41,13 +38,18 @@ struct InventoryView: View {
                 }
                 ToolbarSpacer(.fixed, placement: .primaryAction)
                 ToolbarItem(placement: .primaryAction) {
-                    Toggle(isOn: $nav.inventoryGrouped) {
-                        Label(tr("Group by site", "Inventory"), systemImage: "square.stack.3d.up")
-                            .labelStyle(.titleAndIcon)
-                    }
-                    .toggleStyle(.button)
-                    .help(tr("Fold domains into their site and IPs into their network", "Inventory"))
+                    Toggle(tr("Group by site", "Inventory"), isOn: $nav.inventoryGrouped)
+                        .toggleStyle(.button)
+                        .help(tr("Fold domains into their site and IPs into their network", "Inventory"))
                 }
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+                // The design's order: the search field before Export CSV (`searchable` would put it last).
+                ToolbarItem(placement: .primaryAction) {
+                    ToolbarSearchField(text: $nav.inventorySearch, prompt: tr("Search", "Inventory"))
+                        .frame(width: 170)
+                }
+                // The last item to overflow: the field has no usable form in the overflow menu.
+                .visibilityPriority(.high)
                 ToolbarSpacer(.fixed, placement: .primaryAction)
                 ToolbarItem(placement: .primaryAction) {
                     Button(tr("Export CSV", "Inventory")) {
@@ -57,7 +59,6 @@ struct InventoryView: View {
                     .disabled(visible.isEmpty)
                 }
             }
-            .searchable(text: $nav.inventorySearch, prompt: Text(tr("Search", "Inventory")))
             .fileExporter(isPresented: $isExporting, document: exportDocument, contentType: .commaSeparatedText,
                           defaultFilename: tr("Domains and IPs", "Inventory"),
                           onCompletion: { result in
@@ -73,18 +74,22 @@ struct InventoryView: View {
                                           language: Localizer.shared.languageCode), initial: true) {
                 recompute()
             }
-            .onChange(of: sortOrder) { recompute() }
     }
 
     @ViewBuilder
     private var content: some View {
         if loaded && visible.isEmpty {
-            if model.nav.inventorySearch.trimmingCharacters(in: .whitespaces).isEmpty {
+            let search = model.nav.inventorySearch.trimmingCharacters(in: .whitespaces)
+            if search.isEmpty {
                 EmptyState(systemImage: "network",
                            title: tr("No domains or IPs yet", "Inventory"),
                            message: tr("Every domain and IP that Surge sees shows up here once, whichever app or probe reached it.", "Inventory"))
             } else {
-                ContentUnavailableView.search(text: model.nav.inventorySearch)
+                // Not `ContentUnavailableView.search`, whose text follows the system language rather than
+                // Settings › Language.
+                EmptyState(systemImage: "magnifyingglass",
+                           title: trf("No domains or IPs match “%@”", "Inventory", search),
+                           message: tr("The search looks at each domain or IP and the apps and probes that reached it.", "Inventory"))
             }
         } else if model.nav.inventoryGrouped {
             groupedTable
@@ -105,9 +110,9 @@ struct InventoryView: View {
         var language: String
     }
 
-    /// Filters, sorts and groups `entries` for the tables.
+    /// Filters, orders and groups `entries` for the tables.
     private func recompute() {
-        visible = InventoryPresentation.visible(entries, kind: model.nav.inventoryKind, sortOrder: sortOrder)
+        visible = InventoryPresentation.visible(entries, kind: model.nav.inventoryKind)
         groups = model.nav.inventoryGrouped
             ? InventoryGroup.make(visible, site: { model.classifier.site(for: $0) }, unknownNetwork: tr("Unknown network", "Inventory"))
             : []
@@ -117,15 +122,16 @@ struct InventoryView: View {
     // MARK: Flat table
 
     private var flatTable: some View {
-        Table(visible, selection: $selection, sortOrder: $sortOrder) {
-            TableColumn(tr("Name", "Inventory"), value: \.value) { entry in
+        // As in the design, the headers do not sort: the rows keep the newest first.
+        Table(visible) {
+            TableColumn(tr("Name", "Inventory")) { entry in
                 Text(entry.value)
                     .font(entry.kind == .ip ? Theme.mono(12, weight: .medium) : .system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .help(entry.geo?.display ?? entry.value)
             }
-            .width(min: 150, ideal: 230)
+            .width(min: 150, ideal: 270)
 
             TableColumn(tr("Type", "Inventory")) { entry in
                 InventoryKindChip(kind: entry.kind)
@@ -137,19 +143,19 @@ struct InventoryView: View {
             TableColumn(tr("Seen by · process path", "Inventory")) { entry in
                 InventorySourcesList(model: model, sources: entry.sources)
             }
-            .width(min: 240, ideal: 520)
+            .width(min: 240, ideal: 480)
 
-            TableColumn(tr("First seen", "Inventory"), value: \.firstSeen) { entry in
+            TableColumn(tr("First seen", "Inventory")) { entry in
                 Text(AnalyzeFormat.seen(entry.firstSeen)).foregroundStyle(Theme.ink2)
             }
-            .width(min: 84, ideal: 96, max: 112)
+            .width(min: 108, ideal: 112, max: 120)
 
-            TableColumn(tr("Last seen", "Inventory"), value: \.lastSeen) { entry in
+            TableColumn(tr("Last seen", "Inventory")) { entry in
                 Text(AnalyzeFormat.seen(entry.lastSeen, timeOnlyToday: true)).foregroundStyle(Theme.ink2)
             }
-            .width(min: 70, ideal: 84, max: 100)
+            .width(min: 108, ideal: 112, max: 120)
 
-            TableColumn(tr("Requests", "Inventory"), value: \.requestCount) { entry in
+            TableColumn(tr("Requests", "Inventory")) { entry in
                 Text(Fmt.count(entry.requestCount))
                     .font(Theme.mono(11))
             }
@@ -157,27 +163,6 @@ struct InventoryView: View {
             .alignment(.trailing)
         }
         .font(.system(size: 12))
-        .contextMenu(forSelectionType: InventoryEntry.ID.self) { ids in
-            selectionMenu(ids)
-        }
-    }
-
-    @ViewBuilder
-    private func selectionMenu(_ ids: Set<InventoryEntry.ID>) -> some View {
-        let values = entries.filter { ids.contains($0.id) }.map(\.value)
-        if !values.isEmpty {
-            Button(values.count == 1 ? tr("Copy", "Inventory") : trf("Copy %lld Items", "Inventory", values.count)) {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(values.joined(separator: "\n"), forType: .string)
-            }
-            if values.count == 1, let value = values.first {
-                let state = AnalyzeMuteState(value, alerts: model.alerts)
-                Button(AnalyzeMuteButton.title(state)) {
-                    Task { await AnalyzeMuteButton.toggle(value, state: state, model: model) }
-                }
-                .disabled(state == .mutedByRule)
-            }
-        }
     }
 
     // MARK: Grouped table
@@ -250,10 +235,13 @@ struct InventoryView: View {
     }
 }
 
-/// Filtering and sorting behind the Domains & IPs table (pure, so it can be tested).
+/// Filtering and ordering behind the Domains & IPs table (pure, so it can be tested).
 enum InventoryPresentation {
-    static func visible(_ entries: [InventoryEntry], kind: HostKind?, sortOrder: [KeyPathComparator<InventoryEntry>]) -> [InventoryEntry] {
-        entries.filter { kind == nil || $0.kind == kind }.sorted(using: sortOrder)
+    /// The entries of `kind` (all when nil), newest first seen first, then by name: the database's order.
+    static func visible(_ entries: [InventoryEntry], kind: HostKind?) -> [InventoryEntry] {
+        entries.filter { kind == nil || $0.kind == kind }.sorted { a, b in
+            a.firstSeen != b.firstSeen ? a.firstSeen > b.firstSeen : a.value < b.value
+        }
     }
 }
 
@@ -273,7 +261,8 @@ struct InventoryKindChip: View {
     }
 }
 
-/// Up to six "seen by" rows: a tile (app icon, letter, or the purple probe tile) and the process path.
+/// The first six "seen by" rows, as in the design: a tile (app icon, letter, or the purple probe tile) and the
+/// process path.
 /// Rendered inside `Table` cells, which do not receive custom environment objects on macOS 27, so the
 /// model is passed explicitly.
 struct InventorySourcesList: View {
@@ -294,11 +283,6 @@ struct InventorySourcesList: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .help(Self.displayPath(source))
                 }
-            }
-            if sources.count > 6 {
-                Text(trf("+%lld more", "Inventory", sources.count - 6))
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Theme.ink3)
             }
         }
         .padding(.vertical, 3)

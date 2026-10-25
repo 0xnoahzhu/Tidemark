@@ -9,7 +9,7 @@ import Observation
 @MainActor
 @Observable
 final class RequestsHistoryModel {
-    /// Rows fetched per page ("Load More" appends the next page).
+    /// Rows fetched per page (scrolling to the end of the table appends the next page).
     static let pageSize = 500
     static let histogramBuckets = 48
 
@@ -25,11 +25,14 @@ final class RequestsHistoryModel {
     /// The current query's histogram is loading.
     private(set) var isLoadingHistogram = false
     private(set) var isLoadingMore = false
-    /// Why the last load failed, nil after one succeeded.
+    /// Why the current query's first page failed, nil after one succeeded.
     private(set) var failure: (any Error)?
+    /// Next pages that failed in a row. The rows already loaded stay and the next `loadMore` asks again; the
+    /// view retries after each failure while it is shown.
+    private(set) var nextPageFailures = 0
     /// Why the current query's histogram failed; the rows are unaffected.
     private(set) var histogramFailure: (any Error)?
-    /// The query the rows belong to (offset 0). Its `interval` is set while the chart is zoomed.
+    /// The query the rows belong to (offset 0).
     private(set) var query = RequestQuery()
 
     /// Bumped by every `load`: only the latest load may change the results.
@@ -51,8 +54,8 @@ final class RequestsHistoryModel {
         var first = query
         first.limit = Self.pageSize
         first.offset = 0
-        first.before = nil
         self.query = first
+        nextPageFailures = 0
         generation &+= 1
         let generation = generation
         isLoading = true
@@ -81,8 +84,12 @@ final class RequestsHistoryModel {
             rows.append(contentsOf: result.rows.filter { !known.contains($0.key) })
             totalCount = result.totalCount
             elapsed = result.elapsed
+            nextPageFailures = 0
         } catch {
-            if !Task.isCancelled { failure = error }
+            // A next page that fails leaves the rows above it alone; only a failed first page means
+            // "Can't load history".
+            guard !Task.isCancelled, next.offset == rows.count, sameFilter(next, query) else { return }
+            nextPageFailures += 1
         }
     }
 
@@ -172,7 +179,7 @@ final class RequestsHistoryModel {
     }
 
     private func sameFilter(_ a: RequestQuery, _ b: RequestQuery) -> Bool {
-        a.scope == b.scope && a.range == b.range && a.interval == b.interval && a.appID == b.appID && a.policy == b.policy
+        a.scope == b.scope && a.range == b.range && a.appID == b.appID && a.policy == b.policy
             && a.status == b.status && a.search == b.search
     }
 }

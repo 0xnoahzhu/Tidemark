@@ -71,42 +71,12 @@
         }
       }
     },
-    "+%lld more" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "另外 %lld 个"
-          }
-        }
-      }
-    },
     "All" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "全部"
-          }
-        }
-      }
-    },
-    "Copy" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "拷贝"
-          }
-        }
-      }
-    },
-    "Copy %lld Items" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "拷贝 %lld 项"
           }
         }
       }
@@ -271,6 +241,16 @@
         }
       }
     },
+    "No domains or IPs match “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有匹配“%@”的域名或 IP"
+          }
+        }
+      }
+    },
     "No domains or IPs yet" : {
       "localizations" : {
         "zh-Hans" : {
@@ -357,6 +337,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "网站探测 · %@"
+          }
+        }
+      }
+    },
+    "The search looks at each domain or IP and the apps and probes that reached it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索会匹配域名或 IP，以及访问过它的 App 和探测。"
           }
         }
       }

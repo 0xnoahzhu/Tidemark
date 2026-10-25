@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Inspector of the selected request: process chain, connection, timing, host insight and storage.
+/// Inspector of the selected request: process chain, connection, timing and storage.
 struct RequestsInspector: View {
     @Environment(AppModel.self) private var model
     var record: RequestRecord
@@ -8,7 +8,6 @@ struct RequestsInspector: View {
 
     var body: some View {
         let identity = model.requestsIdentity(for: record)
-        let appName = RequestsPresentation.isUnattributed(record, identity: identity) ? nil : identity.name
         VStack(spacing: 0) {
             RequestsInspectorHeader(record: record, close: close)
             Divider()
@@ -17,7 +16,6 @@ struct RequestsInspector: View {
                     RequestsInspectorChain(record: record, identity: identity)
                     RequestsInspectorConnection(record: record)
                     RequestsInspectorTiming(record: record)
-                    HostInsightView(context: RequestsPresentation.hostContext(for: record, appName: appName))
                     RequestsInspectorStored(record: record)
                 }
                 .padding(.horizontal, 16)
@@ -45,7 +43,9 @@ private struct RequestsInspectorHeader: View {
                     .padding(.vertical, 2)
                     .background(Theme.fill, in: .rect(cornerRadius: 5, style: .continuous))
                     .foregroundStyle(Theme.ink2)
-                RequestsStatusChip(status: RequestsPresentation.status(of: record))
+                if let status = RequestsPresentation.status(of: record) {
+                    RequestsStatusChip(status: status)
+                }
                 if record.isNew {
                     TagBadge(text: tr("FIRST VISIT", "Requests"), style: .new)
                 }
@@ -85,17 +85,14 @@ private struct RequestsInspectorHeader: View {
     }
 }
 
-/// `Tunnel` / `Active` / `Completed` in green or accent, `Failed` / `Rejected` in red.
+/// `Tunnel` in green, `Failed` in red.
 private struct RequestsStatusChip: View {
     var status: RequestsPresentation.Status
 
     var body: some View {
         let (label, colors): (String, (Color, Color)) = switch status {
         case .tunnel: (tr("Tunnel", "Requests"), Theme.tint(150))
-        case .completed: (tr("Completed", "Requests"), Theme.tint(150))
-        case .active: (tr("Active", "Requests"), (Theme.accentTint, Theme.accentInk))
         case .failed: (tr("Failed", "Requests"), Theme.tint(27))
-        case .rejected: (tr("Rejected", "Requests"), Theme.tint(27))
         }
         Text(label)
             .font(.system(size: 10.5, weight: .semibold))

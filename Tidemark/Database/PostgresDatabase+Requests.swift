@@ -320,25 +320,16 @@ extension PostgresDatabase {
         )
     }
 
-    /// The time window a query covers: its explicit `interval` (inclusive at both ends, like
-    /// `DateInterval.contains`), otherwise its `range` up to now.
+    /// The time window a query covers: its `range` up to now (no lower bound for "All time").
     struct TimeWindow: Sendable, Equatable {
         var lower: Date?
-        var upper: Date?
 
-        init(lower: Date?, upper: Date?) {
+        init(lower: Date?) {
             self.lower = lower
-            self.upper = upper
         }
 
         init(_ query: RequestQuery, now: Date = .now) {
-            if let interval = query.interval {
-                lower = interval.start
-                upper = interval.end
-            } else {
-                lower = query.range.lowerBound(now: now)
-                upper = nil
-            }
+            lower = query.range.lowerBound(now: now)
         }
     }
 
@@ -354,17 +345,11 @@ extension PostgresDatabase {
     /// Appends ` WHERE …` for a request query (`r` aliases `requests`). A search matches the host, process
     /// name, remote IP or bundle path, or attributes the request to one of `searchApps` (the apps whose name
     /// matches, resolved beforehand: a bound list lets the planner combine the trigram index and the app
-    /// index, where a subquery made it scan the whole range). The keyset cursor (`before`) is left out when
-    /// `includeCursor` is false (totals count every match of the filters).
-    static func appendFilters(_ query: RequestQuery, window: TimeWindow, searchApps: [AppID] = [], includeCursor: Bool = true, to sql: inout SQL) {
+    /// index, where a subquery made it scan the whole range).
+    static func appendFilters(_ query: RequestQuery, window: TimeWindow, searchApps: [AppID] = [], to sql: inout SQL) {
         var conditions: [String] = []
         if let device = query.scope.deviceID { conditions.append("r.device_id = \(sql.bind(device))") }
         if let lower = window.lower { conditions.append("r.started_at >= \(sql.bind(lower))") }
-        if let upper = window.upper { conditions.append("r.started_at <= \(sql.bind(upper))") }
-        if includeCursor, let cursor = query.before {
-            // Newest-first keyset: rows strictly after the cursor in `ORDER BY started_at DESC, id DESC`.
-            conditions.append("(r.started_at, r.id) < (\(sql.bindInstant(cursor.startedAt)), \(sql.bind(cursor.rowID))::int8)")
-        }
         if let app = query.appID { conditions.append("r.app_id = \(sql.bind(app))") }
         if let policy = query.policy { conditions.append("r.policy = \(sql.bind(policy))") }
         switch query.status {
@@ -386,9 +371,9 @@ extension PostgresDatabase {
         if !conditions.isEmpty { sql.append(" WHERE " + conditions.joined(separator: " AND ")) }
     }
 
-    /// Rows newest first with a total. The total counts every row matching the filters (ignoring `offset`
-    /// and the `before` cursor); it is exact up to 100,000 matches, beyond that (and for the unfiltered
-    /// "All time" view) it comes from the planner / table statistics.
+    /// Rows newest first with a total. The total counts every row matching the filters (ignoring `offset`);
+    /// it is exact up to 100,000 matches, beyond that (and for the unfiltered "All time" view) it comes from
+    /// the planner / table statistics.
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage {
         let clock = ContinuousClock()
         let start = clock.now
@@ -410,7 +395,7 @@ extension PostgresDatabase {
     private static let exactCountCap: Int64 = 100_000
 
     private func totalCount(for query: RequestQuery, window: TimeWindow, searchApps: [AppID]) async throws -> Int64 {
-        let unfiltered = window.lower == nil && window.upper == nil && query.appID == nil && query.policy == nil && query.status == .any
+        let unfiltered = window.lower == nil && query.appID == nil && query.policy == nil && query.status == .any
             && query.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if unfiltered {
             switch query.scope {
@@ -424,13 +409,13 @@ extension PostgresDatabase {
         }
 
         var count = SQL("SELECT count(*) AS n FROM (SELECT 1 FROM requests r")
-        Self.appendFilters(query, window: window, searchApps: searchApps, includeCursor: false, to: &count)
+        Self.appendFilters(query, window: window, searchApps: searchApps, to: &count)
         count.append(" LIMIT \(Self.exactCountCap + 1)) AS capped")
         let exact = try await rows(count.query, statementTimeout: Self.longReadTimeout).first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
         guard exact > Self.exactCountCap else { return exact }
 
         var explain = SQL("EXPLAIN (FORMAT JSON) SELECT 1 FROM requests r")
-        Self.appendFilters(query, window: window, searchApps: searchApps, includeCursor: false, to: &explain)
+        Self.appendFilters(query, window: window, searchApps: searchApps, to: &explain)
         let plan = try await rows(explain.query).first.map { try PostgresRowReader($0)("QUERY PLAN", as: String.self) } ?? "[]"
         return max(exact, Self.plannedRows(fromExplainJSON: plan) ?? exact)
     }
@@ -449,18 +434,17 @@ extension PostgresDatabase {
         return Int64(first.plan.rows)
     }
 
-    /// `buckets` equal slices of the query's `interval`, or from the range's lower bound (the oldest
-    /// matching request for "All time") to now. The keyset cursor is ignored.
+    /// `buckets` equal slices from the range's lower bound (the oldest matching request for "All time") to now.
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram {
         let now = Date.now
         var window = TimeWindow(query, now: now)
-        let end = window.upper ?? now
+        let end = now
         guard buckets > 0 else { return Histogram(start: end, end: end, counts: []) }
         let apps = try await searchApps(for: query)
 
         if window.lower == nil {
             var oldest = SQL("SELECT min(r.started_at) AS oldest FROM requests r")
-            Self.appendFilters(query, window: window, searchApps: apps, includeCursor: false, to: &oldest)
+            Self.appendFilters(query, window: window, searchApps: apps, to: &oldest)
             window.lower = try await rows(oldest.query, statementTimeout: Self.longReadTimeout).first.flatMap { try PostgresRowReader($0)("oldest", as: Date?.self) }
         }
         guard let start = window.lower, start < end else {
@@ -474,7 +458,7 @@ extension PostgresDatabase {
         let high = sql.bind(end.timeIntervalSince1970)
         let count = sql.bind(buckets)
         sql.append("\(low)::float8, \(high)::float8, \(count)::int4), \(count)::int4), 1) AS bucket, count(*) AS n FROM requests r")
-        Self.appendFilters(query, window: TimeWindow(lower: start, upper: window.upper), searchApps: apps, includeCursor: false, to: &sql)
+        Self.appendFilters(query, window: TimeWindow(lower: start), searchApps: apps, to: &sql)
         sql.append(" GROUP BY bucket")
 
         var counts = Array(repeating: Int64(0), count: buckets)

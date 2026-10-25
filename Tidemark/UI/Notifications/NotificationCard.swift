@@ -8,8 +8,6 @@ struct NotificationCard: View {
     /// Today's cards show only the time; older ones show the day above it.
     var isToday: Bool
 
-    @State private var isHovering = false
-
     var body: some View {
         let app = model.catalog.app(alert.appID)
         let appName = app?.name ?? tr("Deleted app", "Notifications")
@@ -57,24 +55,10 @@ struct NotificationCard: View {
         .background(alert.isUnread ? Theme.fresh : Theme.card, in: .rect(cornerRadius: 12, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(isHovering ? Theme.fill2 : Theme.line, lineWidth: isHovering ? 1 : 0.5)
+                .strokeBorder(Theme.line, lineWidth: 0.5)
         }
         .contentShape(.rect(cornerRadius: 12))
-        .onHover { isHovering = $0 }
         .onTapGesture { markRead() }
-        .contextMenu {
-            if alert.isUnread {
-                Button(tr("Mark as Read", "Notifications")) { markRead() }
-            }
-            Button(alert.kind == .ip ? tr("Mute IP", "Notifications") : tr("Mute Host", "Notifications")) {
-                Task { await model.capture.mute(NotificationsPresentation.muteValue(for: alert), dismissingAlert: alert.id) }
-            }
-            Divider()
-            Button(tr("Copy", "Notifications")) { RequestsPasteboard.copy(alert.value) }
-            if app != nil {
-                Button(tr("View", "Notifications")) { view() }
-            }
-        }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityValue(alert.isUnread ? tr("Unread", "Notifications") : "")

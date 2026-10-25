@@ -34,9 +34,7 @@ struct NotificationsView: View {
         .background(Theme.bg3)
         .overlay {
             if items.isEmpty {
-                Text(nav.alertFilter == .unread && !model.alerts.items.isEmpty
-                     ? tr("No unread notifications.", "Notifications")
-                     : tr("Nothing here. New domains and IPs show up the first time they're seen.", "Notifications"))
+                Text(tr("Nothing here. New domains and IPs show up the first time they're seen.", "Notifications"))
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.ink2)
                     .multilineTextAlignment(.center)

@@ -44,6 +44,4 @@ struct AlertItem: Identifiable, Hashable, Codable, Sendable {
 enum AlertFilter: String, CaseIterable, Sendable, Hashable {
     case all
     case unread
-    case domain
-    case ip
 }

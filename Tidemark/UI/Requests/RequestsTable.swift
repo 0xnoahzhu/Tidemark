@@ -3,23 +3,30 @@ import SwiftUI
 
 /// The request table shared by Live and History: Time, App · Process, Host, Remote IP, Policy, Size.
 ///
-/// Table cells and row menus are hosted outside the SwiftUI environment chain, so they receive the model
-/// explicitly instead of reading it from `@Environment`.
+/// Table cells are hosted outside the SwiftUI environment chain, so they receive the model explicitly instead
+/// of reading it from `@Environment`.
 struct RequestsTable: View {
     enum TimeStyle {
         /// `14:32:27.130`
         case clock
-        /// `10-24 14:21:25`
+        /// `Oct 24 14:21:25.017`
         case dayClock
     }
 
     var model: AppModel
     var rows: [RequestRecord]
-    @Binding var selection: RequestKey?
+    /// The selected row; nil when rows cannot be selected (History, whose rows open no inspector).
+    var selection: Binding<RequestKey?>?
     var timeStyle: TimeStyle
     /// Reference time for the fresh-row background; nil disables it (History).
     var now: Date?
+    /// The BY IP and NEW badges after the host, which the design shows in the live table only.
+    var showsHostBadges = true
+    /// Called when the last row comes into view (History loads its next page).
+    var onReachEnd: (() -> Void)?
 
+    /// Fits History's longest time, `10月24日 23:59:59.999` in Chinese, in 11 pt SF Mono with the cell's inset.
+    static let historyTimeWidth: CGFloat = 146
     /// Fits the widest IPv4 address (`255.255.255.255`, about 102 pt in 11 pt SF Mono) with the cell's inset.
     static let remoteIPWidth: CGFloat = 108
     /// The App · Process column never gets narrower than the tile and an app name like `Brave Browser` with
@@ -39,59 +46,68 @@ struct RequestsTable: View {
         // whatever is left is always shared between the app names and the hosts, Host keeping the wider share.
         // The minimums add up to about the content column of the smallest window; below that the table
         // scrolls horizontally.
-        Table(rows, selection: $selection) {
-            TableColumn(Self.header(tr("Time", "Requests"))) { record in
-                RequestsTimeCell(date: record.startedAt, style: timeStyle)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                    .background {
-                        if now != nil {
-                            RequestsRowTint(key: record.key, isFresh: isFresh(record), isSelected: record.key == selection)
-                        }
-                    }
+        Group {
+            if let selection {
+                Table(rows, selection: selection) { columns }
+            } else {
+                Table(rows) { columns }
             }
-            .width(timeStyle == .clock ? 86 : 102)
-
-            TableColumn(Self.header(tr("App · Process", "Requests"))) { record in
-                RequestsAppCell(model: model, record: record)
-            }
-            .width(min: Self.appMinWidth, ideal: 180)
-
-            TableColumn(Self.header(tr("Host", "Requests"))) { record in
-                RequestsHostCell(record: record)
-            }
-            .width(min: 140, ideal: 220)
-
-            TableColumn(Self.header(tr("Remote IP", "Requests"))) { record in
-                RequestsRemoteIPCell(remoteIP: record.remoteIP)
-            }
-            .width(Self.remoteIPWidth)
-
-            TableColumn(Self.header(tr("Policy", "Requests"))) { record in
-                // The shared chip: a truncated policy keeps its group and the end of the final policy.
-                PolicyChip(policyPath: record.policyPath, maxWidth: .infinity)
-            }
-            .width(min: Self.policyMinWidth, ideal: 170, max: 200)
-
-            TableColumn(Self.header(tr("Size", "Requests"))) { record in
-                RequestsSizeCell(record: record)
-            }
-            .width(64)
-            .alignment(.trailing)
         }
         .alternatingRowBackgrounds()
         // A table reports the sum of its column widths as its minimum, which would push the split view past the
         // window once the inspector opens; below that width it scrolls horizontally instead.
         .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
-        .contextMenu(forSelectionType: RequestKey.self) { keys in
-            RequestsRowMenu(model: model, records: rows.filter { keys.contains($0.key) })
-        } primaryAction: { keys in
-            if let key = keys.first { selection = key }
-        }
     }
+
+    @TableColumnBuilder<RequestRecord, Never>
+    private var columns: some TableColumnContent<RequestRecord, Never> {
+        TableColumn(Self.header(tr("Time", "Requests"))) { record in
+            RequestsTimeCell(date: record.startedAt, style: timeStyle)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .background {
+                    if now != nil {
+                        RequestsRowTint(key: record.key, isFresh: isFresh(record), isSelected: record.key == selectedKey)
+                    }
+                }
+                .onAppear {
+                    if let onReachEnd, record.key == rows.last?.key { onReachEnd() }
+                }
+        }
+        .width(timeStyle == .clock ? 86 : Self.historyTimeWidth)
+
+        TableColumn(Self.header(tr("App · Process", "Requests"))) { record in
+            RequestsAppCell(model: model, record: record)
+        }
+        .width(min: Self.appMinWidth, ideal: 180)
+
+        TableColumn(Self.header(tr("Host", "Requests"))) { record in
+            RequestsHostCell(record: record, showsBadges: showsHostBadges)
+        }
+        .width(min: 140, ideal: 220)
+
+        TableColumn(Self.header(tr("Remote IP", "Requests"))) { record in
+            RequestsRemoteIPCell(remoteIP: record.remoteIP)
+        }
+        .width(Self.remoteIPWidth)
+
+        TableColumn(Self.header(tr("Policy", "Requests"))) { record in
+            // The shared chip: a truncated policy keeps its group and the end of the final policy.
+            PolicyChip(policyPath: record.policyPath, maxWidth: .infinity)
+        }
+        .width(min: Self.policyMinWidth, ideal: 170, max: 200)
+
+        TableColumn(Self.header(tr("Size", "Requests"))) { record in
+            RequestsSizeCell(record: record)
+        }
+        .width(64)
+        .alignment(.trailing)
+    }
+
+    private var selectedKey: RequestKey? { selection?.wrappedValue }
 
     /// Fresh rows get the arrival tint, except the selected one, which keeps the system selection.
     private func isFresh(_ record: RequestRecord) -> Bool {
-        guard let now, record.key != selection else { return false }
+        guard let now, record.key != selectedKey else { return false }
         return RequestsPresentation.isFresh(record, now: now)
     }
 
@@ -109,11 +125,16 @@ struct RequestsTimeCell: View {
     var style: RequestsTable.TimeStyle
 
     var body: some View {
-        Text(style == .clock ? Fmt.clock(date) : Fmt.dayClock(date))
+        Text(Self.label(date, style: style, locale: Localizer.shared.locale))
             .font(Theme.mono(11))
             .monospacedDigit()
             .foregroundStyle(.secondary)
             .lineLimit(1)
+    }
+
+    /// `14:32:27.130` in the live table, `Oct 24 14:21:25.017` (`10月24日 14:21:25.017`) in History.
+    static func label(_ date: Date, style: RequestsTable.TimeStyle, locale: Locale) -> String {
+        style == .clock ? Fmt.clock(date) : Fmt.monthDay(date, locale: locale) + " " + Fmt.clock(date)
     }
 }
 
@@ -143,6 +164,7 @@ struct RequestsAppCell: View {
 /// `CONNECT  api2.cursor.sh  BY IP  NEW`
 struct RequestsHostCell: View {
     var record: RequestRecord
+    var showsBadges = true
 
     var body: some View {
         HStack(spacing: 6) {
@@ -156,10 +178,10 @@ struct RequestsHostCell: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .layoutPriority(1)
-            if record.isIPLiteral {
+            if showsBadges, record.isIPLiteral {
                 TagBadge(text: tr("BY IP", "Requests"), style: .neutral)
             }
-            if record.isNew {
+            if showsBadges, record.isNew {
                 TagBadge(text: tr("NEW", "Requests"), style: .new)
             }
         }
@@ -167,17 +189,15 @@ struct RequestsHostCell: View {
     }
 }
 
-/// Byte count, or "failed" / "rejected" in red.
+/// Byte count, or "failed" in red for a request Surge failed or rejected.
 struct RequestsSizeCell: View {
     var record: RequestRecord
 
     var body: some View {
         Group {
             switch record.state {
-            case .failed:
+            case .failed, .rejected:
                 Text(tr("failed", "Requests")).foregroundStyle(Theme.failed)
-            case .rejected:
-                Text(tr("rejected", "Requests")).foregroundStyle(Theme.failed)
             case .active, .completed:
                 Text(Fmt.bytes(record.totalBytes)).foregroundStyle(.tertiary)
             }
@@ -200,35 +220,6 @@ struct RequestsRemoteIPCell: View {
             .lineLimit(1)
             .truncationMode(.middle)
             .help(remoteIP ?? "")
-    }
-}
-
-/// Right-click menu of request rows.
-struct RequestsRowMenu: View {
-    var model: AppModel
-    var records: [RequestRecord]
-
-    var body: some View {
-        if let record = records.first {
-            let identity = model.requestsIdentity(for: record)
-            Button(tr("Copy Host", "Requests")) { RequestsPasteboard.copy(records.map(\.host).joined(separator: "\n")) }
-            if records.count == 1, let ip = record.remoteIP {
-                Button(tr("Copy Remote IP", "Requests")) { RequestsPasteboard.copy(ip) }
-            }
-            if records.count == 1, let url = record.url {
-                Button(tr("Copy URL", "Requests")) { RequestsPasteboard.copy(url) }
-            }
-            Button(tr("Copy as JSON", "Requests")) {
-                RequestsPasteboard.copy(RequestsPresentation.json(for: records))
-            }
-            Divider()
-            Button(trf("Filter by %@", "Requests", record.host)) { model.nav.requestSearch = record.host }
-            if let appID = identity.appID {
-                Button(trf("Open %@", "Requests", identity.name)) { model.nav.open(.app(appID), tab: RequestsPresentation.openAppTab) }
-            } else if let bundle = record.bundlePath, !bundle.isEmpty {
-                Button(trf("Monitor %@…", "Requests", identity.name)) { model.nav.openAddApp(preselect: bundle) }
-            }
-        }
     }
 }
 

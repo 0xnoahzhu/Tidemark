@@ -115,8 +115,6 @@ extension PostgresDatabase {
         switch filter {
         case .all: break
         case .unread: conditions.append("a.read_at IS NULL")
-        case .domain: conditions.append("a.kind = 'domain'")
-        case .ip: conditions.append("a.kind = 'ip'")
         }
         if let appID { conditions.append("a.app_id = \(sql.bind(appID))") }
         if let device = scope.deviceID { conditions.append("a.device_id = \(sql.bind(device))") }

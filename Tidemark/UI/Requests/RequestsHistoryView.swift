@@ -1,47 +1,33 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
-/// History mode of the Requests page: filters, a histogram and every stored request matching them.
+/// History mode of the Requests page: filters, a histogram and every stored request matching them. The next
+/// page of rows loads when the table is scrolled to its end.
 struct RequestsHistoryView: View {
     @Environment(AppModel.self) private var model
     var history: RequestsHistoryModel
 
     /// Search text of the last query that ran; a change of only the search is debounced.
     @State private var lastSearch: String?
-    @State private var reloadToken = 0
-    @State private var exportDocument: RequestsCSVDocument?
-    @State private var isExporting = false
-    @State private var exportError: (any Error)?
 
     var body: some View {
-        @Bindable var nav = model.nav
+        let nav = model.nav
         let key = RequestsHistoryKey(
             scope: model.devices.scope,
             range: nav.history.range,
-            interval: nav.history.interval,
             appID: nav.history.appID,
             policy: nav.history.policy,
             status: nav.history.status,
-            search: nav.requestSearch.trimmingCharacters(in: .whitespacesAndNewlines),
-            reload: reloadToken
+            search: nav.requestSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         VStack(spacing: 0) {
-            RequestsHistoryFilterBar(history: history, export: startExport, reload: { reloadToken &+= 1 })
+            RequestsHistoryFilterBar(history: history)
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .padding(.bottom, 4)
 
-            if let window = nav.history.interval {
-                RequestsZoomBar(window: window) { nav.history.interval = nil }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 4)
-            }
-
             Group {
-                if let histogram = history.histogram, histogram.counts.contains(where: { $0 > 0 }) || nav.history.interval != nil {
-                    RequestsHistogramChart(histogram: histogram) { window in
-                        nav.history.interval = window
-                    }
+                if let histogram = history.histogram, histogram.counts.contains(where: { $0 > 0 }) {
+                    RequestsHistogramChart(histogram: histogram)
                 } else if history.isLoadingHistogram, !history.isLoading {
                     ProgressView().controlSize(.small)
                 } else if let message = history.histogramError, history.errorMessage == nil {
@@ -57,11 +43,12 @@ struct RequestsHistoryView: View {
 
             Divider()
 
-            RequestsTable(model: model, rows: history.rows, selection: $nav.selectedRequest, timeStyle: .dayClock, now: nil)
-                .scrollEdgeEffectStyle(.hard, for: .top)
-                .overlay { RequestsHistoryOverlay(history: history, search: key.search) }
-
-            RequestsHistoryFooter(history: history)
+            // As in the design, History rows are not selectable: the inspector belongs to the live table.
+            RequestsTable(model: model, rows: history.rows, timeStyle: .dayClock, now: nil, showsHostBadges: false) {
+                Task { await history.loadMore(database: model.database) }
+            }
+            .scrollEdgeEffectStyle(.hard, for: .top)
+            .overlay { RequestsHistoryOverlay(history: history, search: key.search) }
         }
         .task(id: key) {
             if let lastSearch, lastSearch != key.search {
@@ -74,39 +61,15 @@ struct RequestsHistoryView: View {
         .task(id: nav.history.range) {
             await history.loadPolicies(since: nav.history.range.lowerBound(), database: model.database)
         }
-        // A zoomed window belongs to the range it was dragged in.
-        .onChange(of: nav.history.range) { nav.history.interval = nil }
-        .fileExporter(
-            isPresented: $isExporting,
-            document: exportDocument,
-            contentType: .commaSeparatedText,
-            defaultFilename: RequestsHistoryView.exportFilename(),
-            onCompletion: { result in
-                if case .failure(let error) = result { exportError = error }
-                exportDocument = nil
-            },
-            onCancellation: { exportDocument = nil }
-        )
-        .alert(error: $exportError) {
-            Button(tr("OK", "Requests")) {}
+        .task(id: history.nextPageFailures) {
+            // A next page that failed is asked for again after a pause that grows with each failure, even
+            // when the end of the table stays in view (only scrolling to it again would ask otherwise).
+            let failures = history.nextPageFailures
+            guard failures > 0 else { return }
+            try? await Task.sleep(for: .seconds(min(5 * failures, 60)))
+            guard !Task.isCancelled else { return }
+            await history.loadMore(database: model.database)
         }
-    }
-
-    private func startExport() {
-        let snapshot = RequestsCSVSnapshot(
-            query: history.query,
-            database: model.database,
-            appNames: Dictionary(model.catalog.apps.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }),
-            deviceNames: Dictionary(model.devices.devices.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
-        )
-        exportDocument = RequestsCSVDocument(snapshot: snapshot)
-        isExporting = true
-    }
-
-    /// `Tidemark Requests 2026-10-24 1432.csv`
-    static func exportFilename(now: Date = .now) -> String {
-        let stamp = now.formatted(.verbatim("\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased))\(minute: .twoDigits)", timeZone: .current, calendar: .current))
-        return "Tidemark Requests \(stamp).csv"
     }
 }
 
@@ -114,24 +77,20 @@ struct RequestsHistoryView: View {
 private struct RequestsHistoryKey: Hashable {
     var scope: DeviceScope
     var range: HistoryRange
-    var interval: DateInterval?
     var appID: AppID?
     var policy: String?
     var status: StatusFilter
     var search: String
-    var reload: Int
 
     var query: RequestQuery {
-        RequestQuery(scope: scope, range: range, interval: interval, appID: appID, policy: policy, status: status, search: search)
+        RequestQuery(scope: scope, range: range, appID: appID, policy: policy, status: status, search: search)
     }
 }
 
-/// Range, app, policy and status menus; row count and query time; export.
+/// Range, app, policy and status menus; row count and query time.
 private struct RequestsHistoryFilterBar: View {
     @Environment(AppModel.self) private var model
     var history: RequestsHistoryModel
-    var export: () -> Void
-    var reload: () -> Void
 
     var body: some View {
         @Bindable var nav = model.nav
@@ -176,14 +135,6 @@ private struct RequestsHistoryFilterBar: View {
                     .lineLimit(1)
                     .contentTransition(.numericText())
             }
-            Button(action: reload) {
-                Image(systemName: "arrow.clockwise")
-            }
-            .help(tr("Run the query again", "Requests"))
-            .accessibilityLabel(tr("Refresh", "Requests"))
-            Button(tr("Export CSV…", "Requests"), action: export)
-                .disabled(history.totalCount == 0 || history.errorMessage != nil)
-                .help(tr("Save every row matching these filters as CSV", "Requests"))
         }
         .fixedSize(horizontal: false, vertical: true)
         .controlSize(.regular)
@@ -213,30 +164,6 @@ private struct RequestsFilterMenu<Value: Hashable, Options: View>: View {
         .help(title)
         .accessibilityLabel(title)
         .accessibilityValue(label)
-    }
-}
-
-/// `⌕ Zoomed to 14:05–16:30  Reset Zoom`, shown while the chart is zoomed: the dragged window and the way
-/// back to the whole range.
-private struct RequestsZoomBar: View {
-    var window: DateInterval
-    var reset: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "plus.magnifyingglass")
-                .foregroundStyle(Theme.accent)
-                .accessibilityHidden(true)
-            Text(trf("Zoomed to %@", "Requests", RequestsHistogramBin.windowLabel(window.start, window.end, locale: Localizer.shared.locale)))
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.ink2)
-                .lineLimit(1)
-            Button(tr("Reset Zoom", "Requests"), action: reset)
-                .controlSize(.small)
-                .help(tr("Show the whole time range again", "Requests"))
-            Spacer(minLength: 0)
-        }
-        .accessibilityElement(children: .contain)
     }
 }
 
@@ -279,35 +206,6 @@ private struct RequestsHistoryOverlay: View {
                 EmptyState(systemImage: "magnifyingglass", title: trf("No requests match “%@”", "Requests", search), message: tr("The filter looks at host, remote IP, process and app.", "Requests"))
             }
         }
-    }
-}
-
-/// `Showing 500 of 48,211` and Load More.
-private struct RequestsHistoryFooter: View {
-    @Environment(AppModel.self) private var model
-    var history: RequestsHistoryModel
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(trf("Showing %1$@ of %2$@", "Requests", Fmt.count(history.rows.count), Fmt.count(history.totalCount)))
-            Spacer(minLength: 8)
-            if history.isLoadingMore {
-                ProgressView().controlSize(.mini)
-            }
-            if Int64(history.rows.count) < history.totalCount {
-                Button(tr("Load More", "Requests")) {
-                    Task { await history.loadMore(database: model.database) }
-                }
-                .buttonStyle(.borderless)
-                .disabled(!history.canLoadMore)
-            }
-        }
-        .font(.system(size: 11))
-        .foregroundStyle(Theme.ink3)
-        .lineLimit(1)
-        .padding(.horizontal, 14)
-        .frame(height: 28)
-        .overlay(alignment: .top) { Divider() }
     }
 }
 

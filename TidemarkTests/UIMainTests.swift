@@ -72,26 +72,15 @@ struct RequestsPresentationTests {
         #expect(RequestsPresentation.liveRows(rows, scope: .all, search: " WECHAT ", identity: F.identity).map(\.key.surgeID) == [3])
         #expect(RequestsPresentation.liveRows(rows, scope: .all, search: "node", identity: F.identity).map(\.key.surgeID) == [1])
         #expect(RequestsPresentation.liveRows(rows, scope: .all, search: "cursor", identity: F.identity).map(\.key.surgeID) == [1])
-        #expect(RequestsPresentation.liveRows(rows, scope: .all, search: "", monitoredOnly: true, identity: F.identity).map(\.key.surgeID) == [1])
-    }
-
-    @Test func hidesAppleServices() {
-        let apsd = F.record(id: 1, host: "courier.push.apple.com", chain: [ProcessLink(name: "apsd", pid: 4, path: "/System/Library/PrivateFrameworks/ApplePushService.framework/apsd")])
-        let icloud = F.record(id: 2, host: "p57-contacts.icloud.com")
-        let other = F.record(id: 3, host: "notapple.com")
-        #expect(RequestsPresentation.isAppleService(apsd))
-        #expect(RequestsPresentation.isAppleService(icloud))
-        #expect(!RequestsPresentation.isAppleService(other))
-        let visible = RequestsPresentation.liveRows([apsd, icloud, other], scope: .all, search: "", hideAppleServices: true, identity: F.identity)
-        #expect(visible.map(\.key.surgeID) == [3])
     }
 
     @Test func mapsStatus() {
         #expect(RequestsPresentation.status(of: F.record(id: 1, method: "HTTPS")) == .tunnel)
-        #expect(RequestsPresentation.status(of: F.record(id: 1, method: "GET")) == .completed)
-        #expect(RequestsPresentation.status(of: F.record(id: 1, state: .active)) == .active)
+        #expect(RequestsPresentation.status(of: F.record(id: 1, method: "HTTPS", state: .active)) == .tunnel)
+        #expect(RequestsPresentation.status(of: F.record(id: 1, method: "GET")) == nil)
+        #expect(RequestsPresentation.status(of: F.record(id: 1, method: "GET", state: .active)) == nil)
         #expect(RequestsPresentation.status(of: F.record(id: 1, state: .failed)) == .failed)
-        #expect(RequestsPresentation.status(of: F.record(id: 1, state: .rejected)).isError)
+        #expect(RequestsPresentation.status(of: F.record(id: 1, state: .rejected)) == .failed)
     }
 
     @Test func describesAttribution() {
@@ -120,7 +109,6 @@ struct RequestsPresentationTests {
         let quic = F.record(id: 1, host: "apple-relay.cloudflare.com", method: "QUIC")
         #expect(RequestsPresentation.processName(of: quic) == nil)
         #expect(RequestsPresentation.chainLinks(for: quic).map(\.name) == [""])
-        #expect(RequestsPresentation.hostContext(for: quic, appName: nil).processName == nil)
 
         let placeholder = AppIdentity(name: "Unknown", bundlePath: nil, letter: "U", hue: nil, isMonitored: false, appID: nil)
         #expect(RequestsPresentation.isUnattributed(quic, identity: placeholder))
@@ -128,10 +116,8 @@ struct RequestsPresentationTests {
         #expect(shown.name == "未知进程")
         #expect(shown.letter == "?")
 
-        // The placeholder is not data: searching for it finds nothing, and CSV leaves the column empty.
+        // The placeholder is not data: searching for it finds nothing.
         #expect(!RequestsPresentation.matches(quic, needle: "unknown", appName: ""))
-        let line = RequestsCSV.line(for: quic, appName: nil, deviceName: nil)
-        #expect(line.split(separator: ",", omittingEmptySubsequences: false)[3] == "")
 
         // Anything that names the sender keeps its identity.
         let curl = F.record(id: 2, processPath: "/usr/bin/curl")
@@ -251,6 +237,20 @@ struct RequestsTableLayoutTests {
         #expect(RequestsTable.remoteIPWidth <= 124, "the column stays narrow; App · Process and Host get the rest")
     }
 
+    /// History's time column fits the date and the time to the millisecond in both languages.
+    @Test func historyTimesShowTheDay() {
+        let date = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 24, hour: 23, minute: 59, second: 59))!.addingTimeInterval(0.999)
+        let english = RequestsTimeCell.label(date, style: .dayClock, locale: Locale(identifier: "en"))
+        let chinese = RequestsTimeCell.label(date, style: .dayClock, locale: Locale(identifier: "zh-Hans"))
+        #expect(english == "Oct 24 23:59:59.999")
+        #expect(chinese == "10月24日 23:59:59.999")
+        #expect(RequestsTimeCell.label(date, style: .clock, locale: Locale(identifier: "en")) == "23:59:59.999")
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        for label in [english, chinese, "Sep 30 23:59:59.999"] {
+            #expect((label as NSString).size(withAttributes: [.font: font]).width + 6 <= RequestsTable.historyTimeWidth, "\(label)")
+        }
+    }
+
     /// A rebuilt table leaves Policy at its minimum, which still shows the group and enough of the final policy
     /// to tell nodes with the same protocol apart (`AI › …kNerd-Hysteria2`, not `AI › …Hysteria2`).
     @Test func policyColumnKeepsTheGroupAndTheEndOfThePolicy() {
@@ -271,9 +271,41 @@ struct RequestsTableLayoutTests {
         #expect(22 + name + process <= RequestsTable.appMinWidth)
     }
 
-    /// "Open <App>" from a request (inspector and row menu) shows the app's Domains & IPs, as in the design.
+    /// "Open <App>" in the inspector shows the app's Domains & IPs, as in the design.
     @Test func openingAnAppShowsItsDomainsAndIPs() {
         #expect(RequestsPresentation.openAppTab == .inventory)
+    }
+}
+
+/// The toolbar search field of Requests and Domains & IPs hands every edit, and the clear button's empty
+/// string, to its binding, and takes ⌘F.
+@MainActor
+struct ToolbarSearchFieldTests {
+    @Test func editsReachTheBinding() {
+        final class Box { var text = "" }
+        let box = Box()
+        let coordinator = ToolbarSearchField.Coordinator(text: Binding(get: { box.text }, set: { box.text = $0 }))
+        let field = NSSearchField()
+        field.stringValue = "cursor"
+        coordinator.searchChanged(field)
+        #expect(box.text == "cursor")
+        field.stringValue = ""
+        coordinator.searchChanged(field)
+        #expect(box.text == "")
+    }
+
+    @Test func focusesOnCommandF() throws {
+        func key(_ characters: String, _ flags: NSEvent.ModifierFlags) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
+                                          context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                                          isARepeat: false, keyCode: 3))
+        }
+        #expect(ToolbarSearchField.isFindShortcut(try key("f", .command)))
+        #expect(ToolbarSearchField.isFindShortcut(try key("F", [.command, .capsLock])))
+        #expect(!ToolbarSearchField.isFindShortcut(try key("F", [.command, .shift])))
+        #expect(!ToolbarSearchField.isFindShortcut(try key("f", [.command, .option])))
+        #expect(!ToolbarSearchField.isFindShortcut(try key("f", [])))
+        #expect(!ToolbarSearchField.isFindShortcut(try key("g", .command)))
     }
 }
 
@@ -343,154 +375,6 @@ struct RequestsTableRowHeightTests {
         let output = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         FileHandle.standardError.write(Data(output.utf8))
         return output
-    }
-}
-
-struct RequestsCSVTests {
-    typealias F = UIMainFixtures
-
-    @Test func escapesFields() {
-        #expect(RequestsCSV.escape("plain") == "plain")
-        #expect(RequestsCSV.escape("a,b") == "\"a,b\"")
-        #expect(RequestsCSV.escape("say \"hi\"") == "\"say \"\"hi\"\"\"")
-        #expect(RequestsCSV.escape("two\nlines") == "\"two\nlines\"")
-    }
-
-    @Test func writesOneLinePerRecord() {
-        let record = F.record(id: 7, host: "api.github.com", chain: F.cursorChain, appID: F.cursor.id, policy: ["Proxy", "HK-01"])
-        let line = RequestsCSV.line(for: record, appName: "Cursor", deviceName: "MacBook Pro")
-        #expect(line.hasSuffix("\r\n"))
-        let fields = line.dropLast(2).split(separator: ",", omittingEmptySubsequences: false)
-        #expect(fields.count == RequestsCSV.columns.count)
-        #expect(fields[1] == "MacBook Pro")
-        #expect(fields[2] == "Cursor")
-        #expect(fields[3] == "node")
-        #expect(fields[6] == "api.github.com")
-        #expect(fields[9] == "Proxy > HK-01")
-        #expect(fields[14] == "200")
-    }
-
-    @Test func namesUnmonitoredAppsAfterTheirBundle() {
-        let record = F.record(id: 1, bundle: "/Applications/Spotify.app")
-        #expect(RequestsCSV.appName(for: record, names: [:]) == "Spotify")
-        #expect(RequestsCSV.appName(for: F.record(id: 2), names: [:]) == nil)
-        // The same display name as the table's App column, trailing slash or not.
-        let finder = "/System/Library/CoreServices/Finder.app"
-        #expect(RequestsCSV.appName(for: F.record(id: 3, bundle: finder + "/"), names: [:]) == AppNaming.displayName(forBundlePath: finder))
-        #expect(RequestsCSV.appName(for: F.record(id: 4, bundle: finder), names: [:])?.hasSuffix(".app") == false)
-        // A monitored app keeps its own name.
-        #expect(RequestsCSV.appName(for: F.record(id: 5, appID: F.cursor.id, bundle: finder), names: [F.cursor.id: "Cursor"]) == "Cursor")
-    }
-
-    @Test func streamsEveryPageToDisk() async throws {
-        let base = Date.now.addingTimeInterval(-600)
-        let rows = (0..<12_345).map { F.record(id: Int64($0), startedAt: base.addingTimeInterval(Double($0) * 0.01)) }
-        let database = ShellDemoDatabase(rows: rows)
-        var query = RequestQuery()
-        query.range = .lastHour
-        let snapshot = RequestsCSVSnapshot(query: query, database: database, appNames: [:], deviceNames: [F.thisMac: "MacBook Pro"])
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tidemark-export-\(UUID().uuidString).csv")
-        defer { try? FileManager.default.removeItem(at: url) }
-
-        let manager = ProgressManager(totalCount: 1)
-        try await RequestsCSVWriter().write(snapshot: snapshot, to: url, previous: nil, progress: manager.subprogress(assigningCount: 1))
-
-        let text = try String(contentsOf: url, encoding: .utf8)
-        let lines = text.split(separator: "\r\n")
-        #expect(lines.count == rows.count + 1)
-        #expect(lines.first.map(String.init) == RequestsCSV.columns.joined(separator: ","))
-        #expect(manager.fractionCompleted == 1)
-    }
-
-    @Test func ordersRowsByKeysetCursor() {
-        let t = Date(timeIntervalSince1970: 1_000)
-        let cursor = RequestCursor(startedAt: t, rowID: 50)
-        #expect(RequestsCSV.isOlder(F.record(id: 49, startedAt: t), than: cursor))
-        #expect(!RequestsCSV.isOlder(F.record(id: 50, startedAt: t), than: cursor))
-        #expect(!RequestsCSV.isOlder(F.record(id: 10, startedAt: t.addingTimeInterval(1)), than: cursor))
-        #expect(RequestsCSV.isOlder(F.record(id: 99, startedAt: t.addingTimeInterval(-1)), than: cursor))
-        #expect(RequestsCSV.cursor(after: [F.record(id: 7, startedAt: t), F.record(id: 3, startedAt: t)]) == RequestCursor(startedAt: t, rowID: 3))
-        #expect(RequestsCSV.cursor(after: []) == nil)
-    }
-
-    /// Rows recorded while the export runs land on top of the newest-first order; offset paging would shift
-    /// and repeat rows, the keyset cursor neither repeats nor skips any.
-    @Test func keepsPagesStableWhileRowsArrive() async throws {
-        let base = Date.now.addingTimeInterval(-1_800)
-        let original = (0..<12_000).map { F.record(id: Int64($0), startedAt: base.addingTimeInterval(Double($0) * 0.1)) }
-        let store = RequestsGrowingStore(rows: original, nextID: 100_000)
-        let database = RequestsStubDatabase(query: { query in
-            await store.addNewRows(250)
-            return try await ShellDemoDatabase(rows: store.rows).queryRequests(query)
-        })
-        var query = RequestQuery()
-        query.range = .lastHour
-        let ids = try await exportedRowIDs(query: query, database: database)
-
-        #expect(ids.count == Set(ids).count, "no row is written twice")
-        #expect(Set(original.compactMap(\.rowID)).isSubset(of: Set(ids)), "every row that existed is written")
-        #expect(await store.queries > 1)
-    }
-
-    /// A database that ignores the cursor would hand back the first page forever; the export continues with
-    /// offsets instead and still writes every row once while new rows arrive.
-    @Test func fallsBackToOffsetsWhenTheCursorIsIgnored() async throws {
-        let base = Date.now.addingTimeInterval(-1_800)
-        let original = (0..<12_000).map { F.record(id: Int64($0), startedAt: base.addingTimeInterval(Double($0) * 0.1)) }
-        let store = RequestsGrowingStore(rows: original, nextID: 100_000)
-        let database = RequestsStubDatabase(query: { query in
-            await store.addNewRows(250)
-            var ignoringCursor = query
-            ignoringCursor.before = nil
-            return try await ShellDemoDatabase(rows: store.rows).queryRequests(ignoringCursor)
-        })
-        var query = RequestQuery()
-        query.range = .lastHour
-        let ids = try await exportedRowIDs(query: query, database: database)
-
-        #expect(ids.count == Set(ids).count, "no row is written twice")
-        #expect(Set(original.compactMap(\.rowID)).isSubset(of: Set(ids)), "every row that existed is written")
-    }
-
-    @Test func pagesThroughSmallResultsOnce() async throws {
-        let rows = (0..<7).map { F.record(id: Int64($0), startedAt: Date.now.addingTimeInterval(-Double($0))) }
-        let database = RequestsStubDatabase(query: { query in try await ShellDemoDatabase(rows: rows).queryRequests(query) })
-        var pager = RequestsCSVPager(query: RequestQuery(), database: database, pageSize: 3)
-        var ids = try await pager.first().rows.compactMap(\.rowID)
-        while let next = try await pager.next() { ids += next.compactMap(\.rowID) }
-        #expect(ids == [0, 1, 2, 3, 4, 5, 6])
-    }
-
-    private func exportedRowIDs(query: RequestQuery, database: any TidemarkDatabase) async throws -> [Int64] {
-        let snapshot = RequestsCSVSnapshot(query: query, database: database, appNames: [:], deviceNames: [:])
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tidemark-export-\(UUID().uuidString).csv")
-        defer { try? FileManager.default.removeItem(at: url) }
-        let manager = ProgressManager(totalCount: 1)
-        try await RequestsCSVWriter().write(snapshot: snapshot, to: url, previous: nil, progress: manager.subprogress(assigningCount: 1))
-        #expect(manager.fractionCompleted == 1)
-        let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\r\n").dropFirst()
-        return lines.compactMap { line in line.split(separator: ",", omittingEmptySubsequences: false).last.flatMap { Int64($0) } }
-    }
-}
-
-/// Request rows that keep growing at the top, like a live database during an export.
-private actor RequestsGrowingStore {
-    private(set) var rows: [RequestRecord]
-    private(set) var queries = 0
-    private var nextID: Int64
-
-    init(rows: [RequestRecord], nextID: Int64) {
-        self.rows = rows
-        self.nextID = nextID
-    }
-
-    func addNewRows(_ count: Int) {
-        queries += 1
-        let now = Date.now
-        for i in 0..<count {
-            rows.append(UIMainFixtures.record(id: nextID, startedAt: now.addingTimeInterval(Double(i) * 0.001)))
-            nextID += 1
-        }
     }
 }
 
@@ -601,6 +485,28 @@ struct RequestsHistoryModelTests {
         await history.load(query, database: ShellDemoDatabase(rows: rows))
         #expect(history.histogramError == nil)
         #expect(history.histogram?.counts.reduce(0, +) == 600)
+    }
+
+    @Test func keepsRowsWhenANextPageFails() async {
+        let rows = (0..<600).map { F.record(id: Int64($0)) }
+        let flaky = RequestsStubDatabase(query: { query in
+            guard query.offset == 0 else { throw DatabaseError.unreachable("connection refused") }
+            return try await ShellDemoDatabase(rows: rows).queryRequests(query)
+        })
+        let history = RequestsHistoryModel()
+        var query = RequestQuery()
+        query.range = .all
+
+        await history.load(query, database: flaky)
+        await history.loadMore(database: flaky)
+        #expect(history.rows.count == RequestsHistoryModel.pageSize)
+        #expect(history.errorMessage == nil, "no \"Can't load history\" over the rows already loaded")
+        #expect(history.nextPageFailures == 1)
+        #expect(history.canLoadMore)
+
+        await history.loadMore(database: ShellDemoDatabase(rows: rows))
+        #expect(history.rows.count == 600)
+        #expect(history.nextPageFailures == 0)
     }
 
     @Test func aFailedPageTakesTheChartWithIt() async {
@@ -726,35 +632,9 @@ struct RequestsHistoryModelTests {
         #expect(history.histogramError == nil)
     }
 
-    @Test func zoomsIntoAnInterval() async {
-        let now = Date.now
-        let rows = (0..<600).map { F.record(id: Int64($0), startedAt: now.addingTimeInterval(-Double($0) * 10)) }
-        let database = ShellDemoDatabase(rows: rows)
-        let history = RequestsHistoryModel()
-        var query = RequestQuery()
-        query.range = .last24Hours
-        let window = DateInterval(start: now.addingTimeInterval(-3_000), end: now.addingTimeInterval(-1_000))
-        query.interval = window
-
-        await history.load(query, database: database)
-        #expect(history.query.interval == window)
-        #expect(!history.rows.isEmpty)
-        #expect(history.rows.allSatisfy { window.start <= $0.startedAt && $0.startedAt < window.end })
-        #expect(history.totalCount == 200)
-        #expect(history.histogram?.start == window.start)
-        #expect(history.histogram?.end == window.end)
-        #expect(history.histogram?.counts.reduce(0, +) == 200)
-    }
-
     @Test func labelsQueryTime() {
         #expect(RequestsHistoryLabels.milliseconds(.milliseconds(38)) == "38 ms")
         #expect(RequestsHistoryLabels.milliseconds(.seconds(1.5)) == "1500 ms")
-    }
-
-    @Test func namesExportsAfterTheTime() {
-        let name = RequestsHistoryView.exportFilename()
-        #expect(name.hasPrefix("Tidemark Requests "))
-        #expect(name.hasSuffix(".csv"))
     }
 }
 
@@ -850,8 +730,8 @@ struct RequestsHistogramTests {
         #expect(bins[1].start == start.addingTimeInterval(1200))
         #expect(bins[1].end == start.addingTimeInterval(2400))
         #expect(bins.last?.isLast == true)
-        #expect(bins[2].contains(start.addingTimeInterval(2500)))
-        #expect(!bins[2].contains(start.addingTimeInterval(3600)))
+        // Bars stop short of the next bucket.
+        #expect(bins[2].barEnd > bins[2].start && bins[2].barEnd < bins[2].end)
     }
 
     private let english = Locale(identifier: "en")
@@ -881,31 +761,13 @@ struct RequestsHistogramTests {
         #expect(labels(from: now.addingTimeInterval(-30 * 86400), to: now, now: now) == ["Sep 25", "Oct 2", "Oct 9", "Oct 16", "Now"])
     }
 
-    @Test func labelsAZoomedWindowWithItsEnd() {
-        // A window that does not end now is labelled with its end time.
+    @Test func labelsARangeThatEndsBeforeNow() {
+        // A chart that no longer reaches now (the page stayed open) is labelled with its end time.
         #expect(labels(from: date(24, 9, 5), to: date(24, 11, 50), now: date(24, 14, 0)) == ["10:00", "11:00", "11:50"])
         // The date appears where the day changes.
         #expect(labels(from: date(23, 22, 10), to: date(24, 1, 40), now: date(24, 14, 0)) == ["23:00", "Oct 24 00:00", "01:00", "01:40"])
         // Seconds appear once the ticks are less than a minute apart.
         #expect(labels(from: date(24, 10, 0, 5), to: date(24, 10, 1, 35), now: date(24, 14, 0)) == ["10:00:30", "10:01:00", "10:01:35"])
-    }
-
-    @Test func zoomsOnlyIntoDeliberateDrags() {
-        let start = Date(timeIntervalSince1970: 0)
-        let histogram = Histogram(start: start, end: start.addingTimeInterval(86400), counts: Array(repeating: 0, count: 48))
-        let window = RequestsHistogramBin.zoomWindow(for: start.addingTimeInterval(3600)...start.addingTimeInterval(7200), in: histogram)
-        #expect(window == DateInterval(start: start.addingTimeInterval(3600), end: start.addingTimeInterval(7200)))
-        // Clamped to the chart.
-        let clamped = RequestsHistogramBin.zoomWindow(for: start.addingTimeInterval(-600)...start.addingTimeInterval(3600), in: histogram)
-        #expect(clamped?.start == start)
-        // Shorter than half a 30-minute bar: a click, not a drag.
-        #expect(RequestsHistogramBin.zoomWindow(for: start.addingTimeInterval(3600)...start.addingTimeInterval(4000), in: histogram) == nil)
-    }
-
-    @Test func labelsWindows() {
-        #expect(RequestsHistogramBin.windowLabel(date(24, 14, 0), date(24, 14, 30), locale: english) == "14:00–14:30")
-        #expect(RequestsHistogramBin.windowLabel(date(24, 14, 0, 5), date(24, 14, 1, 5), locale: english) == "14:00:05–14:01:05")
-        #expect(RequestsHistogramBin.windowLabel(date(23, 22, 0), date(24, 1, 30), locale: english) == "Oct 23 22:00–Oct 24 01:30")
     }
 }
 
@@ -926,8 +788,6 @@ struct NotificationsPresentationTests {
         ]
         #expect(NotificationsPresentation.filter(items, by: .all).map(\.id) == [2, 3, 1])
         #expect(NotificationsPresentation.filter(items, by: .unread).map(\.id) == [2, 3])
-        #expect(NotificationsPresentation.filter(items, by: .domain).map(\.id) == [3, 1])
-        #expect(NotificationsPresentation.filter(items, by: .ip).map(\.id) == [2])
     }
 
     @Test func groupsTodayAndEarlier() {

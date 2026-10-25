@@ -7,7 +7,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ 直接用 IP 连接了 %2$@"
+            "value" : "%1$@ 直接连接了 %2$@"
           }
         }
       }
@@ -52,17 +52,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "全部"
-          }
-        }
-      }
-    },
-    "Copy" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "拷贝"
           }
         }
       }
@@ -133,28 +122,6 @@
         }
       }
     },
-    "Mute Host" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "静音此主机"
-          }
-        }
-      }
-    },
-    "Mute IP" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "静音此 IP"
-          }
-        }
-      }
-    },
     "New" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -173,17 +140,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有域名"
-          }
-        }
-      }
-    },
-    "No unread notifications." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有未读通知。"
           }
         }
       }

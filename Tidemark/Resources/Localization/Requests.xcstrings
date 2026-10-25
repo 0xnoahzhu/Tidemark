@@ -7,7 +7,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "显示最近 %1$@ 条 · 本次写入 %2$@ 条"
+            "value" : "%1$@ 条最新记录 · %2$@ 条本次写入"
           }
         }
       }
@@ -128,7 +128,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "纯 IP"
+            "value" : "直连 IP"
           }
         }
       }
@@ -155,13 +155,13 @@
         }
       }
     },
-    "Check the Mac menu in the sidebar and the filter options." : {
+    "Check the Mac menu in the sidebar." : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "检查一下侧边栏的 Mac 菜单和过滤选项。"
+            "value" : "检查一下侧边栏的 Mac 菜单。"
           }
         }
       }
@@ -210,50 +210,6 @@
         }
       }
     },
-    "Copy Host" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "拷贝主机"
-          }
-        }
-      }
-    },
-    "Copy Remote IP" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "拷贝远端 IP"
-          }
-        }
-      }
-    },
-    "Copy URL" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "拷贝 URL"
-          }
-        }
-      }
-    },
-    "Drag across the chart to zoom into that time." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在图表上拖动，即可放大那段时间。"
-          }
-        }
-      }
-    },
     "Every request Surge sees, kept in PostgreSQL" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -261,17 +217,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Surge 看到的每个请求，都存进 PostgreSQL"
-          }
-        }
-      }
-    },
-    "Export CSV…" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导出 CSV…"
           }
         }
       }
@@ -298,17 +243,6 @@
         }
       }
     },
-    "Filter by %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只看 %@"
-          }
-        }
-      }
-    },
     "Filter host, IP, process" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -320,17 +254,6 @@
         }
       }
     },
-    "Filter Options" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "过滤选项"
-          }
-        }
-      }
-    },
     "FIRST VISIT" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -338,17 +261,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "首次访问"
-          }
-        }
-      }
-    },
-    "Hide Apple Services" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "隐藏 Apple 服务"
           }
         }
       }
@@ -430,17 +342,6 @@
         }
       }
     },
-    "Load More" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "加载更多"
-          }
-        }
-      }
-    },
     "Local" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -492,28 +393,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "监控 %@"
-          }
-        }
-      }
-    },
-    "Monitor %@…" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "监控 %@…"
-          }
-        }
-      }
-    },
-    "Monitored Only" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只看被监控的"
           }
         }
       }
@@ -617,17 +496,6 @@
         }
       }
     },
-    "OK" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "好"
-          }
-        }
-      }
-    },
     "Open %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -716,39 +584,6 @@
         }
       }
     },
-    "Refresh" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "刷新"
-          }
-        }
-      }
-    },
-    "Rejected" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已拒绝"
-          }
-        }
-      }
-    },
-    "rejected" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已拒绝"
-          }
-        }
-      }
-    },
     "Remote IP" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -789,17 +624,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请求随时间的分布"
-          }
-        }
-      }
-    },
-    "Reset Zoom" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重置缩放"
           }
         }
       }
@@ -881,28 +705,6 @@
         }
       }
     },
-    "Run the query again" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新查询"
-          }
-        }
-      }
-    },
-    "Save every row matching these filters as CSV" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "把符合这些筛选条件的每一行存为 CSV"
-          }
-        }
-      }
-    },
     "sent it" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -910,28 +712,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "发起方"
-          }
-        }
-      }
-    },
-    "Show the whole time range again" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新显示整个时间范围"
-          }
-        }
-      }
-    },
-    "Showing %1$@ of %2$@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "显示 %1$@ / %2$@"
           }
         }
       }
@@ -1086,28 +866,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等待请求"
-          }
-        }
-      }
-    },
-    "Zoomed to %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已放大到 %@"
-          }
-        }
-      }
-    },
-    "· %@ buffered" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "· 缓冲 %@ 条"
           }
         }
       }

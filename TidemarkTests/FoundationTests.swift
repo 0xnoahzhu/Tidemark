@@ -39,6 +39,32 @@ struct FoundationTests {
         #expect(abs(note.secondsOfDay - (12 * 3600 + 7 * 60 + 22.102428)) < 0.0001)
     }
 
+    @Test func timesTheDesignsPhasesOncePerKind() throws {
+        // Surge sniffs the TLS Client Hello, evaluates the rule, then hands the connection to a connector.
+        let start = Calendar.current.startOfDay(for: .now).addingTimeInterval(12 * 3600 + 46 * 60 + 59.906)
+        let record = RequestRecord(
+            key: RequestKey(deviceID: UUID(), session: 1, surgeID: 1), rowID: nil, startedAt: start,
+            setupCompletedAt: start.addingTimeInterval(0.004), completedAt: start.addingTimeInterval(0.104),
+            method: "HTTPS", host: "api.anthropic.com", port: 443, url: nil, remoteIP: nil, remoteAddress: nil, geo: nil,
+            policyPath: [], rule: nil, state: .completed, inBytes: 0, outBytes: 0, pid: nil, processPath: nil,
+            bundlePath: nil, chain: [], appID: nil, localAddress: nil, interface: nil,
+            notes: [
+                "12:46:59.906000 [Connection] Incoming proxy protocol: HTTP",
+                "12:46:59.908000 [TLS] TLS Client Hello SNI: api.anthropic.com",
+                "12:46:59.909000 [Rule] Policy decision path: AI -> AT&T-RackNerd-Hysteria2",
+                "12:46:59.909500 [Connector] Master connector is now ready",
+            ],
+            isNew: false, writtenAt: nil, probeSessionID: nil
+        )
+        let phases = RequestTiming.phases(for: record)
+        // No Rule phase: the rule counts as Connect, as does the wait for the Client Hello before it.
+        #expect(phases.map(\.kind) == [.connect, .tls, .transfer])
+        let connect = try #require(phases.first)
+        #expect(abs(connect.duration - 0.003) < 0.0005)
+        #expect(abs(phases[1].duration - 0.001) < 0.0005)
+        #expect(abs(phases[2].duration - 0.1) < 0.0005)
+    }
+
     @Test func formatsBytes() {
         #expect(Fmt.bytes(512) == "512 B")
         #expect(Fmt.bytes(15_770) == "15.4 KB")

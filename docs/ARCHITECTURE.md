@@ -249,9 +249,10 @@ reused for an hour.
 
 The window follows the "Three-pane · Native" direction of the design: a Liquid Glass sidebar (Mac menu,
 Capture, Analyze, Monitored Apps, Archived, Surge/PostgreSQL status footer), a content column per page,
-and an inspector on the Requests page. Native controls are preferred (segmented pickers, switches,
-`Table`, search fields, sheets, `confirmationDialog`/alerts). Colors come from `Theme` (exact OKLCH
-conversions of the design tokens); app tiles use the real app icon when the bundle exists locally.
+and an inspector beside the Requests page's live table (History has none). Native controls are preferred
+(segmented pickers, switches, `Table`, search fields, sheets, `confirmationDialog`/alerts). Colors come from
+`Theme` (exact OKLCH conversions of the design tokens); app tiles use the real app icon when the bundle
+exists locally.
 History runs its page query and its histogram side by side: the rows appear as soon as the page arrives, a
 histogram that fails leaves them in place (the chart area says it is unavailable and why), and a newer query
 cancels the older one's histogram.
@@ -264,6 +265,10 @@ holding the `zh-Hans` translations; Settings › Language switches at runtime.
 * Swift 6 language mode (which implies complete strict concurrency), no warnings.
 * Views inside SwiftUI `Table` cells and AppKit-hosted panels do not receive custom environment objects on
   macOS 27: pass `AppModel` explicitly there.
+* `searchable` always adds the window's search field after every other toolbar item (a
+  `DefaultToolbarItem(kind: .search)` does not move it on macOS 27); a page whose design puts the search field
+  between other items puts a `ToolbarSearchField` in its own `ToolbarItem` instead, with a `visibilityPriority`
+  that keeps it out of the overflow menu longer than the page's other items (it takes ⌘F itself).
 * SwiftUI tables run without NSTableView's estimated row heights (`TableRowHeightDefaults`, registered in
   `TidemarkApp.init`): with them, a table that receives more than 200 rows at once re-enters AppKit's row height
   cache, which AppKit logs as a reentrant operation in the table's delegate and will turn into an assert.
