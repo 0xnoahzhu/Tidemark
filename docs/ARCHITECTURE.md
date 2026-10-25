@@ -286,7 +286,9 @@ The window follows the "Three-pane · Native" direction of the design: a Liquid 
 Capture, Analyze, Monitored Apps, Archived, Surge/PostgreSQL status footer), a content column per page,
 and an inspector beside the Requests page's live table (History has none). Native controls are preferred
 (switches, `Table`, search fields, sheets); the pause / resume and Stop monitoring confirmations are the design's
-glass dialogs (`GlassDialog`), laid over the whole window. Colors come from `Theme` (exact OKLCH conversions of
+glass dialogs (`GlassDialog`), laid over the whole window. Every segmented choice is the design's own
+`DesignSegmentedControl` (a raised white or grey segment on the fill track, no dividers), never the system's; in a
+toolbar it sits outside the glass bubble, and VoiceOver and the overflow menu see a picker. Colors come from `Theme` (exact OKLCH conversions of
 the design tokens); app tiles use the real app icon when the bundle exists locally. The sidebar, its Mac menu, the
 menu bar panel and the dialogs lay the design's glass color over the system glass at an opacity of their own
 (`GlassSurface`: at least .42 for the sidebar, .88 for the Mac menu, .85 for the panel, .6 for the pause dialog
