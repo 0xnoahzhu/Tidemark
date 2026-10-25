@@ -61,15 +61,13 @@ struct AppDetailView: View {
             .sharedBackgroundVisibility(.hidden)
 
             ToolbarItem(placement: .primaryAction) {
-                Picker(tr("View", "AppDetail"), selection: $nav.appTab) {
-                    Text(tr("All Requests", "AppDetail")).tag(AppTab.requests)
-                    Text(tr("Domains & IPs", "AppDetail")).tag(AppTab.inventory)
-                    Text(tr("Process Tree", "AppDetail")).tag(AppTab.tree)
-                }
-                .pickerStyle(.tabs)
-                .labelsHidden()
-                .fixedSize()
+                DesignSegmentedControl(tr("View", "AppDetail"), selection: $nav.appTab, segments: [
+                    (.requests, tr("All Requests", "AppDetail")),
+                    (.inventory, tr("Domains & IPs", "AppDetail")),
+                    (.tree, tr("Process Tree", "AppDetail")),
+                ])
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .task(id: statsKey) {
             await refreshStats(statsKey)

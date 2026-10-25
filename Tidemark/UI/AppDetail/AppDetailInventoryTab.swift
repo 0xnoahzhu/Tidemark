@@ -182,15 +182,11 @@ struct AppDetailInventoryTab: View {
                 .foregroundStyle(Theme.ink3)
                 .fixedSize()
         }
-        let filter = Picker(tr("Show", "AppDetail"), selection: $nav.appIPFilter) {
-            Text(tr("All", "AppDetail")).tag(Navigation.IPFilter.all)
-            Text(tr("Direct", "AppDetail")).tag(Navigation.IPFilter.direct)
-            Text(tr("From domains", "AppDetail")).tag(Navigation.IPFilter.resolved)
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.mini)
-        .fixedSize()
+        let filter = DesignSegmentedControl(tr("Show", "AppDetail"), selection: $nav.appIPFilter, size: .small(), segments: [
+            (.all, tr("All", "AppDetail")),
+            (.direct, tr("Direct", "AppDetail")),
+            (.resolved, tr("From domains", "AppDetail")),
+        ])
         return VStack(spacing: 0) {
             // One row when the pane is wide enough, otherwise the filter moves under the title.
             ViewThatFits(in: .horizontal) {

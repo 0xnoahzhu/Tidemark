@@ -103,14 +103,10 @@ struct AppDetailRequestsTab: View {
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
-            Picker(tr("Source", "AppDetail"), selection: $nav.appRequestsLive) {
-                Text(tr("Live", "AppDetail")).tag(true)
-                Text(tr("History", "AppDetail")).tag(false)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
-            .fixedSize()
+            DesignSegmentedControl(tr("Source", "AppDetail"), selection: $nav.appRequestsLive, segments: [
+                (true, tr("Live", "AppDetail")),
+                (false, tr("History", "AppDetail")),
+            ])
             Text(trf("%@ stored", "AppDetail", Fmt.count(storedCount)))
                 .font(.system(size: 11.5))
                 .foregroundStyle(Theme.ink3)
