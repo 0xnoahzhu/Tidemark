@@ -44,8 +44,6 @@ final class CaptureEngine {
 
     /// Nothing from the watch stream for this long (Surge sends a speed event every second) restarts it.
     let streamSilenceLimit: TimeInterval = 15
-    /// Explaining a host may delay its notification by at most this much.
-    var explanationTimeout: Duration = .milliseconds(1500)
     /// Longest wait for connecting to PostgreSQL or a ping (migrations may take longer and are not bounded).
     let connectTimeout: Duration = .seconds(20)
     /// After this many failed reconnects in a row the client is rebuilt: its pooled connections may be dead.
@@ -86,9 +84,6 @@ final class CaptureEngine {
     private var otherMacRows = CaptureOtherMacRows()
     /// Bumped when that position is dropped, so a poll still running for the old one cannot store it back.
     private var otherMacRowsGeneration = 0
-    /// The explanation a notification is waiting for. One at a time: while it runs, later notifications use
-    /// the cache only, so a burst never queues one generation after another.
-    private var notificationInsight: Task<HostInsight?, Never>?
     /// The app list was loaded from PostgreSQL at least once (apps that appear later were added elsewhere).
     private var catalogLoaded = false
     /// Bumped by every local change of the app list: a database read of the apps that started before it is
@@ -104,7 +99,6 @@ final class CaptureEngine {
         var batchRows: Int
         var batchInterval: Double
         var spoolLimit: Int
-        var systemNotifications: Bool
 
         @MainActor init(_ p: Preferences) {
             cliPath = p.surgeCLIPath
@@ -114,7 +108,6 @@ final class CaptureEngine {
             batchRows = p.batchRows
             batchInterval = p.batchInterval
             spoolLimit = p.spoolLimit
-            systemNotifications = p.systemNotifications
         }
     }
 
@@ -191,9 +184,6 @@ final class CaptureEngine {
             Task { await self.mute(pattern, dismissingAlert: id) }
         }
         notifier.install()
-        if model.preferences.systemNotifications {
-            Task { await notifier.requestAuthorizationIfNeeded() }
-        }
         observedPreferences = PreferenceValues(model.preferences)
         observedScope = model.devices.scope
         pipelineTask = Task { [pipeline] in await pipeline.run() }
@@ -215,8 +205,6 @@ final class CaptureEngine {
         started = false
         for job in jobs.values { job.cancel() }
         jobs.removeAll()
-        // A notification's host explanation that outlived its deadline would otherwise hold the model.
-        notificationInsight?.cancel()
         streamTask?.cancel()
         databaseTask?.cancel()
         if let token = scopeObservation.take() { token.cancel() }
@@ -608,9 +596,6 @@ final class CaptureEngine {
             let limit = new.spoolLimit
             Task { await pipeline.setSpoolLimit(limit) }
         }
-        if !old.systemNotifications, new.systemNotifications {
-            Task { await notifier.requestAuthorizationIfNeeded() }
-        }
     }
 
     /// Applies Surge settings after any earlier application finished (they must not interleave).
@@ -782,10 +767,10 @@ final class CaptureEngine {
         if device != model.devices.devices[index] { model.devices.devices[index] = device }
     }
 
-    /// New alerts: into the Notifications list (when the scope shows their Mac) and as system notifications.
-    /// Alerts from other Macs are skipped when their host is muted or their app is archived (or gone) here.
+    /// New alerts: into the Notifications list (when the scope shows their Mac) and as system notifications, the
+    /// ones other Macs found included. Alerts from other Macs are skipped when their host is muted or their app is
+    /// archived (or gone) here, and are not notified while their app's monitoring is paused on this Mac.
     private func receive(_ alerts: [AlertItem], fromOtherMac: Bool) {
-        let preferences = model.preferences
         for alert in alerts.sorted(by: { $0.id < $1.id }) {
             if fromOtherMac {
                 guard let app = model.catalog.app(alert.appID), !app.isArchived else { continue }
@@ -796,49 +781,14 @@ final class CaptureEngine {
                 model.alerts.items.insert(alert, at: 0)
                 if alert.isUnread { model.alerts.unreadCount += 1 }
             }
-            guard preferences.systemNotifications, !fromOtherMac || preferences.notifyOtherMacs else { continue }
-            guard alert.kind == .domain ? preferences.notifyNewDomain : preferences.notifyNewIP else { continue }
             guard !fromOtherMac || !model.catalog.paused.contains(alert.appID) else { continue }
             guard notifiedAlerts.insert(alert.id).inserted else { continue }
             if notifiedAlerts.count > 5_000 { notifiedAlerts = [alert.id] }
             let appName = model.catalog.app(alert.appID)?.name ?? tr("Unknown app", "Capture")
             let deviceName = fromOtherMac ? model.devices.device(alert.deviceID)?.name : nil
-            notifier.post(alert, appName: appName, deviceName: deviceName, groupBursts: preferences.groupBursts,
-                          explanation: explanation(for: alert, appName: appName))
+            notifier.post(alert, appName: appName, deviceName: deviceName)
         }
         if model.alerts.items.count > 500 { model.alerts.items.removeLast(model.alerts.items.count - 500) }
-    }
-
-    /// With Settings › Notifications › Explain hosts on: a line from the on-device model about the alert's host,
-    /// from the cache when possible, never waiting longer than `explanationTimeout`. The model explains one host
-    /// for notifications at a time; it keeps going after the deadline (its answer is cached for the host), and
-    /// notifications posted meanwhile only use the cache.
-    func explanation(for alert: AlertItem, appName: String) -> (@MainActor () async -> String?)? {
-        guard model.preferences.notifyExplainHosts else { return nil }
-        let host: String
-        switch alert.kind {
-        case .domain: host = alert.value
-        case .ip:
-            guard let name = alert.host, !name.isEmpty else { return nil }
-            host = name
-        }
-        let context = HostContext(host: host, appName: appName, processName: alert.processName, port: nil,
-                                  ips: alert.ip.map { [$0] } ?? [], geo: alert.geo, policy: nil, firstSeen: alert.createdAt, requestCount: nil)
-        let model = self.model
-        let timeout = explanationTimeout
-        return { [weak self] in
-            let insight = await CaptureTimeout.value(within: timeout) { @MainActor () async -> HostInsight? in
-                if let cached = await model.insights.cachedInsight(for: host) { return cached }
-                guard model.insights.isAvailable, let self, self.notificationInsight == nil else { return nil }
-                let generation = Task { @MainActor [weak self] () -> HostInsight? in
-                    defer { self?.notificationInsight = nil }
-                    return try? await model.insights.insight(for: context)
-                }
-                self.notificationInsight = generation
-                return await generation.value
-            }
-            return insight.flatMap(CaptureAlertText.insightLine)
-        }
     }
 
     /// "View" on a notification: the app's Domains & IPs tab, alerts marked read.

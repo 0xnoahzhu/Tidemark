@@ -208,14 +208,6 @@ struct UIChromeTests {
         }
     }
 
-    @Test func explainHostsNoteGivesTheReason() {
-        withLanguage(.english) {
-            #expect(SettingsNotificationsPane.explainHostsNote(available: true, reason: nil).contains("generated on this Mac"))
-            #expect(SettingsNotificationsPane.explainHostsNote(available: false, reason: "Model is downloading") == "Model is downloading")
-            #expect(SettingsNotificationsPane.explainHostsNote(available: false, reason: nil) == "Apple Intelligence is unavailable on this Mac.")
-        }
-    }
-
     // MARK: Commands
 
     /// File › New Site Probe starts from an empty URL bar with no saved session selected, unless a probe runs.
@@ -240,21 +232,6 @@ struct UIChromeTests {
     }
 
     // MARK: Settings helpers
-
-    @Test func mutePatterns() {
-        #expect(SettingsMutePattern.normalize("  API.Example.com ") == "api.example.com")
-        #expect(SettingsMutePattern.normalize("*.apple.com") == "*.apple.com")
-        #expect(SettingsMutePattern.normalize("https://linear.app/team/issue") == "linear.app")
-        #expect(SettingsMutePattern.normalize("104.16.98.215") == "104.16.98.215")
-        #expect(SettingsMutePattern.normalize("2001:db8::1") == "2001:db8::1")
-        #expect(SettingsMutePattern.normalize("example.com.") == "example.com")
-        #expect(SettingsMutePattern.normalize("localhost") == "localhost")
-        #expect(SettingsMutePattern.normalize("") == nil)
-        #expect(SettingsMutePattern.normalize("raycast") == nil)
-        #expect(SettingsMutePattern.normalize("two words.com") == nil)
-        #expect(SettingsMutePattern.normalize("*.*.example.com") == nil)
-        #expect(SettingsMutePattern.normalize("a..b") == nil)
-    }
 
     @Test func databaseURLKeepsThePasswordOut() {
         let split = SettingsDatabaseURL.split("postgresql://tide:s%40cret@127.0.0.1:5432/tidemark")

@@ -23,7 +23,6 @@ enum SettingsTab: String, Hashable, Sendable, CaseIterable {
     case general
     case surge
     case database
-    case notifications
 }
 
 /// UI navigation and transient presentation state.

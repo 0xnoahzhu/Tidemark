@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@preconcurrency import UserNotifications
 @testable import Tidemark
 
 @Suite(.timeLimit(.minutes(1)))
@@ -7,17 +8,18 @@ import Testing
 struct CaptureEngineTests {
     let temp = CaptureTempDirectory()
     let scratch = TestDefaults()
+    /// Notifications the engines posted; none reaches Notification Center.
+    let notifications = CaptureBox<[UNNotificationRequest]>([])
 
     func makeEngine(database: CaptureFakeDatabase = CaptureFakeDatabase(), surge: CaptureFakeSurge = CaptureFakeSurge()) -> (CaptureEngine, AppModel) {
-        let preferences = Preferences(defaults: scratch.make())
-        preferences.systemNotifications = false
-        preferences.surgeReconnect = false
-        let model = AppModel(preferences: preferences)
+        let model = AppModel(preferences: Preferences(defaults: scratch.make()))
         model.database = database
         let engine = CaptureEngine(model: model, surge: surge, database: database, processes: CaptureFakeProcesses(),
                                    classifier: CaptureFakeClassifier(), spool: CaptureSpool(directory: temp.url, limit: 1000))
         // Never read the Keychain from tests.
         engine.settingsDatabaseURL = { "postgresql://tide@db-a.invalid/tidemark" }
+        let notifications = self.notifications
+        engine.notifier.deliver = { notifications.value.append($0) }
         model.capture = engine
         return (engine, model)
     }
@@ -233,6 +235,7 @@ struct CaptureEngineTests {
         #expect(built.value == ["postgresql://tide@db-b.invalid/tidemark"])
         #expect(await eventually { (await engine.pipeline.database as? CaptureFakeDatabase) === replacement })
         #expect(await eventually { model.live.database.isHealthy })
+        #expect(await CaptureWait.finishes { await engine.stopStream() })
     }
 
     @Test func testingNewSettingsUsesAThrowawayClient() async {
@@ -269,6 +272,7 @@ struct CaptureEngineTests {
         engine.reconnect()
         try? await Task.sleep(for: .milliseconds(200))
         #expect(made.value.count == 1, "the same endpoint keeps its client")
+        #expect(await CaptureWait.finishes { await engine.stopStream() })
     }
 
     // MARK: Surge stream
@@ -335,44 +339,35 @@ struct CaptureEngineTests {
         #expect(model.alerts.unreadCount == 1)
     }
 
-    @Test func explainsHostsInNotificationsWithoutWaitingLong() async {
+    /// Every alert becomes a system notification on every Mac: this Mac's and the ones other Macs found, which
+    /// name their Mac.
+    @Test func notifiesAlertsFromEveryMac() async {
         Localizer.shared.preference = .english
-        let (engine, model) = makeEngine()
-        let alert = AlertItem(id: 1, deviceID: UUID(), appID: UUID(), kind: .domain, scope: .site, value: "beacon.qq.com", site: "qq.com",
-                              host: "beacon.qq.com", ip: nil, geo: nil, processName: "WeChat", isDirect: false, requestRowID: nil,
-                              createdAt: .now, readAt: nil)
-        #expect(engine.explanation(for: alert, appName: "WeChat") == nil, "off by default")
+        let database = CaptureFakeDatabase()
+        let (engine, model) = makeEngine(database: database)
+        let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
+        let docker = CaptureFixtures.app("Docker", path: "/Applications/Docker.app")
+        await database.setApps([cursor, docker])
+        #expect(await engine.connectDatabase())
+        let me = model.preferences.thisDeviceID
+        let mini = Device(id: UUID(), name: "Mac mini (Office)", model: "Mac mini · M4", shortName: "mini", hue: 150, isRemoteSurge: false,
+                          rowCount: 0, lastWriteAt: nil, createdAt: .now)
+        model.devices.devices = [mini]
+        func alert(_ id: Int64, _ device: DeviceID, _ app: MonitoredApp, _ kind: HostKind, _ value: String) -> AlertItem {
+            AlertItem(id: id, deviceID: device, appID: app.id, kind: kind, scope: kind == .ip ? .ip : .host, value: value, site: nil,
+                      host: kind == .ip ? nil : value, ip: nil, geo: nil, processName: "com.docker.backend", isDirect: false,
+                      requestRowID: nil, createdAt: .now, readAt: nil)
+        }
 
-        model.preferences.notifyExplainHosts = true
-        let insights = CaptureFakeInsights()
-        let insight = HostInsight(host: "beacon.qq.com", category: .analytics, operatorName: "Tencent", summary: "Reports usage statistics.",
-                                  concern: nil, language: "en", model: nil, createdAt: .now)
-        insights.cached = insight
-        model.insights = insights
-        #expect(await engine.explanation(for: alert, appName: "WeChat")?() == "Tencent — Reports usage statistics.")
+        var update = CaptureUIUpdate()
+        update.alerts = [alert(1, me, cursor, .domain, "api2.cursor.sh")]
+        engine.apply(update)
+        await database.setOtherMacAlerts([alert(2, mini.id, docker, .ip, "104.16.98.215")])
+        await engine.pollOtherMacAlerts()
 
-        // Not cached: the model may answer, but never later than the timeout.
-        engine.explanationTimeout = .milliseconds(200)
-        insights.cached = nil
-        insights.generated = insight
-        insights.delay = .milliseconds(800)
-        let clock = ContinuousClock()
-        let started = clock.now
-        #expect(await engine.explanation(for: alert, appName: "WeChat")?() == nil)
-        #expect(started.duration(to: clock.now) < .milliseconds(600))
-
-        // The model keeps explaining that host; notifications posted meanwhile only use the cache.
-        insights.delay = .zero
-        #expect(await engine.explanation(for: alert, appName: "WeChat")?() == nil, "one explanation at a time")
-        #expect(await eventually { await engine.explanation(for: alert, appName: "WeChat")?() == "Tencent — Reports usage statistics." })
-        insights.available = false
-        #expect(await engine.explanation(for: alert, appName: "WeChat")?() == nil)
-
-        var direct = alert
-        direct.kind = .ip
-        direct.scope = .ip
-        direct.host = nil
-        #expect(engine.explanation(for: direct, appName: "WeChat") == nil, "an IP without a hostname has no host to explain")
+        #expect(notifications.value.count == 2)
+        #expect(notifications.value.last?.content.subtitle.hasPrefix("Mac mini (Office) · ") == true)
+        #expect(model.alerts.items.map(\.id) == [2, 1])
     }
 
     @Test func describesWriteFailuresInTheUILanguage() {
@@ -535,23 +530,4 @@ final class CaptureBox<Value> {
 actor CaptureRetiredDatabases {
     private(set) var count = 0
     func add(_ database: any TidemarkDatabase) { count += 1 }
-}
-
-/// Scriptable on-device insights.
-@MainActor
-final class CaptureFakeInsights: HostInsightProviding {
-    var cached: HostInsight?
-    var generated: HostInsight?
-    var delay: Duration = .zero
-    var available = true
-
-    var isAvailable: Bool { available }
-    var unavailableReason: String? { available ? nil : "Off" }
-    func insight(for context: HostContext) async throws -> HostInsight {
-        if delay > .zero { try await Task.sleep(for: delay) }
-        guard let generated else { throw DatabaseError.notConfigured }
-        return generated
-    }
-    func cachedInsight(for host: String) async -> HostInsight? { cached }
-    func prewarm() {}
 }

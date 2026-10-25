@@ -38,16 +38,6 @@ enum CaptureAlertText {
         if !geo.isEmpty { parts.append(geo) }
         return parts.joined(separator: " · ")
     }
-
-    /// One line explaining the host, from the on-device model: `Tencent — Reports usage statistics.`
-    /// Nil for a declined or empty insight.
-    @MainActor
-    static func insightLine(_ insight: HostInsight) -> String? {
-        let summary = insight.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-        let operatorName = insight.operatorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !summary.isEmpty, insight.category != .unknown || !operatorName.isEmpty else { return nil }
-        return operatorName.isEmpty ? summary : trf("%1$@ — %2$@", "Capture", operatorName, summary)
-    }
 }
 
 /// At most one notification per app per burst window: later alerts of the same app replace the pending
@@ -73,15 +63,15 @@ struct CaptureBurstGrouper {
         self.window = window
     }
 
-    mutating func add(_ alert: AlertItem, grouping: Bool, now: Date = .now) -> Decision {
+    mutating func add(_ alert: AlertItem, now: Date = .now) -> Decision {
         bursts = bursts.filter { now.timeIntervalSince($0.value.startedAt) < window }
-        if grouping, var burst = bursts[alert.appID] {
+        if var burst = bursts[alert.appID] {
             burst.alerts.append(alert)
             bursts[alert.appID] = burst
             return .aggregate(identifier: burst.identifier, first: burst.alerts[0], extra: Array(burst.alerts.dropFirst()))
         }
         let identifier = "alert-\(alert.appID.uuidString)-\(alert.id)-\(Int(now.timeIntervalSince1970 * 1000))"
-        if grouping { bursts[alert.appID] = Burst(identifier: identifier, startedAt: now, alerts: [alert]) }
+        bursts[alert.appID] = Burst(identifier: identifier, startedAt: now, alerts: [alert])
         return .post(identifier: identifier)
     }
 }
@@ -97,15 +87,15 @@ final class CaptureNotifier: NSObject {
     var onView: ((AppID, [Int64]) -> Void)?
     /// Mutes a host or IP, dismissing an alert.
     var onMute: ((String, Int64?) -> Void)?
+    /// Hands a notification to Notification Center; tests replace it so nothing reaches the screen.
+    var deliver: (UNNotificationRequest) -> Void = { UNUserNotificationCenter.current().add($0) }
 
     private var grouper = CaptureBurstGrouper()
-    private var deliveries: [String: Delivery] = [:]
     private var installed = false
-    private var authorizationRequested = false
 
     private var center: UNUserNotificationCenter { UNUserNotificationCenter.current() }
 
-    /// Registers the delegate and the alert category. Call once at launch.
+    /// Registers the delegate and the alert category, and asks for permission to notify. Call once at launch.
     func install() {
         guard !installed else { return }
         installed = true
@@ -115,68 +105,33 @@ final class CaptureNotifier: NSObject {
         center.setNotificationCategories([
             UNNotificationCategory(identifier: Self.categoryIdentifier, actions: [view, mute], intentIdentifiers: [], options: [])
         ])
+        let center = self.center
+        Task { _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge]) }
     }
 
-    /// Asks for permission the first time notifications are enabled.
-    func requestAuthorizationIfNeeded() async {
-        guard !authorizationRequested else { return }
-        authorizationRequested = true
-        _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
-    }
-
-    /// Posts (or folds into the current burst) a notification for `alert`.
-    ///
-    /// `explanation`, when given, produces a line explaining the host (on-device model); the notification
-    /// waits for it, so the caller must bound it. Updates of the same burst are delivered after it, in order.
-    func post(_ alert: AlertItem, appName: String, deviceName: String?, groupBursts: Bool, now: Date = .now,
-              explanation: (@MainActor () async -> String?)? = nil) {
-        let decision = grouper.add(alert, grouping: groupBursts, now: now)
-        deliveries = deliveries.filter { now.timeIntervalSince($0.value.startedAt) < grouper.window + 60 }
-        switch decision {
+    /// Posts a notification for `alert`, or folds it into the notification of its app's current burst.
+    func post(_ alert: AlertItem, appName: String, deviceName: String?, now: Date = .now) {
+        switch grouper.add(alert, now: now) {
         case .post(let identifier):
-            let text = Text(
+            add(identifier: identifier, text: Text(
                 title: CaptureAlertText.title(appName: appName, alert: alert),
                 subtitle: CaptureAlertText.subtitle(alert: alert, deviceName: deviceName),
                 body: nil, silent: false, appID: alert.appID, alertIDs: [alert.id], muteValue: alert.value
-            )
-            guard let explanation else {
-                deliveries[identifier] = Delivery(startedAt: now)
-                add(identifier: identifier, text: text)
-                return
-            }
-            let task = Task { [weak self] in
-                let line = await explanation()
-                guard let self else { return }
-                self.deliveries[identifier]?.line = line
-                var explained = text
-                explained.body = line
-                self.add(identifier: identifier, text: explained)
-            }
-            deliveries[identifier] = Delivery(line: nil, task: task, startedAt: now)
+            ))
         case .aggregate(let identifier, let first, let extra):
             let values = extra.map { $0.scope == .site ? ($0.site ?? $0.value) : $0.value }
-            let more = trf("…and %lld more: %@", "Capture", extra.count, values.joined(separator: ", "))
             // The burst already alerted once; the update is silent.
-            let text = Text(
+            add(identifier: identifier, text: Text(
                 title: CaptureAlertText.title(appName: appName, alert: first),
                 subtitle: CaptureAlertText.subtitle(alert: first, deviceName: deviceName),
-                body: more, silent: true, appID: alert.appID, alertIDs: [first.id] + extra.map(\.id), muteValue: first.value
-            )
-            let previous = deliveries[identifier]?.task
-            let task = Task { [weak self] in
-                await previous?.value
-                guard let self else { return }
-                var update = text
-                if let line = self.deliveries[identifier]?.line { update.body = [line, more].joined(separator: "\n") }
-                self.add(identifier: identifier, text: update)
-            }
-            if deliveries[identifier] == nil { deliveries[identifier] = Delivery(startedAt: now) }
-            deliveries[identifier]?.task = task
+                body: trf("…and %lld more: %@", "Capture", extra.count, values.joined(separator: ", ")),
+                silent: true, appID: alert.appID, alertIDs: [first.id] + extra.map(\.id), muteValue: first.value
+            ))
         }
     }
 
     /// What one notification says (built into `UNNotificationContent` on delivery).
-    private struct Text: Sendable {
+    private struct Text {
         var title: String
         var subtitle: String
         var body: String?
@@ -184,13 +139,6 @@ final class CaptureNotifier: NSObject {
         var appID: AppID
         var alertIDs: [Int64]
         var muteValue: String
-    }
-
-    /// A burst's notification: the explanation line of its first alert and the latest pending delivery.
-    private struct Delivery {
-        var line: String?
-        var task: Task<Void, Never>?
-        var startedAt: Date
     }
 
     private func add(identifier: String, text: Text) {
@@ -207,7 +155,7 @@ final class CaptureNotifier: NSObject {
             content.sound = .default
         }
         content.userInfo = Self.userInfo(appID: text.appID, alertIDs: text.alertIDs, muteValue: text.muteValue, alertID: text.alertIDs.first ?? 0)
-        center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
+        deliver(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
     }
 
     private static func userInfo(appID: AppID, alertIDs: [Int64], muteValue: String, alertID: Int64) -> [String: Any] {

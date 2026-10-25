@@ -21,11 +21,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 访问了新站点 %2$@" } }
       }
     },
-    "%1$@ — %2$@" : {
-      "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@——%2$@" } }
-      }
-    },
     "%@ asked for an authentication method Tidemark does not support." : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 要求的认证方式 Tidemark 不支持。" } }

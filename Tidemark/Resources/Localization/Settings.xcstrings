@@ -61,42 +61,12 @@
         }
       }
     },
-    "Add" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "添加"
-          }
-        }
-      }
-    },
-    "Adds a short description of the host, generated on this Mac. It never delays the alert." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "附上一句在这台 Mac 上生成的主机说明，不会延迟提醒。"
-          }
-        }
-      }
-    },
     "Adds the network type (hosting, residential…) to egress IPs and IPs you look up. Only those addresses are sent, this Mac's own public IP (DIRECT) among them. Off, the default, keeps lookups to Surge's own GeoIP data." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "为出口 IP 和你查询的 IP 补充网络类型（机房、家庭宽带等），只会发送这些地址，其中包括本机自己的公网 IP（DIRECT）。默认关闭，此时只使用 Surge 自带的 GeoIP 数据。"
-          }
-        }
-      }
-    },
-    "Alerts from other Macs" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "其他 Mac 的提醒"
           }
         }
       }
@@ -111,32 +81,12 @@
         }
       }
     },
-    "Also show a system notification when another Mac in this database finds something new" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同一数据库里的其他 Mac 发现新增时，也在这台 Mac 上弹出系统通知"
-          }
-        }
-      }
-    },
     "Appearance" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "外观"
-          }
-        }
-      }
-    },
-    "Apple Intelligence is unavailable on this Mac." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这台 Mac 上无法使用 Apple 智能。"
           }
         }
       }
@@ -271,16 +221,6 @@
         }
       }
     },
-    "Enter a host name, an IP address or a pattern like *.example.com." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请输入主机名、IP 地址或 *.example.com 这样的规则。"
-          }
-        }
-      }
-    },
     "Every %lld rows or %@ s, whichever comes first" : {
       "localizations" : {
         "zh-Hans" : {
@@ -297,16 +237,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "每一行都会标明来自哪台 Mac，所以几台 Mac 可以共用一个数据库。每台 Mac 只记录和提醒自己的 App，用侧边栏顶部的 Mac 下拉菜单切换，就能只看某一台的数据。"
-          }
-        }
-      }
-    },
-    "Explain new hosts with Apple Intelligence" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用 Apple 智能解释新主机"
           }
         }
       }
@@ -347,16 +277,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "通用"
-          }
-        }
-      }
-    },
-    "Group bursts" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "合并短时间内的提醒"
           }
         }
       }
@@ -481,62 +401,12 @@
         }
       }
     },
-    "Mute" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "静音"
-          }
-        }
-      }
-    },
-    "Muted hosts" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已静音的主机"
-          }
-        }
-      }
-    },
-    "Muted hosts are still recorded. They just don't alert." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "静音的主机仍会记录，只是不再提醒。"
-          }
-        }
-      }
-    },
     "Name this Mac" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "本机名称"
-          }
-        }
-      }
-    },
-    "New IP" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新 IP"
-          }
-        }
-      }
-    },
-    "New domain" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新域名"
           }
         }
       }
@@ -561,42 +431,12 @@
         }
       }
     },
-    "Noisier, since CDNs rotate addresses" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会比较吵，CDN 经常更换地址"
-          }
-        }
-      }
-    },
     "Not connected" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "未连接"
-          }
-        }
-      }
-    },
-    "Notifications" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "通知"
-          }
-        }
-      }
-    },
-    "Notifications are turned off for Tidemark in System Settings." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "系统设置里关闭了 Tidemark 的通知。"
           }
         }
       }
@@ -631,32 +471,12 @@
         }
       }
     },
-    "One alert per app for anything new within 30 seconds" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同一个 App 30 秒内的新增只提醒一次"
-          }
-        }
-      }
-    },
     "Open Login Items…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开登录项…"
-          }
-        }
-      }
-    },
-    "Open System Settings…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开系统设置…"
           }
         }
       }
@@ -761,16 +581,6 @@
         }
       }
     },
-    "Remove" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除"
-          }
-        }
-      }
-    },
     "Saved in the Keychain" : {
       "localizations" : {
         "zh-Hans" : {
@@ -787,16 +597,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "显示位置"
-          }
-        }
-      }
-    },
-    "Shown the first time a monitored app reaches any new domain or IP." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "被监控的 App 第一次访问任何新域名或新 IP 时弹出。"
           }
         }
       }
@@ -921,16 +721,6 @@
         }
       }
     },
-    "When a monitored app reaches a host it never has before" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "被监控的 App 访问从未访问过的主机时"
-          }
-        }
-      }
-    },
     "Write in batches" : {
       "localizations" : {
         "zh-Hans" : {
@@ -947,26 +737,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在写入"
-          }
-        }
-      }
-    },
-    "host, IP or *.example.com" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "主机、IP 或 *.example.com"
-          }
-        }
-      }
-    },
-    "macOS notifications" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "系统通知"
           }
         }
       }

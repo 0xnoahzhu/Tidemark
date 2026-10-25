@@ -44,15 +44,6 @@ final class Preferences {
     /// Days to keep requests; 0 keeps them forever.
     var retentionDays: Int { didSet { set(retentionDays, "db.retentionDays") } }
 
-    // MARK: Notifications
-    var systemNotifications: Bool { didSet { set(systemNotifications, "notify.system") } }
-    var notifyNewDomain: Bool { didSet { set(notifyNewDomain, "notify.newDomain") } }
-    var notifyNewIP: Bool { didSet { set(notifyNewIP, "notify.newIP") } }
-    var notifyOtherMacs: Bool { didSet { set(notifyOtherMacs, "notify.otherMacs") } }
-    var groupBursts: Bool { didSet { set(groupBursts, "notify.groupBursts") } }
-    /// Add an on-device one-line explanation of the host to new-host notifications.
-    var notifyExplainHosts: Bool { didSet { set(notifyExplainHosts, "notify.explainHosts") } }
-
     // MARK: General
     var showIn: ShowIn { didSet { set(showIn.rawValue, "general.showIn") } }
     var appearance: Appearance { didSet { set(appearance.rawValue, "general.appearance") } }
@@ -96,13 +87,6 @@ final class Preferences {
         batchInterval = defaults.object(forKey: "db.batchInterval") as? Double ?? 1
         spoolLimit = defaults.object(forKey: "db.spoolLimit") as? Int ?? 500_000
         retentionDays = defaults.object(forKey: "db.retentionDays") as? Int ?? 0
-
-        systemNotifications = defaults.object(forKey: "notify.system") as? Bool ?? true
-        notifyNewDomain = defaults.object(forKey: "notify.newDomain") as? Bool ?? true
-        notifyNewIP = defaults.object(forKey: "notify.newIP") as? Bool ?? true
-        notifyOtherMacs = defaults.object(forKey: "notify.otherMacs") as? Bool ?? false
-        groupBursts = defaults.object(forKey: "notify.groupBursts") as? Bool ?? true
-        notifyExplainHosts = defaults.object(forKey: "notify.explainHosts") as? Bool ?? false
 
         showIn = defaults.string(forKey: "general.showIn").flatMap(ShowIn.init(rawValue:)) ?? .menuBarAndDock
         appearance = defaults.string(forKey: "general.appearance").flatMap(Appearance.init(rawValue:)) ?? .system

@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The Settings window: General, Surge, Database and Notifications tabs.
+/// The Settings window: General, Surge and Database tabs.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
@@ -23,11 +23,6 @@ struct SettingsView: View {
                 SettingsDatabasePane()
             } label: {
                 tabLabel(.database)
-            }
-            Tab(value: SettingsTab.notifications) {
-                SettingsNotificationsPane()
-            } label: {
-                tabLabel(.notifications)
             }
         }
         .tabViewStyle(.automatic)
@@ -52,7 +47,7 @@ enum SettingsLayout {
 }
 
 /// The design's Settings tab icons: a 26 pt rounded tile in the tab's color holding a white glyph
-/// (a dotted ring for General, rising bars for Surge, stacked rows for Database, a bell for Notifications).
+/// (a dotted ring for General, rising bars for Surge, stacked rows for Database).
 ///
 /// The Settings toolbar shows tab images at 32 pt, so the tile sits centered on a transparent 32 pt canvas
 /// to keep the design's 26 pt size and clear the label.
@@ -69,17 +64,15 @@ enum SettingsTabIcon {
         case .general: tr("General", "Settings")
         case .surge: String("Surge")
         case .database: tr("Database", "Settings")
-        case .notifications: tr("Notifications", "Settings")
         }
     }
 
-    /// Tile color, `oklch` from the design (Notifications has no design tile; it takes an amber one).
+    /// Tile color, `oklch` from the design.
     static func tileColor(_ tab: SettingsTab) -> NSColor {
         switch tab {
         case .general: OKLCH.nsColor(0.55, 0.02, 260)
         case .surge: OKLCH.nsColor(0.6, 0.16, 25)
         case .database: OKLCH.nsColor(0.62, 0.14, 240)
-        case .notifications: OKLCH.nsColor(0.68, 0.15, 60)
         }
     }
 
@@ -137,14 +130,6 @@ enum SettingsTabIcon {
             // Three 12 × 3 pt rows, 2 pt apart, fading 1 → 0.8 → 0.6.
             for (index, opacity) in [CGFloat(1), 0.8, 0.6].enumerated() {
                 pill(box(7, 6.5 + CGFloat(index) * 5, 12, 3), opacity: opacity)
-            }
-        case .notifications:
-            let configuration = NSImage.SymbolConfiguration(pointSize: 13 * scale, weight: .semibold)
-                .applying(.init(paletteColors: [.white]))
-            if let bell = NSImage(systemSymbolName: "bell.fill", accessibilityDescription: nil)?.withSymbolConfiguration(configuration) {
-                let glyph = bell.size
-                let target = NSRect(x: rect.midX - glyph.width / 2, y: rect.midY - glyph.height / 2, width: glyph.width, height: glyph.height)
-                bell.draw(in: target, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             }
         }
     }

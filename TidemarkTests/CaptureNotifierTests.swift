@@ -19,15 +19,15 @@ struct CaptureNotifierTests {
         let docker = UUID()
         let t0 = Date(timeIntervalSince1970: 1_792_000_000)
 
-        guard case .post(let first) = grouper.add(alert(1, app: cursor, scope: .host, value: "a.com"), grouping: true, now: t0) else {
+        guard case .post(let first) = grouper.add(alert(1, app: cursor, scope: .host, value: "a.com"), now: t0) else {
             Issue.record("first alert should post")
             return
         }
-        guard case .post = grouper.add(alert(2, app: docker, scope: .ip, value: "1.1.1.1"), grouping: true, now: t0) else {
+        guard case .post = grouper.add(alert(2, app: docker, scope: .ip, value: "1.1.1.1"), now: t0) else {
             Issue.record("another app posts on its own")
             return
         }
-        let third = grouper.add(alert(3, app: cursor, scope: .host, value: "b.com"), grouping: true, now: t0.addingTimeInterval(10))
+        let third = grouper.add(alert(3, app: cursor, scope: .host, value: "b.com"), now: t0.addingTimeInterval(10))
         guard case .aggregate(let identifier, let head, let extra) = third else {
             Issue.record("same app within 30 s aggregates")
             return
@@ -36,23 +36,12 @@ struct CaptureNotifierTests {
         #expect(head.id == 1)
         #expect(extra.map(\.id) == [3])
 
-        let later = grouper.add(alert(4, app: cursor, scope: .host, value: "c.com"), grouping: true, now: t0.addingTimeInterval(31))
+        let later = grouper.add(alert(4, app: cursor, scope: .host, value: "c.com"), now: t0.addingTimeInterval(31))
         guard case .post(let next) = later else {
             Issue.record("a new window posts again")
             return
         }
         #expect(next != first)
-    }
-
-    @Test func postsEveryAlertWhenGroupingIsOff() {
-        var grouper = CaptureBurstGrouper()
-        let app = UUID()
-        for id in 1...3 {
-            guard case .post = grouper.add(alert(Int64(id), app: app, scope: .host, value: "x\(id).com"), grouping: false) else {
-                Issue.record("expected a separate notification")
-                return
-            }
-        }
     }
 
     @Test func buildsDesignTitlesAndSubtitles() {
