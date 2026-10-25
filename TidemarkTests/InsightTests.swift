@@ -67,16 +67,6 @@ struct InsightVerdictTests {
         #expect(HostInsightVerdict.clampSentences("No ending punctuation", limit: 2) == "No ending punctuation")
     }
 
-    @Test func summarizesForNotifications() {
-        var insight = HostInsight(host: "report.weixin.qq.com", category: .analytics, operatorName: "Tencent", summary: "WeChat statistics.", concern: "Reports usage statistics.", language: "en", model: nil, createdAt: .now)
-        #expect(HostInsightStyle.notificationLine(for: insight) == "\(HostInsightStyle.label(for: .analytics)) · Tencent — Reports usage statistics.")
-        insight.concern = nil
-        insight.operatorName = nil
-        #expect(HostInsightStyle.notificationLine(for: insight) == HostInsightStyle.label(for: .analytics))
-        insight.category = .unknown
-        #expect(HostInsightStyle.notificationLine(for: insight) == nil)
-    }
-
     @Test func tintsEveryKnownCategory() {
         for category in HostCategory.allCases {
             #expect((HostInsightStyle.hue(for: category) == nil) == (category == .unknown))

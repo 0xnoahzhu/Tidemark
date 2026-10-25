@@ -40,15 +40,4 @@ enum HostInsightStyle {
         case .unknown: tr("Unknown", "Insight")
         }
     }
-
-    /// One line for a new-host notification: `Analytics · Tencent — Reports usage statistics.`
-    /// Nil for insights without anything worth adding (unknown category and no operator).
-    @MainActor
-    static func notificationLine(for insight: HostInsight) -> String? {
-        guard insight.category != .unknown || insight.operatorName != nil else { return nil }
-        var line = label(for: insight.category)
-        if let operatorName = insight.operatorName { line += " · \(operatorName)" }
-        if let concern = insight.concern { line += " — \(concern)" }
-        return line
-    }
 }
