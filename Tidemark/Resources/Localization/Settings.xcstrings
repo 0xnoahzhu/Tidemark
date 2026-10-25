@@ -81,12 +81,12 @@
         }
       }
     },
-    "Adds the network type (hosting, residential…) to egress IPs and IPs you look up. Only those addresses are sent. Off keeps lookups to Surge's own GeoIP data." : {
+    "Adds the network type (hosting, residential…) to egress IPs and IPs you look up. Only those addresses are sent, this Mac's own public IP (DIRECT) among them. Off, the default, keeps lookups to Surge's own GeoIP data." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "为出口 IP 和你查询的 IP 补充网络类型（机房、家庭宽带等），只会发送这些地址。关闭后只使用 Surge 自带的 GeoIP 数据。"
+            "value" : "为出口 IP 和你查询的 IP 补充网络类型（机房、家庭宽带等），只会发送这些地址，其中包括本机自己的公网 IP（DIRECT）。默认关闭，此时只使用 Surge 自带的 GeoIP 数据。"
           }
         }
       }

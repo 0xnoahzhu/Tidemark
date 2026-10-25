@@ -160,7 +160,7 @@ struct SettingsGeneralPane: View {
             }
         } label: {
             Text(tr("IP info service", "Settings"))
-            Text(tr("Adds the network type (hosting, residential…) to egress IPs and IPs you look up. Only those addresses are sent. Off keeps lookups to Surge's own GeoIP data.", "Settings"))
+            Text(tr("Adds the network type (hosting, residential…) to egress IPs and IPs you look up. Only those addresses are sent, this Mac's own public IP (DIRECT) among them. Off, the default, keeps lookups to Surge's own GeoIP data.", "Settings"))
         }
         .pickerStyle(.menu)
     }

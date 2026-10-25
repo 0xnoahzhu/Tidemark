@@ -463,6 +463,22 @@ struct EgressMonitorTests {
         #expect(spy.ips.last == "1.1.1.1", "private addresses are not sent")
     }
 
+    /// The service would receive this Mac's own public IP (the DIRECT egress), so nothing is sent until the
+    /// user picks it in Settings.
+    @Test func aFreshInstallSendsNothingToTheIPInfoService() async {
+        let surge = autoTestSurge()
+        let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: "tidemark-tests-\(UUID().uuidString)")!))
+        model.surge = surge
+        model.database = CaptureFakeDatabase()
+        #expect(model.preferences.ipInfoService == .off)
+        let spy = EgressServiceSpy()
+        let monitor = makeMonitor(model, service: spy)
+
+        await monitor.checkAll()
+        #expect(!model.egress.samples.isEmpty)
+        #expect(spy.ips.isEmpty)
+    }
+
     @Test func notesNetworkChangesFromSurgesView() async {
         let surge = autoTestSurge()
         let model = makeModel(surge: surge)

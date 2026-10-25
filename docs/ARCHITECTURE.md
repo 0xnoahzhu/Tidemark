@@ -216,10 +216,11 @@ outbound mode or FINAL rule uses. A change of the current egress IP is logged wi
 the group type), a network change — `NWPathMonitor` updates are confirmed against Surge's `summary`, because
 under enhanced mode the system path describes Surge's own utun interface — and a Surge restart from a new
 `start-time`). In rule mode the current route is the FINAL rule's policy (`dump rule`). The network type
-(hosting, residential…) comes from the IP info service chosen in Settings › General (proxycheck.io, or off);
-it is only asked about Tidemark's own egress IPs and IPs the user looks up. The Egress page's lookup card names
-that service, says which addresses Tidemark sends it and links to Settings › General; country and ASN come
-from Surge's GeoIP database and reverse DNS from this Mac's resolver.
+(hosting, residential…) comes from the IP info service chosen in Settings › General (off by default, or
+proxycheck.io); it is only asked about Tidemark's own egress IPs (DIRECT's, this Mac's public address, among
+them) and IPs the user looks up. The Egress page's lookup card names that service, says which addresses
+Tidemark sends it and links to Settings › General; country and ASN come from Surge's GeoIP database and
+reverse DNS from this Mac's resolver.
 
 Whether the current egress reaches IPv6 is tested with `http probe` of an IPv6 literal through its policy,
 alongside the IP info lookups (an egress IP that is itself IPv6 needs no test). It reads "No IPv6" only when

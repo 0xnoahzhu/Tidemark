@@ -522,7 +522,7 @@ enum EgressFormat {
         return mode.components(separatedBy: " · ").map { tr($0, "SurgeCLI") }.joined(separator: " · ")
     }
 
-    /// Where the lookup's facts come from, naming the IP info service (on by default) and where to turn it off.
+    /// Where the lookup's facts come from, naming the IP info service (off by default) and where to turn it on or off.
     static func sourcesNote(service: Preferences.IPInfoService) -> String {
         switch service {
         case .proxycheck:

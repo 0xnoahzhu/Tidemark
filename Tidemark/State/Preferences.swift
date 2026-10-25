@@ -60,6 +60,8 @@ final class Preferences {
     var glass: Double { didSet { set(glass, "general.glass") } }
     var language: Language { didSet { set(language.rawValue, "general.language") } }
     var openAtLogin: Bool { didSet { set(openAtLogin, "general.openAtLogin") } }
+    /// Off until the user picks a service: it is sent every public egress IP, DIRECT's (this Mac's own
+    /// address) included.
     var ipInfoService: IPInfoService { didSet { set(ipInfoService.rawValue, "general.ipInfoService") } }
 
     // MARK: Requests view
@@ -107,7 +109,7 @@ final class Preferences {
         glass = defaults.object(forKey: "general.glass") as? Double ?? 40
         language = defaults.string(forKey: "general.language").flatMap(Language.init(rawValue:)) ?? .system
         openAtLogin = defaults.object(forKey: "general.openAtLogin") as? Bool ?? true
-        ipInfoService = defaults.string(forKey: "general.ipInfoService").flatMap(IPInfoService.init(rawValue:)) ?? .proxycheck
+        ipInfoService = defaults.string(forKey: "general.ipInfoService").flatMap(IPInfoService.init(rawValue:)) ?? .off
 
         hideAppleServices = defaults.object(forKey: "requests.hideApple") as? Bool ?? false
         monitoredOnly = defaults.object(forKey: "requests.monitoredOnly") as? Bool ?? false
