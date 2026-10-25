@@ -52,7 +52,7 @@ Tidemark opens a 6-connection pool for reads and a 2-connection writer pool (`Ti
 | Reads over a long history: History pages, totals and histogram, the policy list, an app's counters and process tree, the backfill preview | 5 min (`SET LOCAL` in its own transaction) | 10 s | 60 s |
 | Maintenance: retention, backfill, deleting an app | 10 min (`SET LOCAL`) | 10 s | 60 s |
 | Capture writes (`Tidemark writer`) | 15 s | 5 s | 15 s |
-| Closing requests of ended sessions or that ended while Tidemark was not running | 15 s (`SET LOCAL`) | 10 s | 60 s |
+| Closing (or counting) requests of ended sessions or that ended while Tidemark was not running | 15 s (`SET LOCAL`) | 10 s | 60 s |
 | Migration transactions | 5 min | 3 s per statement (retried) | 60 s |
 | Index builds of migrations | none | none in the background; 10 s while connecting; 3 s for a BRIN setting | 60 s |
 
@@ -107,7 +107,29 @@ loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`)
 | `chain` | process ancestry, root → leaf: `[{"name","pid","path","startTime"}]` (`startTime` in seconds since 1970) |
 | `app_id`, `is_new` | the monitored app it rolled up to, and whether it was that app's first contact with the host or IP |
 | `probe_session_id` | set when the request came from a site probe |
-| `written_at`, `updated_at` | first and latest write by Tidemark |
+| `written_at`, `updated_at` | first and latest write by Tidemark, set by the server (`now()`, the writing transaction's start) |
+
+### Rows other Macs write
+
+Every Mac shows the rows the other Macs write in its live table. Every 2 s it reads them in the server's write
+order, `(updated_at, id)`, from the position it reached:
+
+```sql
+SELECT … FROM requests r
+WHERE r.updated_at >= $1 AND (r.updated_at, r.id) > ($1, $2) AND r.device_id <> $3
+ORDER BY r.updated_at, r.id LIMIT 300;
+```
+
+The row comparison is the keyset; the plain `updated_at` bound beside it is what the BRIN index
+`requests_updated_brin_idx` can serve, so a poll reads only the block ranges written since (an index serves a
+row comparison only when it is a btree over those columns). A poll reads page after page until one comes back
+shorter than the limit, at most ten pages; a poll that stopped there lets the next one carry on from where it
+stopped. A row written again gets a later `updated_at` and is read again.
+
+Positions come from the server only: the first one is the server's clock (`SELECT now()`) less a minute, so
+the Macs' clocks never take part. Because `updated_at` is the writing transaction's start, a transaction that
+commits late adds rows just behind a position already read: each poll that starts afresh steps back 3 s and
+skips the `(id, updated_at)` positions it already returned.
 
 ## Useful queries
 
