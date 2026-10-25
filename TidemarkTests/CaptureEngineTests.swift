@@ -340,7 +340,7 @@ struct CaptureEngineTests {
     }
 
     /// Every alert becomes a system notification on every Mac: this Mac's and the ones other Macs found, which
-    /// name their Mac.
+    /// name their Mac, also for an app whose monitoring is paused here (that only stops this Mac's alerts).
     @Test func notifiesAlertsFromEveryMac() async {
         Localizer.shared.preference = .english
         let database = CaptureFakeDatabase()
@@ -362,6 +362,7 @@ struct CaptureEngineTests {
         var update = CaptureUIUpdate()
         update.alerts = [alert(1, me, cursor, .domain, "api2.cursor.sh")]
         engine.apply(update)
+        model.catalog.paused.insert(docker.id)
         await database.setOtherMacAlerts([alert(2, mini.id, docker, .ip, "104.16.98.215")])
         await engine.pollOtherMacAlerts()
 

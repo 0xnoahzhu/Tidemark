@@ -767,7 +767,7 @@ final class CaptureEngine {
 
     /// New alerts: into the Notifications list (when the scope shows their Mac) and as system notifications, the
     /// ones other Macs found included. Alerts from other Macs are skipped when their host is muted or their app is
-    /// archived (or gone) here, and are not notified while their app's monitoring is paused on this Mac.
+    /// archived (or gone) here; pausing an app's monitoring on this Mac only stops this Mac's own alerts.
     private func receive(_ alerts: [AlertItem], fromOtherMac: Bool) {
         for alert in alerts.sorted(by: { $0.id < $1.id }) {
             if fromOtherMac {
@@ -779,7 +779,6 @@ final class CaptureEngine {
                 model.alerts.items.insert(alert, at: 0)
                 if alert.isUnread { model.alerts.unreadCount += 1 }
             }
-            guard !fromOtherMac || !model.catalog.paused.contains(alert.appID) else { continue }
             guard notifiedAlerts.insert(alert.id).inserted else { continue }
             if notifiedAlerts.count > 5_000 { notifiedAlerts = [alert.id] }
             let appName = model.catalog.app(alert.appID)?.name ?? tr("Unknown app", "Capture")
