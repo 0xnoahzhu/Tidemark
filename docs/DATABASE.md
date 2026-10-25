@@ -71,8 +71,10 @@ a writer connection as soon as capture gives up on its call. Its transaction the
 committing later (unless its `COMMIT` was already under way), and calls capture abandoned never hold on to
 the two writer connections. The call ends as soon as the connection is closed, even when it was rolling
 back or about to send its next statement: PostgresNIO never answers a statement sent on a connection that
-finished closing, so a call never waits for one, and the rollback and session cleanup are skipped on a
-closed connection (its transaction, settings and locks ended with it).
+finished closing. A connection closed by anything else (the server, the network, the pool shutting down)
+fails its call as unreachable within about two seconds unless the call finished first, so no call waits
+for such a statement until its limit. The rollback and session cleanup are skipped on a closed connection
+(its transaction, settings and locks ended with it).
 
 URLs without `sslmode` use `prefer` for remote hosts (TLS when the server offers it) and `disable` for
 loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`) are supported.
