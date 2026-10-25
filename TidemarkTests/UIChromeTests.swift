@@ -146,6 +146,14 @@ struct UIChromeTests {
         withExtendedLifetime(tabs) {}
     }
 
+    /// The window's glass is at least 72 % opaque, as in the design, and follows the Liquid Glass slider above that.
+    @Test func settingsGlassFollowsTheSlider() {
+        #expect(SettingsWindowGlass.opacity(0) == 0.72)
+        #expect(SettingsWindowGlass.opacity(40) == 0.72)
+        #expect(abs(SettingsWindowGlass.opacity(80) - 0.768) < 1e-9)
+        #expect(abs(SettingsWindowGlass.opacity(100) - 0.92) < 1e-9)
+    }
+
     /// Each tab icon is a full-color 26 pt tile in the design's color with a white glyph on it, centered on the
     /// toolbar's 32 pt canvas.
     @Test func settingsTabIconsAreColoredTiles() throws {

@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The Settings window: General, Surge and Database tabs.
+/// The Settings window: General, Surge and Database tabs on the design's glass.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
@@ -26,6 +26,7 @@ struct SettingsView: View {
             }
         }
         .tabViewStyle(.automatic)
+        .containerBackground(for: .window) { SettingsWindowGlass(preference: model.preferences.glass) }
         .environment(\.locale, localizer.locale)
     }
 
@@ -49,6 +50,36 @@ enum SettingsLayout {
     static let toolbarHeight: CGFloat = 88
     /// What the window leaves a pane.
     static var paneHeight: CGFloat { height - toolbarHeight }
+}
+
+/// The Settings window's glass, as in the design: the glass color at `max(.72, .16 + .76·g)` over a blur of
+/// what lies behind the window, following Settings › General › Liquid Glass. Cards stay opaque on it.
+struct SettingsWindowGlass: View {
+    var preference: Double
+
+    /// The design's alpha for the Settings window.
+    static func opacity(_ preference: Double) -> Double {
+        max(0.72, 0.16 + 0.76 * SidebarGlassStyle(preference: preference).amount)
+    }
+
+    var body: some View {
+        SettingsBehindWindowBlur()
+            .overlay(SidebarGlassStyle.glassColor.opacity(Self.opacity(preference)))
+            .ignoresSafeArea()
+    }
+}
+
+/// A blur of whatever lies behind the window.
+private struct SettingsBehindWindowBlur: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .behindWindow
+        view.material = .underWindowBackground
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
 
 /// The design's Settings tab icons: a 26 pt rounded tile in the tab's color holding a white glyph
