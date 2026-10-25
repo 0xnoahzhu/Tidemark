@@ -144,6 +144,17 @@
         }
       }
     },
+    "Chart unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "图表不可用"
+          }
+        }
+      }
+    },
     "Check the Mac menu in the sidebar and the filter options." : {
       "extractionState" : "manual",
       "localizations" : {

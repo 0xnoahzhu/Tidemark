@@ -48,12 +48,14 @@ struct MonitoredAppEntity: AppEntity, Identifiable, Hashable, Sendable {
         return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
     }
 
-    /// `true` when `query` matches the app's name, bundle ID or bundle file name (case-insensitive).
+    /// `true` when `query` matches the app's name, bundle ID, the bundle's display name (`AppNaming`: the name
+    /// Finder shows) or its file name (a localized system app's English name, "Calendar" for "日历"), ignoring case.
     func matches(_ query: String) -> Bool {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return true }
+        let bundleName = AppNaming.displayName(forBundlePath: path)
         let fileName = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-        return [name, bundleID ?? "", fileName].contains { $0.localizedCaseInsensitiveContains(needle) }
+        return [name, bundleID ?? "", bundleName, fileName].contains { $0.localizedCaseInsensitiveContains(needle) }
     }
 }
 

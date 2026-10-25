@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import os
+import Synchronization
 
 /// Failure surfaced to the UI when an insight cannot be produced.
 struct HostInsightError: LocalizedError, Equatable {
@@ -23,14 +24,15 @@ struct HostInsightError: LocalizedError, Equatable {
 /// sharing the database reuses them.
 ///
 /// Lookup order: memory → database → model. Model requests run one at a time; concurrent callers asking
-/// for the same host share one request.
+/// for the same host share one request, which is cancelled (and leaves the queue) once every caller waiting
+/// for it was cancelled.
 @MainActor
 @Observable
 final class HostInsightService: HostInsightProviding {
     @ObservationIgnored private let database: any TidemarkDatabase
     @ObservationIgnored private let generator: any HostInsightGenerating
     @ObservationIgnored private var memory: [String: HostInsight] = [:]
-    @ObservationIgnored private var inFlight: [String: Task<HostInsight, any Error>] = [:]
+    @ObservationIgnored private var inFlight: [String: HostInsightRequest] = [:]
     /// Completes when the most recently queued model request finishes.
     @ObservationIgnored private var queueTail: Task<Void, Never>?
     @ObservationIgnored private let log = Logger(subsystem: "io.tidemark.Tidemark", category: "insight")
@@ -66,16 +68,17 @@ final class HostInsightService: HostInsightProviding {
         let language = languageCode
         let key = Self.cacheKey(host: host, language: language)
         if let hit = memory[key] { return hit }
-        if let running = inFlight[key] { return try await running.value }
+        // A request whose callers all gave up is being cancelled: start afresh instead of joining it.
+        if let running = inFlight[key], running.join() { return try await running.value() }
 
         var facts = context
         facts.host = host
-        let task = Task { @MainActor [self] in
+        let request = HostInsightRequest(Task { @MainActor [self] in
             try await self.resolve(facts, key: key, language: language)
-        }
-        inFlight[key] = task
-        defer { inFlight[key] = nil }
-        return try await task.value
+        })
+        inFlight[key] = request
+        defer { if inFlight[key] === request { inFlight[key] = nil } }
+        return try await request.value()
     }
 
     // MARK: Cache
@@ -111,6 +114,7 @@ final class HostInsightService: HostInsightProviding {
         guard isAvailable else {
             throw HostInsightError(kind: .unavailable, message: unavailableReason ?? Self.message(for: .other))
         }
+        try Task.checkCancellation()
         let insight = try await serialized { [self] in
             try await self.generate(context, language: language)
         }
@@ -128,6 +132,8 @@ final class HostInsightService: HostInsightProviding {
             let verdict = try await generator.verdict(for: context, languageCode: language)
             return verdict.insight(host: context.host, languageCode: language, model: generator.modelName)
         } catch {
+            // Every caller gave up: end as cancelled, whatever the model reported.
+            if Task.isCancelled { throw CancellationError() }
             let failure = HostInsightFailure(error)
             log.notice("Insight for \(context.host, privacy: .public) failed: \(String(describing: failure), privacy: .public)")
             switch failure {
@@ -153,14 +159,21 @@ final class HostInsightService: HostInsightProviding {
     }
 
     /// Runs `work` after every previously queued request has finished (a session takes one request at a time).
+    /// Cancelling the caller cancels `work`, or skips it while it is still queued, so an abandoned request
+    /// never holds up the ones behind it.
     private func serialized<T: Sendable>(_ work: @escaping @MainActor @Sendable () async throws -> T) async throws -> T {
         let previous = queueTail
         let task = Task { @MainActor in
             await previous?.value
+            try Task.checkCancellation()
             return try await work()
         }
         queueTail = Task { _ = await task.result }
-        return try await task.value
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     /// Stored when the model declines to describe a host, so it is not asked again.
@@ -194,4 +207,41 @@ final class HostInsightService: HostInsightProviding {
     }
 
     nonisolated static func cacheKey(host: String, language: String) -> String { "\(language)|\(host)" }
+}
+
+/// A model request shared by every caller asking about the same host. It keeps going while at least one
+/// caller still waits for it and is cancelled once every one of them was cancelled.
+private final class HostInsightRequest: Sendable {
+    private let task: Task<HostInsight, any Error>
+    /// Callers waiting for the answer that were not cancelled (the one that started the request counts), and
+    /// whether the last of them left: the request is then being cancelled and takes no new callers.
+    private let state = Mutex((waiters: 1, closed: false))
+
+    init(_ task: Task<HostInsight, any Error>) {
+        self.task = task
+    }
+
+    /// Counts one more caller in before it awaits `value()`; `false` once every caller left, so that it
+    /// starts a new request instead. One step under the lock, so nobody joins as the last caller leaves.
+    func join() -> Bool {
+        state.withLock { current in
+            guard !current.closed else { return false }
+            current.waiters += 1
+            return true
+        }
+    }
+
+    /// The answer, for the caller that started the request or one that joined it.
+    func value() async throws -> HostInsight {
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            let last = state.withLock { current in
+                current.waiters -= 1
+                if current.waiters == 0 { current.closed = true }
+                return current.closed
+            }
+            if last { task.cancel() }
+        }
+    }
 }

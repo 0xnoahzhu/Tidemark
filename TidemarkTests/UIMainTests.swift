@@ -446,12 +446,204 @@ struct RequestsHistoryModelTests {
         #expect(history.errorMessage == "PostgreSQL is unreachable: connection refused")
         #expect(history.rows.isEmpty)
         #expect(!history.canLoadMore)
+        #expect(!history.isLoading)
+        #expect(!history.isLoadingHistogram)
 
         // The failure reads in a language chosen after it.
         Localizer.shared.preference = .chinese
         defer { Localizer.shared.preference = .english }
         guard Localizer.shared.bundle != nil else { return }
         #expect(history.errorMessage == "连不上 PostgreSQL：connection refused")
+    }
+
+    private func eventually(_ timeout: Duration = .seconds(3), _ condition: () async -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return await condition()
+    }
+
+    /// A page with one row whose ID tells the queries apart (`old` → 1, anything else → 2).
+    private nonisolated static func page(_ query: RequestQuery) -> RequestPage {
+        RequestPage(rows: [F.record(id: query.search == "old" ? 1 : 2)], totalCount: 1, elapsed: .milliseconds(4))
+    }
+
+    private nonisolated static let oldChart = Histogram(start: Date(timeIntervalSince1970: 0), end: Date(timeIntervalSince1970: 3600), counts: [1, 0])
+    private nonisolated static let newChart = Histogram(start: Date(timeIntervalSince1970: 0), end: Date(timeIntervalSince1970: 3600), counts: [0, 1])
+
+    @Test func showsRowsBeforeTheHistogram() async {
+        let gate = RequestsGate()
+        let database = RequestsStubDatabase(
+            query: { query in Self.page(query) },
+            buckets: { _, _ in
+                await gate.wait()
+                return Self.newChart
+            }
+        )
+        let history = RequestsHistoryModel()
+        let load = Task { await history.load(RequestQuery(), database: database) }
+        #expect(await eventually { history.rows.count == 1 })
+        #expect(history.totalCount == 1)
+        #expect(!history.isLoading)
+        #expect(history.isLoadingHistogram)
+        #expect(history.histogram == nil)
+
+        await gate.open()
+        await load.value
+        #expect(history.histogram == Self.newChart)
+        #expect(!history.isLoadingHistogram)
+        #expect(history.histogramError == nil)
+    }
+
+    @Test func keepsRowsWhenTheHistogramFails() async {
+        let rows = (0..<600).map { F.record(id: Int64($0)) }
+        let failing = RequestsStubDatabase(
+            query: { query in try await ShellDemoDatabase(rows: rows).queryRequests(query) },
+            buckets: { _, _ in throw DatabaseError.unreachable("Query timed out") }
+        )
+        let history = RequestsHistoryModel()
+        var query = RequestQuery()
+        query.range = .all
+
+        await history.load(query, database: failing)
+        #expect(history.rows.count == RequestsHistoryModel.pageSize)
+        #expect(history.totalCount == 600)
+        #expect(history.errorMessage == nil)
+        #expect(history.histogram == nil)
+        #expect(history.histogramError == CaptureEngine.message(for: DatabaseError.unreachable("Query timed out")))
+        #expect(history.canLoadMore)
+        await history.loadMore(database: failing)
+        #expect(history.rows.count == 600)
+
+        // The next load that gets a histogram clears the note.
+        await history.load(query, database: ShellDemoDatabase(rows: rows))
+        #expect(history.histogramError == nil)
+        #expect(history.histogram?.counts.reduce(0, +) == 600)
+    }
+
+    @Test func aFailedPageTakesTheChartWithIt() async {
+        // The histogram arrives first, then the page fails.
+        let pageGate = RequestsGate()
+        let pageLast = RequestsStubDatabase(
+            query: { _ in
+                await pageGate.wait()
+                throw DatabaseError.unreachable("connection refused")
+            },
+            buckets: { _, _ in Self.newChart }
+        )
+        let history = RequestsHistoryModel()
+        let load = Task { await history.load(RequestQuery(), database: pageLast) }
+        #expect(await eventually { history.histogram == Self.newChart })
+        await pageGate.open()
+        await load.value
+        #expect(history.errorMessage != nil)
+        #expect(history.histogram == nil)
+        #expect(!history.isLoadingHistogram)
+
+        // The page fails first: the histogram is cancelled, and one that finishes anyway is dropped.
+        let chartGate = RequestsGate()
+        let chartLast = RequestsStubDatabase(
+            buckets: { _, _ in
+                await chartGate.wait()
+                if Task.isCancelled { await chartGate.noteCancellation() }
+                return Self.newChart
+            }
+        )
+        let fresh = RequestsHistoryModel()
+        let second = Task { await fresh.load(RequestQuery(), database: chartLast) }
+        #expect(await eventually { fresh.errorMessage != nil })
+        #expect(!fresh.isLoading)
+        #expect(!fresh.isLoadingHistogram)
+        await chartGate.open()
+        await second.value
+        #expect(await chartGate.cancellations == 1)
+        #expect(fresh.histogram == nil)
+        #expect(fresh.histogramError == nil)
+        #expect(fresh.rows.isEmpty)
+    }
+
+    @Test func aNewerLoadCancelsTheOlderHistogram() async {
+        let gate = RequestsGate()
+        let database = RequestsStubDatabase(
+            query: { query in Self.page(query) },
+            buckets: { query, _ in
+                guard query.search == "old" else { return Self.newChart }
+                do {
+                    try await Task.sleep(for: .seconds(30))
+                } catch {
+                    await gate.noteCancellation()
+                    throw error
+                }
+                return Self.oldChart
+            }
+        )
+        let history = RequestsHistoryModel()
+        var old = RequestQuery()
+        old.search = "old"
+        let first = Task { await history.load(old, database: database) }
+        #expect(await eventually { history.rows.first?.rowID == 1 })
+        #expect(history.isLoadingHistogram)
+
+        await history.load(RequestQuery(), database: database)
+        await first.value
+        #expect(await gate.cancellations == 1)
+        #expect(history.rows.map(\.rowID) == [2])
+        #expect(history.histogram == Self.newChart)
+        #expect(history.histogramError == nil)
+        #expect(!history.isLoadingHistogram)
+    }
+
+    @Test func dropsAnOlderHistogramThatFinishesLate() async {
+        let gate = RequestsGate()
+        // The old histogram ignores cancellation, like a server still working on the statement.
+        let database = RequestsStubDatabase(
+            query: { query in Self.page(query) },
+            buckets: { query, _ in
+                guard query.search == "old" else { return Self.newChart }
+                await gate.wait()
+                return Self.oldChart
+            }
+        )
+        let history = RequestsHistoryModel()
+        var old = RequestQuery()
+        old.search = "old"
+        let first = Task { await history.load(old, database: database) }
+        #expect(await eventually { history.rows.first?.rowID == 1 })
+
+        await history.load(RequestQuery(), database: database)
+        #expect(history.histogram == Self.newChart)
+        await gate.open()
+        await first.value
+        #expect(history.histogram == Self.newChart)
+        #expect(history.rows.map(\.rowID) == [2])
+        #expect(!history.isLoading)
+        #expect(!history.isLoadingHistogram)
+    }
+
+    @Test func stopsLoadingWhenItsCallerIsCancelled() async {
+        let gate = RequestsGate()
+        let database = RequestsStubDatabase(
+            query: { query in Self.page(query) },
+            buckets: { _, _ in
+                do {
+                    try await Task.sleep(for: .seconds(30))
+                } catch {
+                    await gate.noteCancellation()
+                    throw error
+                }
+                return Self.newChart
+            }
+        )
+        let history = RequestsHistoryModel()
+        let load = Task { await history.load(RequestQuery(), database: database) }
+        #expect(await eventually { !history.rows.isEmpty })
+        load.cancel()
+        await load.value
+        #expect(await gate.cancellations == 1)
+        #expect(!history.isLoadingHistogram)
+        #expect(history.histogramError == nil)
     }
 
     @Test func zoomsIntoAnInterval() async {
@@ -484,6 +676,27 @@ struct RequestsHistoryModelTests {
         #expect(name.hasPrefix("Tidemark Requests "))
         #expect(name.hasSuffix(".csv"))
     }
+}
+
+/// Holds the stub database's queries until the test opens it, and counts queries that were cancelled.
+private actor RequestsGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var cancellations = 0
+
+    /// Returns once the gate is open, whether or not the caller was cancelled meanwhile.
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        for waiter in waiters { waiter.resume() }
+        waiters = []
+    }
+
+    func noteCancellation() { cancellations += 1 }
 }
 
 /// A database whose request queries are answered by closures; by default they fail.

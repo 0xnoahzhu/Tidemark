@@ -107,15 +107,23 @@ struct IntentsEntityTests {
         #expect(names == ["Cursor", "Raycast", "Arc", "Zed"])
     }
 
-    @Test func matchesNameBundleIDAndFileName() {
+    @Test func matchesNameBundleIDAndBundleName() {
         let entity = MonitoredAppEntity(app: app("Visual Studio Code", created: 0, bundleID: "com.microsoft.VSCode"))
         #expect(entity.matches("studio"))
         #expect(entity.matches("microsoft"))
         #expect(entity.matches(""))
         #expect(!entity.matches("cursor"))
-        let renamed = MonitoredAppEntity(app: MonitoredApp(id: UUID(), name: "Docs", path: "/Applications/Notion.app", tileLetter: "N", tileHue: 0,
+        // A bundle missing on this Mac is named after its file.
+        let renamed = MonitoredAppEntity(app: MonitoredApp(id: UUID(), name: "Docs", path: "/Applications/Tidemark Missing Notion.app", tileLetter: "N", tileHue: 0,
                                                           includeChildren: true, alertRule: .off, alertNewIP: false, createdAt: .now))
-        #expect(renamed.matches("notion"))
+        #expect(renamed.matches("missing notion"))
+        #expect(!renamed.matches(".app"))
+        // An installed bundle matches by the name Finder shows for it, and by its file name in any system language.
+        let finderPath = "/System/Library/CoreServices/Finder.app"
+        let finder = MonitoredAppEntity(app: MonitoredApp(id: UUID(), name: "Files", path: finderPath + "/", tileLetter: "F", tileHue: 0,
+                                                         includeChildren: true, alertRule: .off, alertNewIP: false, createdAt: .now))
+        #expect(finder.matches(AppNaming.displayName(forBundlePath: finderPath)))
+        #expect(finder.matches("finder"))
     }
 
     @Test func keepsTheAppIdentity() {

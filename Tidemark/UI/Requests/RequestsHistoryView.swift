@@ -42,6 +42,10 @@ struct RequestsHistoryView: View {
                     RequestsHistogramChart(histogram: histogram) { window in
                         nav.history.interval = window
                     }
+                } else if history.isLoadingHistogram, !history.isLoading {
+                    ProgressView().controlSize(.small)
+                } else if let message = history.histogramError, history.errorMessage == nil {
+                    RequestsHistogramUnavailable(message: message)
                 } else {
                     Color.clear
                 }
@@ -233,6 +237,30 @@ private struct RequestsZoomBar: View {
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// The chart area when the histogram failed but the rows loaded: a short note and the reason.
+private struct RequestsHistogramUnavailable: View {
+    var message: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "chart.bar.xaxis")
+                .foregroundStyle(Theme.ink3)
+                .accessibilityHidden(true)
+            Text(tr("Chart unavailable", "Requests"))
+                .foregroundStyle(Theme.ink2)
+                .layoutPriority(1)
+            Text(message)
+                .foregroundStyle(Theme.ink3)
+                .truncationMode(.tail)
+        }
+        .font(.system(size: 12))
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .help(message)
+        .accessibilityElement(children: .combine)
     }
 }
 

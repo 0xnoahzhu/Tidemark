@@ -215,6 +215,88 @@ struct InsightServiceTests {
         #expect(generator.maxConcurrent == 1)
     }
 
+    private func eventually(_ timeout: Duration = .seconds(3), _ condition: () async -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return await condition()
+    }
+
+    @Test func cancellingTheOnlyCallerFreesTheQueue() async throws {
+        let (service, generator, store) = makeService()
+        generator.delay = .seconds(5)
+        let abandoned = Task { try await service.insight(for: HostContext(host: "slow.example", ips: [])) }
+        #expect(await eventually { generator.calls == ["slow.example"] })
+        abandoned.cancel()
+        generator.delay = .zero
+
+        // The next host does not wait for the abandoned generation.
+        let clock = ContinuousClock()
+        let started = clock.now
+        let next = try await service.insight(for: HostContext(host: "next.example", ips: []))
+        #expect(next.host == "next.example")
+        #expect(started.duration(to: clock.now) < .seconds(2))
+        await #expect(throws: CancellationError.self) { try await abandoned.value }
+        #expect(await store.saves == 1)
+
+        // Nothing was cached for the abandoned host, so asking again runs the model again.
+        _ = try await service.insight(for: HostContext(host: "slow.example", ips: []))
+        #expect(generator.calls == ["slow.example", "next.example", "slow.example"])
+        #expect(generator.maxConcurrent == 1)
+    }
+
+    @Test func skipsAQueuedRequestWhoseCallerGaveUp() async throws {
+        let (service, generator, _) = makeService()
+        generator.delay = .milliseconds(300)
+        let first = Task { try await service.insight(for: HostContext(host: "first.example", ips: [])) }
+        #expect(await eventually { generator.calls == ["first.example"] })
+        let queued = Task { try await service.insight(for: HostContext(host: "queued.example", ips: [])) }
+        try await Task.sleep(for: .milliseconds(50))
+        queued.cancel()
+
+        _ = try await first.value
+        await #expect(throws: CancellationError.self) { try await queued.value }
+        #expect(generator.calls == ["first.example"])
+
+        generator.delay = .zero
+        _ = try await service.insight(for: HostContext(host: "queued.example", ips: []))
+        #expect(generator.calls == ["first.example", "queued.example"])
+    }
+
+    @Test func aCallerArrivingAsTheLastOneLeavesStartsAfresh() async throws {
+        let (service, generator, store) = makeService()
+        generator.delay = .seconds(5)
+        let abandoned = Task { try await service.insight(for: HostContext(host: "again.example", ips: [])) }
+        #expect(await eventually { generator.calls == ["again.example"] })
+        abandoned.cancel()
+        generator.delay = .zero
+
+        // The abandoned request is still registered for the host, but takes no new callers.
+        let insight = try await service.insight(for: HostContext(host: "again.example", ips: []))
+        #expect(insight.host == "again.example")
+        #expect(generator.calls == ["again.example", "again.example"])
+        await #expect(throws: CancellationError.self) { try await abandoned.value }
+        #expect(await store.saves == 1)
+    }
+
+    @Test func keepsASharedRequestWhileAnotherCallerWaits() async throws {
+        let (service, generator, store) = makeService()
+        generator.delay = .milliseconds(400)
+        let a = Task { try await service.insight(for: HostContext(host: "shared.example", ips: [])) }
+        #expect(await eventually { generator.calls == ["shared.example"] })
+        let b = Task { try await service.insight(for: HostContext(host: "shared.example", ips: [])) }
+        try await Task.sleep(for: .milliseconds(50))
+        a.cancel()
+
+        let insight = try await b.value
+        #expect(insight.host == "shared.example")
+        #expect(generator.calls == ["shared.example"])
+        #expect(await store.saves == 1)
+        _ = await a.result
+    }
+
     @Test func storesNeutralUnknownWhenTheModelDeclines() async throws {
         let (service, generator, store) = makeService()
         generator.respond = { _, _ in throw LanguageModelError.guardrailViolation(.init(debugDescription: "blocked")) }
