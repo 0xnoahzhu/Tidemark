@@ -1447,13 +1447,17 @@ struct DatabaseLiveTests {
             }
             try await db.upsertRequests(history)
             try await db.execute("ANALYZE requests")
-            var closeOld = PostgresDatabase.SQL("EXPLAIN UPDATE requests SET state = 'completed' WHERE device_id = ")
-            closeOld.append(closeOld.bind(mac.id) + " AND state = 'active' AND surge_session < " + closeOld.bind(Fixture.session))
+            var closeOld = PostgresDatabase.SQL("EXPLAIN ")
+            PostgresDatabase.appendCloseActive(deviceID: mac.id, before: Fixture.session + 1, at: Fixture.now, to: &closeOld)
             let closeOldPlan = try await plan(closeOld)
             #expect(closeOldPlan.contains("requests_active_idx") && !closeOldPlan.contains("Seq Scan"), "\(closeOldPlan)")
-            var closeVanished = PostgresDatabase.SQL("EXPLAIN UPDATE requests SET state = 'completed' WHERE device_id = ")
-            closeVanished.append(closeVanished.bind(mac.id) + " AND surge_session = " + closeVanished.bind(Fixture.session))
-            closeVanished.append(" AND state = 'active' AND NOT (surge_id = ANY(" + closeVanished.bind([Int64(1)]) + "))")
+            // The planner picks that index by itself too, with the statement's whole condition as its own.
+            let chosen = try await db.rows(closeOld.query).map { try $0.makeRandomAccess()[0].decode(String.self) }
+            #expect(chosen.contains { $0.contains("requests_active_idx") } && !chosen.contains { $0.contains("Seq Scan") }, "\(chosen)")
+            #expect(chosen.contains { $0.contains("Index Cond") && $0.contains("device_id =") && $0.contains("surge_session <") }, "\(chosen)")
+            var closeVanished = PostgresDatabase.SQL("EXPLAIN ")
+            PostgresDatabase.appendCloseVanished(deviceID: mac.id, session: Fixture.session, keeping: [1], startedBefore: Fixture.now,
+                                                 at: Fixture.now, to: &closeVanished)
             let closeVanishedPlan = try await plan(closeVanished)
             #expect(closeVanishedPlan.contains("requests_active_idx") && !closeVanishedPlan.contains("Seq Scan"), "\(closeVanishedPlan)")
         }
