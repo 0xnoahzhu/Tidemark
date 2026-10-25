@@ -136,8 +136,8 @@ actor CapturePipeline {
     let maintenanceBudget: Duration = .seconds(660)
     /// A failed maintenance statement is tried again after this long, or after the next reconnect.
     let maintenanceRetryInterval: TimeInterval = 600
-    /// A remote Surge's `dump active` closes only rows that started this long before the newest start it lists
-    /// (that Surge's clock, which may also step back a little).
+    /// A remote Surge's `dump active` closes only rows that started this long before the newest start it or the
+    /// `dump recent` taken before it lists (that Surge's clock, which may also step back a little).
     let remoteListingMargin: TimeInterval = 5
     /// Requests an empty `dump active` listing may end at most. More than that still active (in this pipeline
     /// or in PostgreSQL) is likelier a listing that failed than that many connections ending together.
@@ -522,9 +522,10 @@ actor CapturePipeline {
     ///
     /// Rows that started after the listing was taken are not in it and are left alone. A local Surge shares
     /// this Mac's clock, so that is `fetchedAt`. A remote Surge's clock may differ from this Mac's, so its
-    /// listing is compared on that Surge's own clock: every listed request started before the listing, and so
-    /// did every request that started before one of them; an empty listing then closes nothing.
-    func closeVanished(_ listing: [SurgeRequest], undecodable: Int = 0, fetchedAt: Date, epoch expected: Int) {
+    /// listing is compared on that Surge's own clock: every listed request started before the listing, so did
+    /// every request in `recent` (`dump recent`, taken before it), and so did every request that started
+    /// before one of them; with no start time in either, nothing is closed.
+    func closeVanished(_ listing: [SurgeRequest], undecodable: Int = 0, recent: [SurgeRequest] = [], fetchedAt: Date, epoch expected: Int) {
         guard expected == epoch, session != 0 else { return }
         if let problem = activeListingProblem(listing, undecodable: undecodable, fetchedAt: fetchedAt) {
             Self.log.error("Not closing requests that dump active left out: \(problem, privacy: .public)")
@@ -532,8 +533,8 @@ actor CapturePipeline {
         }
         var startedBefore = fetchedAt
         if settings.isRemote {
-            guard let newest = listing.compactMap({ CaptureRecordMapper.date($0.startDate) }).max() else {
-                Self.log.info("Not closing requests of the remote Surge: dump active gave no start time to compare with")
+            guard let newest = (listing + recent).compactMap({ CaptureRecordMapper.date($0.startDate) }).max() else {
+                Self.log.info("Not closing requests of the remote Surge: dump active and dump recent gave no start time to compare with")
                 return
             }
             startedBefore = newest.addingTimeInterval(-remoteListingMargin)

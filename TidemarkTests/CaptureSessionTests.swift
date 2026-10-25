@@ -173,6 +173,42 @@ struct CaptureSessionTests {
         #expect(await database.vanishedCounts == 0)
     }
 
+    @Test func aRemoteSurgesRecentRequestsDateItsListingToo() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        // Only a long-lived connection is still open; an earlier run left 9 and 10 active, which ended since.
+        func row(_ id: Int64, start: Double) -> RequestRecord {
+            var row = activeRow(id)
+            row.startedAt = Date(timeIntervalSince1970: start)
+            return row
+        }
+        await database.preinsertRow(row(9, start: requestStart + 200))
+        await database.preinsertRow(row(10, start: requestStart + 298))
+        let pipeline = makePipeline(database: database, directory: temp.url, remote: true)
+        await pipeline.setDatabaseOnline(true)
+        let epoch = await pipeline.beginSession(1_000)
+        // `dump recent`, taken before `dump active`, lists a request that started later than the open one.
+        let recent = [curl(11, start: requestStart + 300, completed: true)]
+        await pipeline.closeVanished([curl(6, start: requestStart - 1_800)], recent: recent, fetchedAt: base, epoch: epoch)
+        await pipeline.tick(now: base.addingTimeInterval(1))
+
+        let close = try #require(await database.vanishedCloses.first)
+        #expect(close.startedBefore == Date(timeIntervalSince1970: requestStart + 295), "the newest start of either listing, less a few seconds")
+        #expect(await database.rows[row(9, start: 0).key]?.state == .completed)
+        #expect(await database.rows[row(10, start: 0).key]?.state == .active)
+
+        // An empty `dump active` is dated by `dump recent` alone.
+        let quiet = CaptureFakeDatabase()
+        await quiet.preinsertRow(row(9, start: requestStart + 200))
+        let idle = makePipeline(database: quiet, directory: temp.url, remote: true)
+        await idle.setDatabaseOnline(true)
+        let next = await idle.beginSession(1_000)
+        await idle.closeVanished([], recent: recent, fetchedAt: base, epoch: next)
+        await idle.tick(now: base.addingTimeInterval(1))
+        #expect(await quiet.vanishedCloses.count == 1)
+        #expect(await quiet.rows[row(9, start: 0).key]?.state == .completed)
+    }
+
     @Test func aListingWithUnreadableRecordsClosesNothing() async {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()

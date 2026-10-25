@@ -468,10 +468,12 @@ final class CaptureEngine {
                 streamConnectedAt = .now
                 attempt = 0
                 let backfill = Task { [surge, pipeline] in
+                    // One after the other: every request `dump recent` lists started before `dump active` was
+                    // taken, so its start times also date that listing on a remote Surge's clock.
+                    let recentRequests = try? await surge.recentRequests()
+                    guard !Task.isCancelled else { return }
                     let fetchedAt = Date.now
-                    async let recent = try? surge.recentRequests()
-                    async let active = try? Self.activeListing(surge)
-                    let (recentRequests, activeListing) = await (recent, active)
+                    let activeListing = try? await Self.activeListing(surge)
                     guard !Task.isCancelled else { return }
                     await pipeline.ingestBackfill((recentRequests ?? []) + (activeListing?.requests ?? []), epoch: epoch)
                     // Requests that ended while the stream was away get no completion event. A listing that may
@@ -481,7 +483,8 @@ final class CaptureEngine {
                         if await pipeline.activeListingProblem(listed, undecodable: activeListing.undecodable, fetchedAt: fetchedAt) == nil {
                             await pipeline.reconcileActive(Set(listed.map(\.id)), fetchedAt: fetchedAt, epoch: epoch)
                         }
-                        await pipeline.closeVanished(listed, undecodable: activeListing.undecodable, fetchedAt: fetchedAt, epoch: epoch)
+                        await pipeline.closeVanished(listed, undecodable: activeListing.undecodable, recent: recentRequests ?? [],
+                                                     fetchedAt: fetchedAt, epoch: epoch)
                     }
                 }
                 defer { backfill.cancel() }
