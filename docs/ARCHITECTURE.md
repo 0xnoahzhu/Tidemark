@@ -66,6 +66,11 @@ For a remote Surge, add `--remote host:port` and send the password on stdin with
   The previous session's requests are closed at the new start time, and its rows PostgreSQL still holds as
   active are closed by `closeActiveRequests` as maintenance. `environment` is polled every 60 s as a backstop
   for policy switches the watch did not report.
+* **Child processes** — every call runs its own surge-cli child. When a call times out or is cancelled, or the
+  consumer of a `watch` stops, its child gets SIGTERM, then SIGKILL after 2 s, and is reaped. Quitting stops
+  every child still running (lookups nobody cancelled, one that ignored SIGTERM) before Tidemark exits:
+  SIGTERM, then SIGKILL after half a second. A `watch` orphaned by a crash ends at its next event, when
+  writing to the closed pipe fails.
 * **Process** — `pid`, `processPath`, and `pathForStatistics` (the app bundle, e.g. `/Applications/Grok Bot.app/`).
 * **Policy** — `policyName` is the final policy. Notes contain the decision path, e.g.
   `[Rule] Policy decision path: AI -> AT&T-RackNerd-Hysteria2` → `policyPath = ["AI", "AT&T-RackNerd-Hysteria2"]`.
@@ -157,7 +162,8 @@ migration runner and every time limit.
   takes capture offline. A closed row keeps a completion time it already has; otherwise it ends at its last
   write by Tidemark, never later than the restart or relaunch.
 * **Quitting** — the final flush gets 3 s (what it cannot write goes to the spool and `auxiliary.json`), and
-  Tidemark exits after 6 s at the latest. Requests that are still active stay active in PostgreSQL: the
+  Tidemark exits after 6 s at the latest (plus up to a second for a surge-cli child that ignores SIGTERM, see
+  [Surge integration](#surge-integration)). Requests that are still active stay active in PostgreSQL: the
   connection usually outlives Tidemark, and a row stored as completed is never reopened. The next launch
   closes the ones that ended meanwhile (`closeVanished` for the same Surge session, `closeActiveRequests` for
   earlier ones). A Surge restart or a switch of the recording device still closes the old session's requests.

@@ -111,6 +111,31 @@ struct SurgeCLIClientTests {
         #expect(await Self.waitUntilGone(pid), "killed and reaped")
     }
 
+    @Test func quittingStopsEveryChildStillRunning() async throws {
+        // One child ends at SIGTERM; the other ignores it and is killed. Each writes its PID once it is ready.
+        let ready = (0..<2).map { FileManager.default.temporaryDirectory.appending(path: "tidemark-quit-\(UUID().uuidString)-\($0).pid") }
+        let plain = try await SurgeFakeCLI("echo $$ > '\(ready[0].path)'\n" + SurgeFakeCLI.waitWhileTheTestRuns)
+        let stubborn = try await SurgeFakeCLI("trap '' TERM\necho $$ > '\(ready[1].path)'\n" + SurgeFakeCLI.waitWhileTheTestRuns)
+        defer {
+            plain.remove()
+            stubborn.remove()
+            for file in ready { try? FileManager.default.removeItem(at: file) }
+        }
+        let children = try [plain, stubborn].map { try SurgeChildProcess($0.client().invocation(["status"])) }
+        for file in ready { _ = try await Self.waitForPID(in: file) }
+        let running = SurgeChildProcess.running
+        #expect(children.allSatisfy { child in running.contains { $0 === child.process } })
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        #expect(await SurgeChildProcess.terminate(children.map(\.process), grace: .milliseconds(300)))
+        #expect(clock.now - started < .seconds(2))
+        #expect(await children[1].waitForExit() == SIGKILL, "SIGTERM was ignored")
+        for child in children { #expect(await Self.waitUntilGone(child.pid), "reaped") }
+        let left = SurgeChildProcess.running
+        #expect(!children.contains { child in left.contains { $0 === child.process } })
+    }
+
     @Test func cancellingACommandTerminatesTheChild() async throws {
         let pidFile = FileManager.default.temporaryDirectory.appending(path: "tidemark-cancel-\(UUID().uuidString).pid")
         let cli = try await SurgeFakeCLI("echo $$ > '\(pidFile.path)'\n" + SurgeFakeCLI.waitWhileTheTestRuns)

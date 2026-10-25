@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Synchronization
 
 /// One surge-cli command line: the executable, its full argv and what to feed its standard input.
 struct SurgeInvocation: Sendable, Hashable {
@@ -21,6 +22,10 @@ struct SurgeInvocation: Sendable, Hashable {
 /// on a 300 KB `dump recent`). The exit status arrives through `terminationHandler`; the typed
 /// `Process.DidTerminateMessage` is posted on the launching thread's run loop, which tasks on the
 /// cooperative pool do not have.
+///
+/// Every child is tracked until it exits, so quitting can stop the ones no caller cancelled (`terminateAll`):
+/// a lookup still in flight, or a child that ignored SIGTERM and whose SIGKILL would otherwise be scheduled
+/// by a process that is about to exit.
 final class SurgeChildProcess: Sendable {
     let process: Process
     /// Chunks of standard output; finishes at end of file.
@@ -28,6 +33,9 @@ final class SurgeChildProcess: Sendable {
     /// Chunks of standard error; finishes at end of file.
     let stderr: AsyncStream<Data>
     private let exit: Task<Int32, Never>
+
+    /// Children launched that have not exited yet, by process object.
+    private static let launched = Mutex<[ObjectIdentifier: Process]>([:])
 
     var pid: Int32 { process.processIdentifier }
 
@@ -60,7 +68,9 @@ final class SurgeChildProcess: Sendable {
         }
 
         let (statusStream, statusContinuation) = AsyncStream.makeStream(of: Int32.self, bufferingPolicy: .bufferingNewest(1))
+        let key = ObjectIdentifier(process)
         process.terminationHandler = { finished in
+            Self.launched.withLock { $0[key] = nil }
             statusContinuation.yield(finished.terminationStatus)
             statusContinuation.finish()
         }
@@ -68,9 +78,12 @@ final class SurgeChildProcess: Sendable {
         stdout = Self.chunks(of: output.fileHandleForReading)
         stderr = Self.chunks(of: errors.fileHandleForReading)
 
+        // Tracked before launch: a child that exits at once is untracked by its termination handler.
+        Self.launched.withLock { $0[key] = process }
         do {
             try process.run()
         } catch {
+            Self.launched.withLock { $0[key] = nil }
             output.fileHandleForReading.readabilityHandler = nil
             errors.fileHandleForReading.readabilityHandler = nil
             if Self.isMissingFile(error) { throw .cliNotFound(path: invocation.executable) }
@@ -100,6 +113,38 @@ final class SurgeChildProcess: Sendable {
             if process.isRunning { kill(process.processIdentifier, SIGKILL) }
         }
         return true
+    }
+
+    /// The children launched that have not exited yet (an exited child is reaped before it leaves the list).
+    static var running: [Process] {
+        launched.withLock { Array($0.values) }
+    }
+
+    /// Stops every child still running before Tidemark quits, so none outlives it: SIGTERM, then SIGKILL for
+    /// the ones still running after `grace`. Returns once they exited (at most `grace` after the SIGKILL).
+    static func terminateAll(grace: Duration = .milliseconds(500)) async {
+        await terminate(running, grace: grace)
+    }
+
+    /// SIGTERM to each of `processes` still running, SIGKILL to the ones still running after `grace`, then waits
+    /// up to `grace` again for them to exit. Returns whether every one exited.
+    @discardableResult
+    static func terminate(_ processes: [Process], grace: Duration) async -> Bool {
+        let alive = processes.filter(\.isRunning)
+        guard !alive.isEmpty else { return true }
+        for process in alive { process.terminate() }
+        if await waitForExit(of: alive, within: grace) { return true }
+        for process in alive where process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        return await waitForExit(of: alive, within: grace)
+    }
+
+    /// Polls until none of `processes` is running, at most `limit` (a cancelled caller stops waiting).
+    private static func waitForExit(of processes: [Process], within limit: Duration) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: limit)
+        while processes.contains(where: \.isRunning), ContinuousClock.now < deadline, !Task.isCancelled {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return !processes.contains(where: \.isRunning)
     }
 
     /// Concatenates a chunk stream, keeping at most the last `limit` bytes.

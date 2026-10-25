@@ -55,11 +55,15 @@ enum AppBootstrap {
     /// Stops a running probe and the egress checks, and flushes buffered rows to PostgreSQL (or the on-disk
     /// spool). The probe is saved right away (no tail, no grace) while capture flushes, so a slow probe save
     /// cannot use up the time the final flush needs. Returns after `timeout` at the latest, whatever is still
-    /// running, so quitting never hangs on an unreachable server.
+    /// running, so quitting never hangs on an unreachable server. Then every surge-cli child still running is
+    /// stopped (a second more at most, for one that ignores SIGTERM), so none outlives Tidemark.
     static func stop(_ model: AppModel, timeout: Duration = .seconds(6)) async {
         StatusItemController.uninstall()
         DockIconUpdater.stop()
         await shutDown(probe: probe, egress: egress, engine: engine, timeout: timeout)
+        // Lookups nobody cancelled may still be running, and a child that ignored SIGTERM would get its SIGKILL
+        // only after Tidemark exited.
+        await SurgeChildProcess.terminateAll()
     }
 
     /// The shutdown work, raced against `timeout` (`CaptureTimeout` returns at the deadline without waiting for
