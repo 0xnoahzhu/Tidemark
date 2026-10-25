@@ -140,17 +140,13 @@ struct SiteProbeView: View {
     }
 
     private var modePicker: some View {
-        Picker(tr("Device", "SiteProbe"), selection: Binding(
+        DesignSegmentedControl(tr("Device", "SiteProbe"), selection: Binding(
             get: { model.preferences.probeMode },
             set: { web.switchMode(to: $0, model: model) }
-        )) {
-            Text(tr("Desktop", "SiteProbe")).tag(ProbeDeviceMode.desktop)
-            Text(tr("iPhone", "SiteProbe")).tag(ProbeDeviceMode.iphone)
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.small)
-        .fixedSize()
+        ), size: .small(fontSize: 11.5, horizontalPadding: 10), segments: [
+            (.desktop, tr("Desktop", "SiteProbe")),
+            (.iphone, tr("iPhone", "SiteProbe")),
+        ])
     }
 
     private var ownWindowToggle: some View {

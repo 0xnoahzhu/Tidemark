@@ -62,17 +62,15 @@ struct ProbeBrowserWindow: View {
         ToolbarSpacer(.flexible)
 
         ToolbarItem(placement: .primaryAction) {
-            Picker(tr("Device", "SiteProbe"), selection: Binding(
+            DesignSegmentedControl(tr("Device", "SiteProbe"), selection: Binding(
                 get: { model.preferences.probeMode },
                 set: { web.switchMode(to: $0, model: model) }
-            )) {
-                Text(tr("Desktop", "SiteProbe")).tag(ProbeDeviceMode.desktop)
-                Text(tr("iPhone", "SiteProbe")).tag(ProbeDeviceMode.iphone)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+            ), size: .small(fontSize: 11.5, horizontalPadding: 10), segments: [
+                (.desktop, tr("Desktop", "SiteProbe")),
+                (.iphone, tr("iPhone", "SiteProbe")),
+            ])
         }
+        .sharedBackgroundVisibility(.hidden)
 
         ToolbarSpacer(.fixed, placement: .primaryAction)
 
