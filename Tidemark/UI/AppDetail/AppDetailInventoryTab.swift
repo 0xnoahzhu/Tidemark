@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// "Domains & IPs" tab of a monitored app: every domain (grouped by site) and every IP it used, each
-/// listed once. Selecting a domain highlights the IPs it resolved to.
+/// listed once, with a search field and CSV export. Selecting a domain highlights the IPs it resolved to.
 struct AppDetailInventoryTab: View {
     @Environment(AppModel.self) private var model
     var app: MonitoredApp
@@ -46,13 +46,6 @@ struct AppDetailInventoryTab: View {
                 }
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(tr("Export CSV", "AppDetail"), action: export)
-                    .disabled(hosts.isEmpty)
-                    .help(tr("Save every domain and IP of this app as a CSV file", "AppDetail"))
-            }
-        }
         .fileExporter(isPresented: $isExporting, document: exportDocument, contentType: .commaSeparatedText,
                       defaultFilename: trf("%@ domains and IPs", "AppDetail", app.name),
                       onCompletion: { result in
@@ -70,7 +63,8 @@ struct AppDetailInventoryTab: View {
     // MARK: Header
 
     private var summaryLine: some View {
-        HStack(spacing: 12) {
+        @Bindable var nav = model.nav
+        return HStack(spacing: 12) {
             Text(summary.headline)
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
@@ -78,9 +72,14 @@ struct AppDetailInventoryTab: View {
                 AnalyzePill(text: trn("%lld new domain or IP in 24 h", "%lld new domains & IPs in 24 h", summary.newCount, "AppDetail"), size: 11)
             }
             Spacer(minLength: 0)
+            FilterField(prompt: tr("Search", "AppDetail"), text: $nav.appInventorySearch, width: 190)
+            Button(tr("Export CSV", "AppDetail"), action: export)
+                .buttonStyle(.bordered)
+                .disabled(hosts.isEmpty)
+                .help(tr("Save every domain and IP of this app as a CSV file", "AppDetail"))
         }
         .padding(.horizontal, 20)
-        .frame(height: 44)
+        .frame(height: 48)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
 
@@ -171,7 +170,8 @@ struct AppDetailInventoryTab: View {
     private var ipsPane: some View {
         @Bindable var nav = model.nav
         let selected = summary.selectedHost(nav.appSelectedHost)
-        let shown = summary.visibleIPCount(selectedHost: selected, filter: nav.appIPFilter)
+        // Like the design's "N of M", the Direct / From domains switch doesn't change the count.
+        let shown = summary.visibleIPCount(selectedHost: selected)
         let title = HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(selected.map { trf("IPs used by %@", "AppDetail", $0) } ?? tr("All IPs", "AppDetail"))
                 .font(.system(size: 12.5, weight: .bold))
@@ -310,40 +310,20 @@ struct AppDetailInventoryTab: View {
         exportDocument = AnalyzeCSVDocument(text: AnalyzeCSV.appHosts(hosts, mutes: model.alerts.mutes))
         isExporting = true
     }
-
-    /// Copy and Mute / Unmute for a domain or IP row. The model is passed in because context menus are
-    /// hosted by AppKit.
-    @MainActor @ViewBuilder
-    fileprivate static func hostMenu(_ value: String, state: AnalyzeMuteState, model: AppModel) -> some View {
-        Button(tr("Copy", "AppDetail")) {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(value, forType: .string)
-        }
-        Button(AnalyzeMuteButton.title(state)) {
-            Task { await AnalyzeMuteButton.toggle(value, state: state, model: model) }
-        }
-        .disabled(state == .mutedByRule)
-    }
 }
 
-/// A domain under its site; keeps its own hover state so hovering doesn't rebuild the whole tab.
+/// A domain under its site.
 private struct AppDetailDomainRow: View {
     @Environment(AppModel.self) private var model
     var host: AppHost
     var selected: Bool
 
-    @State private var hovered = false
-
     var body: some View {
-        let muteState = AnalyzeMuteState(host.value, alerts: model.alerts)
         AnalyzeColumnsLayout(columns: AppDetailInventoryTab.domainColumns) {
             HStack(spacing: 7) {
                 Text(verbatim: "└").font(Theme.mono(11)).foregroundStyle(Theme.ink3)
                 Text(host.value).lineLimit(1).truncationMode(.middle)
                 if host.isNew() { TagBadge(text: tr("NEW", "AppDetail"), style: .new) }
-                if muteState != .unmuted { TagBadge(text: tr("MUTED", "AppDetail")) }
-                Spacer(minLength: 0)
-                if hovered { AnalyzeMuteButton(value: host.value) }
             }
             .padding(.leading, 12)
             Text(AnalyzeFormat.seen(host.firstSeen)).foregroundStyle(Theme.ink2).lineLimit(1)
@@ -355,29 +335,23 @@ private struct AppDetailDomainRow: View {
         .frame(height: 28)
         .background(selected ? Theme.accentTint : .clear)
         .contentShape(Rectangle())
-        .onHover { hovered = $0 }
         .onTapGesture {
             withAnimation(.easeOut(duration: 0.2)) {
                 model.nav.appSelectedHost = model.nav.appSelectedHost == host.value ? nil : host.value
             }
         }
-        .contextMenu { AppDetailInventoryTab.hostMenu(host.value, state: muteState, model: model) }
         .help(host.processName.map { trf("First reached by %@", "AppDetail", $0) } ?? host.value)
     }
 }
 
 /// An IP with its network and the domains that resolved to it; dimmed when another domain is selected.
 private struct AppDetailIPRow: View {
-    @Environment(AppModel.self) private var model
     var ip: AppHost
     var selectedHost: String?
-
-    @State private var hovered = false
 
     var body: some View {
         let highlighted = selectedHost.map { ip.hosts.contains($0) } ?? false
         let dimmed = selectedHost != nil && !highlighted
-        let muteState = AnalyzeMuteState(ip.value, alerts: model.alerts)
         AnalyzeColumnsLayout(columns: AppDetailInventoryTab.ipColumns) {
             HStack(spacing: 6) {
                 Text(ip.value).font(Theme.mono(11.5)).lineLimit(1).textSelection(.enabled)
@@ -390,7 +364,6 @@ private struct AppDetailIPRow: View {
                     .help(ip.geo.map(AppDetailInventoryFormat.fullGeo) ?? "")
                 HStack(spacing: 5) {
                     if ip.isDirect { TagBadge(text: tr("BY IP", "AppDetail")) }
-                    if muteState != .unmuted { TagBadge(text: tr("MUTED", "AppDetail")) }
                     // Whole host names, cut at the end: a cut in the middle invents names that don't exist.
                     Text(ip.hosts.isEmpty ? tr("No hostname · connected by IP", "AppDetail") : AppDetailInventoryFormat.domains(ip.hosts))
                         .font(.system(size: 11))
@@ -399,9 +372,6 @@ private struct AppDetailIPRow: View {
                         .truncationMode(.tail)
                         .help(ip.hosts.joined(separator: "\n"))
                 }
-            }
-            .overlay(alignment: .trailing) {
-                if hovered { AnalyzeMuteButton(value: ip.value) }
             }
             Text(Fmt.count(ip.requestCount)).font(Theme.mono(11)).frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -412,9 +382,6 @@ private struct AppDetailIPRow: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
         .opacity(dimmed ? 0.35 : 1)
         .animation(.easeOut(duration: 0.2), value: dimmed)
-        .contentShape(Rectangle())
-        .onHover { hovered = $0 }
-        .contextMenu { AppDetailInventoryTab.hostMenu(ip.value, state: muteState, model: model) }
     }
 }
 
@@ -508,7 +475,7 @@ struct AppDetailInventorySummary {
         resolvedIPs = visibleIPs.filter { !$0.isDirect }
     }
 
-    /// `11 domains · 6 sites · 9 IPs (1 by IP only)`; the clause is left out when no IP was reached directly.
+    /// `11 domains · 6 sites · 9 IPs (1 by IP only)`, the clause included when it counts none, like the design.
     @MainActor
     var headline: String {
         let base = [
@@ -516,7 +483,6 @@ struct AppDetailInventorySummary {
             trn("%lld site", "%lld sites", siteCount, "AppDetail"),
             trn("%lld IP", "%lld IPs", ipCount, "AppDetail"),
         ].joined(separator: " · ")
-        guard directIPCount > 0 else { return base }
         return trf("%1$@ (%2$lld by IP only)", "AppDetail", base, directIPCount)
     }
 
@@ -526,14 +492,9 @@ struct AppDetailInventorySummary {
         return host
     }
 
-    /// IPs the pane lists for `filter` (Direct, From domains or both) that the host selection doesn't dim
-    /// (all of them when nothing is selected).
-    func visibleIPCount(selectedHost: String?, filter: Navigation.IPFilter = .all) -> Int {
-        let listed: [AppHost] = switch filter {
-        case .all: directIPs + resolvedIPs
-        case .direct: directIPs
-        case .resolved: resolvedIPs
-        }
+    /// IPs the search keeps that the host selection doesn't dim (all of them when nothing is selected).
+    func visibleIPCount(selectedHost: String?) -> Int {
+        let listed = directIPs + resolvedIPs
         guard let selectedHost else { return listed.count }
         return listed.filter { $0.hosts.contains(selectedHost) }.count
     }

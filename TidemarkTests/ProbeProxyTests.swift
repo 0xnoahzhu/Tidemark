@@ -311,10 +311,6 @@ struct ProbeControllerTests {
         let sources = await database.sources
         #expect(sources.count == 2)
         #expect(sources.allSatisfy { $0.sourcePath == "probe:\(session.id.uuidString.lowercased())" && $0.sourceTitle == "Probe · github.com" })
-
-        await controller.deleteProbe(session.id)
-        #expect(model.probe.sessions.isEmpty)
-        #expect(await database.probeSessionsSaved.isEmpty)
     }
 
     @Test func rejectsAnInvalidURL() async {

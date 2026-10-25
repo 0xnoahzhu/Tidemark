@@ -4,7 +4,7 @@ import SwiftUI
 /// Page of one monitored app: header, stats and the Requests / Domains & IPs / Process Tree tabs.
 ///
 /// The app's tile, name and bundle path live in the window toolbar (title, subtitle and a leading tile);
-/// the tab switch is the toolbar's principal item. The page also presents the "Stop monitoring" and
+/// the tab switch is the toolbar's trailing item. The page also presents the "Stop monitoring" and
 /// "Delete" confirmations whenever `Navigation.confirmMonitoringToggle` / `confirmDeleteApp` name this app.
 struct AppDetailView: View {
     @Environment(AppModel.self) private var model
@@ -15,8 +15,6 @@ struct AppDetailView: View {
     /// Mac) and until the capture engine publishes the app's counters in `CatalogState`.
     @State private var loadedStats: LoadedStats?
     @State private var actionError: (any Error)?
-    /// Filter of the Process Tree tab (the other tabs keep theirs in `Navigation`).
-    @State private var treeSearch = ""
 
     var body: some View {
         if let app = model.catalog.app(appID) {
@@ -49,23 +47,20 @@ struct AppDetailView: View {
             case .inventory:
                 AppDetailInventoryTab(app: app, absent: absent)
             case .tree:
-                AppDetailProcessTreeTab(app: app, absent: absent, search: treeSearch)
+                AppDetailProcessTreeTab(app: app, absent: absent)
             }
         }
         .background(Theme.bg)
-        // One search field for every tab: attaching `.searchable` to the swapped tab views left a stale
-        // second search item in the window toolbar. Placed like the Requests page's field.
-        .searchable(text: searchText, placement: .toolbar, prompt: Text(searchPrompt))
         .navigationTitle(app.name)
         .navigationSubtitle(app.path)
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                AppTile(app: app, size: 32, dimmed: app.isArchived)
+                AppTile(app: app, size: 26, dimmed: app.isArchived)
                     .padding(.horizontal, 2)
             }
             .sharedBackgroundVisibility(.hidden)
 
-            ToolbarItem(placement: .principal) {
+            ToolbarItem(placement: .primaryAction) {
                 Picker(tr("View", "AppDetail"), selection: $nav.appTab) {
                     Text(tr("All Requests", "AppDetail")).tag(AppTab.requests)
                     Text(tr("Domains & IPs", "AppDetail")).tag(AppTab.inventory)
@@ -99,37 +94,6 @@ struct AppDetailView: View {
         .dialogIcon(dialogIconImage(app))
         .alert(error: $actionError) {
             Button(tr("OK", "AppDetail")) {}
-        }
-    }
-
-    // MARK: Search
-
-    /// The search field edits the current tab's filter.
-    private var searchText: Binding<String> {
-        let nav = model.nav
-        return Binding(
-            get: {
-                switch nav.appTab {
-                case .requests: nav.appRequestSearch
-                case .inventory: nav.appInventorySearch
-                case .tree: treeSearch
-                }
-            },
-            set: { value in
-                switch nav.appTab {
-                case .requests: nav.appRequestSearch = value
-                case .inventory: nav.appInventorySearch = value
-                case .tree: treeSearch = value
-                }
-            }
-        )
-    }
-
-    private var searchPrompt: String {
-        switch model.nav.appTab {
-        case .requests: tr("Filter host, IP, process", "AppDetail")
-        case .inventory: tr("Search", "AppDetail")
-        case .tree: tr("Filter processes", "AppDetail")
         }
     }
 

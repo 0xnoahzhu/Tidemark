@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// "All Requests" tab of a monitored app: every request from the app and everything it launched,
-/// live from the stream or from PostgreSQL. A click expands a row into its process chain, connection
-/// and timing.
+/// live from the stream or from PostgreSQL, with its filter field. A click expands a row into its
+/// process chain, connection and timing.
 struct AppDetailRequestsTab: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -117,6 +117,7 @@ struct AppDetailRequestsTab: View {
                 .lineLimit(1)
                 .fixedSize()
             Spacer(minLength: 0)
+            FilterField(prompt: tr("Filter host, IP, process", "AppDetail"), text: $nav.appRequestSearch, width: 200)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)

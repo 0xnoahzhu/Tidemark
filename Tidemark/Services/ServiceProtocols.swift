@@ -194,7 +194,6 @@ protocol TidemarkDatabase: Sendable {
     // Site probes
     func saveProbeSession(_ session: ProbeSession) async throws
     func probeSessions(limit: Int) async throws -> [ProbeSession]
-    func deleteProbeSession(_ id: UUID) async throws
 
     // Host insights (on-device model output, shared cache)
     func hostInsight(_ host: String, language: String) async throws -> HostInsight?
@@ -440,7 +439,6 @@ protocol ProbeActions: AnyObject {
     func pageDidFinishLoading()
     /// Stops recording, saves the session and returns it.
     @discardableResult func stopProbe() async -> ProbeSession?
-    func deleteProbe(_ id: UUID) async
 }
 
 /// On-device explanations of hosts (FoundationModels). Results are cached in `host_insights`.

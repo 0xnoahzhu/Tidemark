@@ -139,8 +139,9 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(summary.visibleIPCount(selectedHost: nil) == 2)
     }
 
-    /// "x of y" counts only the groups the Direct / From domains switch lists.
-    @Test func ipCountFollowsTheDirectAndResolvedFilter() {
+    /// Like the design's "x of y", the count covers both groups whichever one the Direct / From domains switch
+    /// lists; only the search and the host selection change it.
+    @Test func ipCountIgnoresTheDirectAndResolvedFilter() {
         let now = Date()
         let hosts = [
             host("api2.cursor.sh", now: now),
@@ -149,22 +150,23 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
             host("149.154.175.60", kind: .ip, direct: true, now: now),
         ]
         let summary = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
-        #expect(summary.visibleIPCount(selectedHost: nil, filter: .all) == 3)
-        #expect(summary.visibleIPCount(selectedHost: nil, filter: .direct) == 1)
-        #expect(summary.visibleIPCount(selectedHost: nil, filter: .resolved) == 2)
-        #expect(summary.visibleIPCount(selectedHost: "api2.cursor.sh", filter: .direct) == 0)
-        #expect(summary.visibleIPCount(selectedHost: "api2.cursor.sh", filter: .resolved) == 1)
+        #expect(summary.visibleIPCount(selectedHost: nil) == 3)
+        #expect(summary.visibleIPCount(selectedHost: "api2.cursor.sh") == 1)
         #expect(summary.ipCount == 3, "the total stays every IP")
+        let searched = AppDetailInventorySummary(hosts: hosts, search: "104.18", now: now, site: naiveSite)
+        #expect(searched.visibleIPCount(selectedHost: nil) == 2)
+        #expect(searched.ipCount == 3)
     }
 
-    @Test func headlineMentionsDirectIPsOnlyWhenThereAreSome() {
+    /// Like the design, the headline always counts the IPs reached by IP alone, even when there are none.
+    @Test func headlineAlwaysCountsIPsReachedByIPAlone() {
         let now = Date()
         let resolved = host("104.18.19.125", kind: .ip, hosts: ["api2.cursor.sh"], now: now)
         let none = AppDetailInventorySummary(hosts: [host("api2.cursor.sh", now: now), resolved], search: "", now: now, site: naiveSite)
-        #expect(!none.headline.contains("(") && !none.headline.contains("（"))
+        #expect(none.headline.hasSuffix(trf("%1$@ (%2$lld by IP only)", "AppDetail", "", 0)))
         let some = AppDetailInventorySummary(hosts: [resolved, host("149.154.175.60", kind: .ip, direct: true, now: now)],
                                              search: "", now: now, site: naiveSite)
-        #expect(some.headline.contains("(") || some.headline.contains("（"))
+        #expect(some.headline.hasSuffix(trf("%1$@ (%2$lld by IP only)", "AppDetail", "", 1)))
         #expect(AppDetailInventorySummary().groups.isEmpty)
     }
 
@@ -279,17 +281,6 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         // No Mac recorded: checked only when the page shows this Mac alone.
         #expect(AppDetailProcessTree.isRunning(node("node", depth: 1, pid: 42), thisDeviceID: thisMac, pageShowsOnlyThisMac: true, check: live))
         #expect(!AppDetailProcessTree.isRunning(node("node", depth: 1, pid: 42), thisDeviceID: thisMac, pageShowsOnlyThisMac: false, check: live))
-    }
-
-    @Test func filtersKeepingParents() {
-        let nodes = [
-            node("Cursor", depth: 0), node("Cursor Helper (Plugin)", depth: 1), node("node", depth: 2),
-            node("Cursor Helper (Renderer)", depth: 1), node("git", depth: 1),
-        ]
-        #expect(AppDetailProcessTree.filter(nodes, query: "").count == 5)
-        #expect(AppDetailProcessTree.filter(nodes, query: " NODE ").map(\.name) == ["Cursor", "Cursor Helper (Plugin)", "node"])
-        #expect(AppDetailProcessTree.filter(nodes, query: "renderer").map(\.name) == ["Cursor", "Cursor Helper (Renderer)"])
-        #expect(AppDetailProcessTree.filter(nodes, query: "zsh").isEmpty)
     }
 }
 
@@ -406,6 +397,22 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(session.page == nil && session.port == nil)
     }
 
+    /// The design's options row says a probe "Records until you press Stop", with no setting: every probe
+    /// keeps the engine's tail after its first load.
+    @Test func everyProbeKeepsTheTailAfterItsFirstLoad() async throws {
+        let scratch = TestDefaults()
+        defer { scratch.removeAll() }
+        let model = AppModel(preferences: Preferences(defaults: scratch.make()))
+        let actions = SlowStopProbeActions(model: model)
+        model.probeActions = actions
+        let session = ProbeWebSession()
+        session.urlDraft = "example.com"
+
+        await #expect(throws: CancellationError.self) { try await session.start(model: model) }
+        #expect(actions.tails == [true])
+        #expect(!session.isBusy && session.page == nil)
+    }
+
     private static func waitUntil(_ condition: @MainActor () -> Bool) async throws {
         for _ in 0..<100 where !condition() {
             try await Task.sleep(for: .milliseconds(20))
@@ -420,6 +427,8 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
 private final class SlowStopProbeActions: ProbeActions {
     let model: AppModel
     private(set) var startCalls = 0
+    /// The `tail` of every start asked for.
+    private(set) var tails: [Bool] = []
     private(set) var stopCalls = 0
     private var release: CheckedContinuation<Void, Never>?
 
@@ -429,6 +438,7 @@ private final class SlowStopProbeActions: ProbeActions {
 
     func startProbe(url: String, mode: ProbeDeviceMode, tail: Bool) async throws -> UInt16 {
         startCalls += 1
+        tails.append(tail)
         throw CancellationError()
     }
 
@@ -448,8 +458,6 @@ private final class SlowStopProbeActions: ProbeActions {
         release?.resume()
         release = nil
     }
-
-    func deleteProbe(_ id: UUID) async {}
 }
 
 @Suite @MainActor struct InventoryGroupTests {
@@ -643,14 +651,15 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(EgressFormat.surgeMode("System proxy · something new") == "系统代理 · something new")
     }
 
-    /// The lookup card says where its facts come from, as the design does.
-    @Test func namesWhereTheLookupsFactsComeFrom() {
+    /// The IP info service is always on: the lookup card keeps the design's first sentence, names the service
+    /// and points at no setting.
+    @Test func namesTheIPInfoService() {
         Localizer.shared.preference = .english
-        #expect(EgressFormat.sourcesNote == "Country and ASN come from Surge's own GeoIP database. Type and reverse DNS come from the IP info service set in Settings.")
+        #expect(EgressFormat.sourcesNote == "Country and ASN come from Surge's own GeoIP database. Type comes from the IP info service, proxycheck.io, and reverse DNS from this Mac's resolver.")
         Localizer.shared.preference = .chinese
         defer { Localizer.shared.preference = .english }
         guard Localizer.shared.bundle != nil else { return }
-        #expect(EgressFormat.sourcesNote == "国家和 ASN 来自 Surge 自带的 GeoIP 数据库，类型和反向解析来自设置里配置的 IP 信息服务。")
+        #expect(EgressFormat.sourcesNote == "国家和 ASN 来自 Surge 自带的 GeoIP 数据库。类型来自 IP 信息服务 proxycheck.io，反向解析来自本机的解析器。")
     }
 
     @Test func translatesEveryReasonTheMonitorWrites() throws {

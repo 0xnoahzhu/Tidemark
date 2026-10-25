@@ -60,7 +60,6 @@ struct OfflineDatabase: TidemarkDatabase {
 
     func saveProbeSession(_ session: ProbeSession) async throws {}
     func probeSessions(limit: Int) async throws -> [ProbeSession] { [] }
-    func deleteProbeSession(_ id: UUID) async throws {}
 
     func hostInsight(_ host: String, language: String) async throws -> HostInsight? { nil }
     func saveHostInsight(_ insight: HostInsight) async throws {}
@@ -140,7 +139,6 @@ final class NoopProbeActions: ProbeActions {
     func startProbe(url: String, mode: ProbeDeviceMode, tail: Bool) async throws -> UInt16 { throw DatabaseError.notConfigured }
     func recordStep(label: String, url: String?) {}
     func stopProbe() async -> ProbeSession? { nil }
-    func deleteProbe(_ id: UUID) async {}
 }
 
 @MainActor

@@ -85,15 +85,6 @@ extension PostgresDatabase {
         }
     }
 
-    /// Deletes the session, its hosts, and the global-inventory sources it recorded (`probe:<id>`).
-    func deleteProbeSession(_ id: UUID) async throws {
-        let sourcePaths = ["probe:\(id.uuidString)", "probe:\(id.uuidString.lowercased())"]
-        try await withTransaction { connection in
-            try await connection.query("DELETE FROM host_sources WHERE source_path = ANY(\(sourcePaths))", logger: Self.logger)
-            try await connection.query("DELETE FROM probe_sessions WHERE id = \(id)", logger: Self.logger)
-        }
-    }
-
     private static func milliseconds(_ seconds: TimeInterval) -> Int32 {
         guard seconds.isFinite else { return 0 }
         return Int32(clamping: Int64((seconds * 1_000).rounded()))

@@ -214,7 +214,7 @@ other sites in amber. The proxy matches Surge records to the probe by the forwar
 address. The forwarder dials the interface Surge's HTTP listener is bound to. A probe needs this Mac's Surge,
 the only one Tidemark reads: a remote Surge would not see the forwarder's source ports.
 
-Stopping a probe waits for the rest of its tail (by default a probe records until at least 6 s after its first
+Stopping a probe waits for the rest of its tail (a probe records until at least 6 s after its first
 page load, so a Stop pressed earlier still catches the page's late requests), lets the last Surge records
 arrive for a second, then saves the session. Every caller awaits the stop in progress, so Stop followed by
 Quit still saves before Tidemark exits; quitting skips the tail and the grace and bounds the two writes. The

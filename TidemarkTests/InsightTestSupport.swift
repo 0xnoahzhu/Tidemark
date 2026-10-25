@@ -90,7 +90,6 @@ struct InsightTestDatabase: TidemarkDatabase {
 
     func saveProbeSession(_ session: ProbeSession) async throws {}
     func probeSessions(limit: Int) async throws -> [ProbeSession] { [] }
-    func deleteProbeSession(_ id: UUID) async throws {}
 
     func hostInsight(_ host: String, language: String) async throws -> HostInsight? {
         try await store.lookup(host, language: language)

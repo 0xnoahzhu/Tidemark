@@ -181,16 +181,6 @@
         }
       }
     },
-    "Delete" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "删除"
-          }
-        }
-      }
-    },
     "Desktop" : {
       "localizations" : {
         "zh-Hans" : {
@@ -301,16 +291,6 @@
         }
       }
     },
-    "No page" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有页面"
-          }
-        }
-      }
-    },
     "OK" : {
       "localizations" : {
         "zh-Hans" : {
@@ -381,16 +361,6 @@
         }
       }
     },
-    "Probe Again" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "再次探测"
-          }
-        }
-      }
-    },
     "Probes you run are kept here." : {
       "localizations" : {
         "zh-Hans" : {
@@ -447,26 +417,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "同站点"
-          }
-        }
-      }
-    },
-    "Send Global Privacy Control" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "发送全局隐私控制（GPC）"
-          }
-        }
-      }
-    },
-    "Send Global Privacy Control: tells sites not to sell or share your data (the Sec-GPC header), like Safari's privacy setting. Applies from the next page load." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "发送全局隐私控制（GPC）：告诉网站不要出售或共享你的数据（Sec-GPC 请求头），和 Safari 的隐私设置一样。从下一次页面加载开始生效。"
           }
         }
       }

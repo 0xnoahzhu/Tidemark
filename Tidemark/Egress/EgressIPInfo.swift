@@ -31,7 +31,7 @@ enum EgressIPInfo {
         return components?.url
     }
 
-    /// Queries the service (5 s timeout, best effort). Callers check the preference and `isPublic(_:)` first.
+    /// Queries the service (5 s timeout, best effort). Callers check `isPublic(_:)` first.
     static func service(_ ip: String, session: URLSession = .shared) async -> ServiceInfo? {
         guard isPublic(ip), let url = serviceURL(for: ip) else { return nil }
         var request = URLRequest(url: url)

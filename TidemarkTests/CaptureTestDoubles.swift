@@ -499,7 +499,6 @@ actor CaptureFakeDatabase: TidemarkDatabase {
         probeSessionsSaved.append(session)
     }
     func probeSessions(limit: Int) async throws -> [ProbeSession] { probeSessionsSaved }
-    func deleteProbeSession(_ id: UUID) async throws { probeSessionsSaved.removeAll { $0.id == id } }
 
     func hostInsight(_ host: String, language: String) async throws -> HostInsight? { nil }
     func saveHostInsight(_ insight: HostInsight) async throws {}

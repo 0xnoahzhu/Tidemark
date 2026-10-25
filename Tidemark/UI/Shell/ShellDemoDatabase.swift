@@ -127,7 +127,6 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func removeMute(_ pattern: String) async throws { try await base.removeMute(pattern) }
     func saveProbeSession(_ session: ProbeSession) async throws { try await base.saveProbeSession(session) }
     func probeSessions(limit: Int) async throws -> [ProbeSession] { try await base.probeSessions(limit: limit) }
-    func deleteProbeSession(_ id: UUID) async throws { try await base.deleteProbeSession(id) }
     func hostInsight(_ host: String, language: String) async throws -> HostInsight? { try await base.hostInsight(host, language: language) }
     func saveHostInsight(_ insight: HostInsight) async throws { try await base.saveHostInsight(insight) }
     func saveEgressSamples(_ samples: [EgressSample], deviceID: DeviceID) async throws {

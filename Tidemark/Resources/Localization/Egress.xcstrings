@@ -101,12 +101,12 @@
         }
       }
     },
-    "Country and ASN come from Surge's own GeoIP database. Type and reverse DNS come from the IP info service set in Settings." : {
+    "Country and ASN come from Surge's own GeoIP database. Type comes from the IP info service, proxycheck.io, and reverse DNS from this Mac's resolver." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "国家和 ASN 来自 Surge 自带的 GeoIP 数据库，类型和反向解析来自设置里配置的 IP 信息服务。"
+            "value" : "国家和 ASN 来自 Surge 自带的 GeoIP 数据库。类型来自 IP 信息服务 proxycheck.io，反向解析来自本机的解析器。"
           }
         }
       }

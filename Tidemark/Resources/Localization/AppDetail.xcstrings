@@ -6,7 +6,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@（其中 %2$lld 个仅用 IP 访问）"
+            "value" : "%1$@（其中 %2$lld 个直连）"
           }
         }
       }
@@ -246,7 +246,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "纯 IP"
+            "value" : "直连 IP"
           }
         }
       }
@@ -267,16 +267,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "连接"
-          }
-        }
-      }
-    },
-    "Copy" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "拷贝"
           }
         }
       }
@@ -316,7 +306,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "仅 IP"
+            "value" : "直连"
           }
         }
       }
@@ -377,16 +367,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "过滤主机、IP、进程"
-          }
-        }
-      }
-    },
-    "Filter processes" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "筛选进程"
           }
         }
       }
@@ -521,16 +501,6 @@
         }
       }
     },
-    "MUTED" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已静音"
-          }
-        }
-      }
-    },
     "Monitor %@ again?" : {
       "localizations" : {
         "zh-Hans" : {
@@ -597,16 +567,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有域名，直接用 IP 连接"
-          }
-        }
-      }
-    },
-    "No processes match." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有匹配的进程。"
           }
         }
       }
@@ -986,7 +946,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "存为第 %@ 行"
+            "value" : "存为第 %@"
           }
         }
       }

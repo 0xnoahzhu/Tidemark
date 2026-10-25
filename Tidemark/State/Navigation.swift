@@ -50,7 +50,6 @@ final class Navigation {
     var appRequestsLive = true
     var appRequestSearch = ""
     var appInventorySearch = ""
-    var appDomainsBySite = true
     /// Host selected in the app's domain list; highlights the IPs it resolved to.
     var appSelectedHost: String?
     var appIPFilter: IPFilter = .all

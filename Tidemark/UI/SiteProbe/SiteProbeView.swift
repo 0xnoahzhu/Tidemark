@@ -44,12 +44,7 @@ struct SiteProbeView: View {
         .navigationSubtitle(tr("Open a URL in an isolated browser and record every host it touches", "SiteProbe"))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                ProbePrivacyToggle(preferences: model.preferences)
-            }
-            ToolbarSpacer(.fixed, placement: .primaryAction)
-            ToolbarItem(placement: .primaryAction) {
-                Button(tr("New Probe", "SiteProbe"), systemImage: "plus") { newProbe() }
-                    .labelStyle(.titleAndIcon)
+                Button(tr("New Probe", "SiteProbe")) { newProbe() }
                     .disabled(model.probe.isRunning || web.isBusy)
             }
         }
@@ -66,42 +61,39 @@ struct SiteProbeView: View {
     private var urlBar: some View {
         @Bindable var web = web
         let running = model.probe.isRunning
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                TextField(text: $web.urlDraft, prompt: Text(verbatim: "https://example.com")) {
-                    Text(tr("Address", "SiteProbe"))
-                }
-                .textFieldStyle(.bordered)
-                .textInputBorderShape(.capsule)
-                .font(Theme.mono(12.5))
-                .autocorrectionDisabled()
-                .focused($urlFocused)
-                .disabled(running || web.isBusy)
-                .onSubmit { if !running, !web.isBusy { start() } }
-
-                if web.isStopping {
-                    ProbeStoppingButton()
-                } else if running {
-                    Button(tr("Stop", "SiteProbe")) { stop() }
-                        .buttonStyle(.glassProminent)
-                        .tint(ProbeStoppingButton.tint)
-                        .keyboardShortcut(".", modifiers: .command)
-                } else {
-                    Button(tr("Start Probe", "SiteProbe")) { start() }
-                        .buttonStyle(.glassProminent)
-                        .tint(Theme.accent)
-                        .disabled(ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isBusy)
-                }
+        return HStack(spacing: 8) {
+            TextField(text: $web.urlDraft, prompt: Text(verbatim: "https://example.com")) {
+                Text(tr("Address", "SiteProbe"))
             }
-            .controlSize(.large)
+            .textFieldStyle(.bordered)
+            .textInputBorderShape(.capsule)
+            .font(Theme.mono(12.5))
+            .autocorrectionDisabled()
+            .focused($urlFocused)
+            .disabled(running || web.isBusy)
+            .onSubmit { if !running, !web.isBusy { start() } }
+
+            if web.isStopping {
+                ProbeStoppingButton()
+            } else if running {
+                Button(tr("Stop", "SiteProbe")) { stop() }
+                    .buttonStyle(.glassProminent)
+                    .tint(ProbeStoppingButton.tint)
+                    .keyboardShortcut(".", modifiers: .command)
+            } else {
+                Button(tr("Start Probe", "SiteProbe")) { start() }
+                    .buttonStyle(.glassProminent)
+                    .tint(Theme.accent)
+                    .disabled(ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isBusy)
+            }
         }
+        .controlSize(.large)
         .padding(.horizontal, 20)
         .padding(.top, 14)
         .padding(.bottom, 8)
     }
 
     /// The design's row: isolation, "Records until you press Stop", Desktop / iPhone, own window, proxy port.
-    /// (Global Privacy Control, a macOS 27 extra, is the toolbar's hand button.)
     private var optionsRow: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 18) {
@@ -144,9 +136,7 @@ struct SiteProbeView: View {
             Text(tr("Records until you press Stop", "SiteProbe")).foregroundStyle(Theme.ink2)
         }
         .fixedSize()
-        .help(model.preferences.probeTail
-              ? tr("A Stop pressed right after the page loaded keeps recording until 6 s after the load, so the page's late requests are still caught.", "SiteProbe")
-              : "")
+        .help(tr("A Stop pressed right after the page loaded keeps recording until 6 s after the load, so the page's late requests are still caught.", "SiteProbe"))
     }
 
     private var modePicker: some View {
@@ -375,16 +365,6 @@ private struct ProbeSessionsColumn: View {
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
-        .contextMenu {
-            Button(tr("Probe Again", "SiteProbe")) {
-                model.probe.selectedID = session.id
-                ProbeWebSession.shared.urlDraft = session.url
-            }
-            Divider()
-            Button(tr("Delete", "SiteProbe"), role: .destructive) {
-                Task { await model.probeActions.deleteProbe(session.id) }
-            }
-        }
     }
 }
 
@@ -548,24 +528,6 @@ struct ProbeStoppingButton: View {
         .tint(Self.tint)
         .disabled(true)
         .help(tr("Recording the page's last requests, then saving the session", "SiteProbe"))
-    }
-}
-
-/// Global Privacy Control (a macOS 27 WebKit option) for the probe browser. The design's options row has
-/// no room for it, so it is a toolbar toggle; the preferences are passed in because toolbar items can be
-/// re-hosted in the overflow menu.
-struct ProbePrivacyToggle: View {
-    var preferences: Preferences
-
-    var body: some View {
-        @Bindable var preferences = preferences
-        Toggle(isOn: $preferences.probeGlobalPrivacyControl) {
-            Label(tr("Send Global Privacy Control", "SiteProbe"),
-                  systemImage: preferences.probeGlobalPrivacyControl ? "hand.raised.fill" : "hand.raised")
-        }
-        .toggleStyle(.button)
-        .labelStyle(.iconOnly)
-        .help(tr("Send Global Privacy Control: tells sites not to sell or share your data (the Sec-GPC header), like Safari's privacy setting. Applies from the next page load.", "SiteProbe"))
     }
 }
 

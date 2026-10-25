@@ -6,8 +6,6 @@ struct AppDetailProcessTreeTab: View {
     @Environment(AppModel.self) private var model
     var app: MonitoredApp
     var absent: Bool
-    /// Text of the page's search field: shows matching processes with their parents.
-    var search: String = ""
 
     @State private var nodes: [ProcessNode] = []
     @State private var loaded = false
@@ -15,7 +13,6 @@ struct AppDetailProcessTreeTab: View {
     private static let columns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 200), .fixed(70), .fixed(80), .fixed(84)]
 
     var body: some View {
-        let shown = AppDetailProcessTree.filter(nodes, query: search)
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text(AnalyzeFormat.emphasized(
@@ -39,14 +36,14 @@ struct AppDetailProcessTreeTab: View {
                     .padding(.horizontal, 14)
                     .frame(height: 28)
 
-                    if shown.isEmpty {
-                        Text(emptyText)
+                    if nodes.isEmpty {
+                        Text(loaded ? tr("No processes recorded yet.", "AppDetail") : tr("Loading…", "AppDetail"))
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.ink3)
                             .frame(maxWidth: .infinity, minHeight: 60)
                             .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
                     }
-                    ForEach(shown) { node in
+                    ForEach(nodes) { node in
                         row(node)
                     }
                 }
@@ -61,12 +58,6 @@ struct AppDetailProcessTreeTab: View {
         .task(id: LoadKey(appID: app.id, scope: scope)) {
             await refresh()
         }
-    }
-
-    private var emptyText: String {
-        if !loaded { return tr("Loading…", "AppDetail") }
-        if nodes.isEmpty { return tr("No processes recorded yet.", "AppDetail") }
-        return tr("No processes match.", "AppDetail")
     }
 
     private func row(_ node: ProcessNode) -> some View {
@@ -146,7 +137,7 @@ struct AppDetailProcessTreeTab: View {
     }
 }
 
-/// Running state and filtering of process tree rows (pure, so it can be tested).
+/// Running state of process tree rows (pure, so it can be tested).
 enum AppDetailProcessTree {
     /// libproc can only confirm processes of this Mac: a node whose latest PID ran here is checked live
     /// (the stored PID and start time must still name a running process) in any scope; other Macs' nodes
@@ -156,27 +147,6 @@ enum AppDetailProcessTree {
         let onThisMac = node.deviceID.map { $0 == thisDeviceID } ?? pageShowsOnlyThisMac
         guard onThisMac, let start = node.startTime else { return node.isRunning }
         return check(node.pid, start)
-    }
-
-    /// Nodes whose name, path or PID contains `query`, with their ancestors so they stay in the tree.
-    /// `nodes` are in tree order (each parent before its children, `depth` counting from the app).
-    static func filter(_ nodes: [ProcessNode], query: String) -> [ProcessNode] {
-        let query = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return nodes }
-        var keep = Set<Int>()
-        var ancestors: [Int] = []
-        for (index, node) in nodes.enumerated() {
-            while let last = ancestors.last, nodes[last].depth >= node.depth { ancestors.removeLast() }
-            let matches = node.name.lowercased().contains(query)
-                || (node.path?.lowercased().contains(query) ?? false)
-                || String(node.pid).contains(query)
-            if matches {
-                keep.insert(index)
-                keep.formUnion(ancestors)
-            }
-            ancestors.append(index)
-        }
-        return nodes.indices.filter(keep.contains).map { nodes[$0] }
     }
 }
 

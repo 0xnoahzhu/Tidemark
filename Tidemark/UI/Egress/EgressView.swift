@@ -30,13 +30,8 @@ struct EgressView: View {
         .navigationSubtitle(tr("What the outside world sees, for each policy", "Egress"))
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
+                Button(egress.isChecking ? tr("Checking…", "Egress") : tr("Check All", "Egress")) {
                     Task { await model.egressActions.checkAll() }
-                } label: {
-                    Label(egress.isChecking ? tr("Checking…", "Egress") : tr("Check All", "Egress"),
-                          systemImage: "arrow.clockwise")
-                        .labelStyle(.titleAndIcon)
-                        .symbolEffect(.rotate, isActive: egress.isChecking)
                 }
                 .disabled(egress.isChecking)
                 .help(tr("Look up the egress IP through every policy again", "Egress"))
@@ -512,9 +507,10 @@ enum EgressFormat {
         return mode.components(separatedBy: " · ").map { tr($0, "SurgeCLI") }.joined(separator: " · ")
     }
 
-    /// Where the lookup's facts come from, in the design's words.
+    /// Where the lookup's facts come from: the design's first sentence, then the IP info service (always on,
+    /// with no setting to point at) and this Mac's resolver.
     static var sourcesNote: String {
-        tr("Country and ASN come from Surge's own GeoIP database. Type and reverse DNS come from the IP info service set in Settings.", "Egress")
+        tr("Country and ASN come from Surge's own GeoIP database. Type comes from the IP info service, proxycheck.io, and reverse DNS from this Mac's resolver.", "Egress")
     }
 
     /// What the lookup card can show for the current egress before (or without) a lookup.

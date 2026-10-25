@@ -39,7 +39,7 @@ struct IPLookupResult: Hashable, Sendable {
     var country: String?
     var asn: Int?
     var organization: String?
-    /// `Hosting · anycast`, `Residential`… from the configured IP info service.
+    /// `Hosting · anycast`, `Residential`… from the IP info service.
     var networkType: String?
     var reverseDNS: String?
 }

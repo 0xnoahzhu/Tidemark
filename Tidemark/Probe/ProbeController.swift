@@ -235,16 +235,6 @@ final class ProbeController: ProbeActions {
         }
     }
 
-    func deleteProbe(_ id: UUID) async {
-        model.probe.sessions.removeAll { $0.id == id }
-        if model.probe.selectedID == id { model.probe.selectedID = model.probe.sessions.first?.id }
-        do {
-            try await model.database.deleteProbeSession(id)
-        } catch {
-            Self.log.error("Deleting probe session failed: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
     // MARK: Helpers
 
     /// Where Surge's HTTP proxy listens. Fails with a clear reason instead of guessing `127.0.0.1:6152`.

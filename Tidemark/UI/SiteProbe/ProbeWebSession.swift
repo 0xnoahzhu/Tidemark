@@ -89,10 +89,13 @@ final class ProbeWebSession {
         self.model = model
         urlDraft = url.absoluteString
         loadFailure = nil
-        endedSnapshot = nil
 
+        // A probe records at least 6 s after its first page load (the engine's tail), so a Stop pressed
+        // right after the load still catches the page's late requests.
         let mode = model.preferences.probeMode
-        let port = try await model.probeActions.startProbe(url: url.absoluteString, mode: mode, tail: model.preferences.probeTail)
+        let port = try await model.probeActions.startProbe(url: url.absoluteString, mode: mode, tail: true)
+        // Only a probe the engine started replaces the last session's picture: a refused start keeps it.
+        endedSnapshot = nil
         guard port != 0, let endpointPort = NWEndpoint.Port(rawValue: port) else {
             await model.probeActions.stopProbe()
             throw ProbeWebError(errorDescription: tr("The probe's proxy did not open a port.", "SiteProbe"))
@@ -261,13 +264,12 @@ final class ProbeWebSession {
         return page
     }
 
-    /// Per-navigation preferences: content mode for the profile, Global Privacy Control (macOS 27, from
-    /// Preferences), and maximum compatibility so the page behaves as it would in Safari.
+    /// Per-navigation preferences: content mode for the profile, and maximum compatibility so the page
+    /// behaves as it would in Safari.
     func navigationPreferences(base: WebPage.NavigationPreferences = WebPage.NavigationPreferences()) -> WebPage.NavigationPreferences {
         var preferences = base
         preferences.preferredContentMode = mode == .iphone ? .mobile : .desktop
         preferences.securityRestrictionMode = .maximizeCompatibility
-        preferences.isGlobalPrivacyControlEnabled = model?.preferences.probeGlobalPrivacyControl ?? false
         return preferences
     }
 

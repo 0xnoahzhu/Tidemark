@@ -103,7 +103,7 @@ struct ProbeBrowserWindow: View {
         if let url = web.page?.url {
             return url.absoluteString.replacingOccurrences(of: "https://", with: "")
         }
-        return web.urlDraft.isEmpty ? tr("No page", "SiteProbe") : web.urlDraft
+        return web.urlDraft
     }
 
     // MARK: Caption

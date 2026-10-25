@@ -938,9 +938,6 @@ struct DatabaseLiveTests {
             let miniOnly = try await db.inventory(kind: nil, search: "", scope: .device(mini.id))
             #expect(miniOnly.map(\.value) == ["github.com"])
             #expect(miniOnly.first?.sources.map(\.title) == ["git"])
-
-            try await db.deleteProbeSession(probe.id)
-            #expect(try await db.inventory(kind: .domain, search: "", scope: .all).first?.sources.count == 2)
         }
     }
 
@@ -1120,9 +1117,6 @@ struct DatabaseLiveTests {
             let ended = (try #require(stored.endedAt), try #require(session.endedAt))
             #expect(Fixture.close(ended.0, ended.1))
             #expect(try await db.probeSessions(limit: 1).count == 1)
-
-            try await db.deleteProbeSession(session.id)
-            #expect(try await db.probeSessions(limit: 10).map(\.id) == [older.id])
         }
     }
 
