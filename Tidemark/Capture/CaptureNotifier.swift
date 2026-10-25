@@ -34,8 +34,8 @@ enum CaptureAlertText {
     }
 }
 
-/// At most one notification per app per burst window: later alerts of the same app replace the pending
-/// notification with an aggregated one.
+/// At most one notification per app and Mac per burst window: later alerts of the same app from the same Mac
+/// replace the pending notification with an aggregated one (which names that Mac once, like its first alert).
 struct CaptureBurstGrouper {
     enum Decision: Equatable {
         /// Post a new notification.
@@ -50,8 +50,13 @@ struct CaptureBurstGrouper {
         var alerts: [AlertItem]
     }
 
+    private struct Source: Hashable {
+        var app: AppID
+        var device: DeviceID
+    }
+
     let window: TimeInterval
-    private var bursts: [AppID: Burst] = [:]
+    private var bursts: [Source: Burst] = [:]
 
     init(window: TimeInterval = 30) {
         self.window = window
@@ -59,13 +64,14 @@ struct CaptureBurstGrouper {
 
     mutating func add(_ alert: AlertItem, now: Date = .now) -> Decision {
         bursts = bursts.filter { now.timeIntervalSince($0.value.startedAt) < window }
-        if var burst = bursts[alert.appID] {
+        let source = Source(app: alert.appID, device: alert.deviceID)
+        if var burst = bursts[source] {
             burst.alerts.append(alert)
-            bursts[alert.appID] = burst
+            bursts[source] = burst
             return .aggregate(identifier: burst.identifier, first: burst.alerts[0], extra: Array(burst.alerts.dropFirst()))
         }
         let identifier = "alert-\(alert.appID.uuidString)-\(alert.id)-\(Int(now.timeIntervalSince1970 * 1000))"
-        bursts[alert.appID] = Burst(identifier: identifier, startedAt: now, alerts: [alert])
+        bursts[source] = Burst(identifier: identifier, startedAt: now, alerts: [alert])
         return .post(identifier: identifier)
     }
 }

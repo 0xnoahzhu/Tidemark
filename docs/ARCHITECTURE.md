@@ -123,9 +123,9 @@ session):
    are still recorded. Entries stay marked NEW for 24 hours.
 4. Post a macOS notification (UserNotifications), always: there are no notification settings. It reads like
    the design's banner: "Tidemark", then "Raycast reached a new site" and "notion.com · first host
-   api.notion.com · via node". Bursts are grouped: one notification per app per 30 s. Alerts written by
-   *other* Macs are polled and posted on this Mac too, led by that Mac's name, unless their host is muted,
-   their app is archived or its monitoring is paused here.
+   api.notion.com · via node". Bursts are grouped: one notification per app and Mac per 30 s. Alerts
+   written by *other* Macs are polled and posted on this Mac too, led by that Mac's name, unless their host
+   is muted, their app is archived or its monitoring is paused here.
 
 ## Database
 

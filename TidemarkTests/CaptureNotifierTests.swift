@@ -36,6 +36,13 @@ struct CaptureNotifierTests {
         #expect(head.id == 1)
         #expect(extra.map(\.id) == [3])
 
+        var elsewhere = alert(5, app: cursor, scope: .host, value: "d.com")
+        elsewhere.deviceID = UUID()
+        guard case .post = grouper.add(elsewhere, now: t0.addingTimeInterval(12)) else {
+            Issue.record("another Mac's alert posts on its own, naming that Mac")
+            return
+        }
+
         let later = grouper.add(alert(4, app: cursor, scope: .host, value: "c.com"), now: t0.addingTimeInterval(31))
         guard case .post(let next) = later else {
             Issue.record("a new window posts again")
