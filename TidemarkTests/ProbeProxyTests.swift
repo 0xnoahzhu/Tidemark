@@ -353,6 +353,36 @@ struct ProbeControllerTests {
         #expect(model.probe.running == nil)
     }
 
+    /// A listener that cannot be read is explained briefly in the UI language, with Surge's own message.
+    @Test func explainsAnUnreadableHTTPProxyListener() async {
+        Localizer.shared.preference = .english
+        let surge = EgressFakeSurge()
+        surge.update { $0.listenerFailure = .commandFailed(command: "dump event", message: "The controller connection has been closed") }
+        let controller = ProbeController(model: makeModel(surge: surge), registry: ProbeRegistry())
+        do {
+            _ = try await controller.startProbe(url: "github.com", mode: .desktop, tail: false)
+            Issue.record("a probe started without Surge's HTTP proxy port")
+        } catch let error as ProbeStartError {
+            #expect(error.reason == .httpProxyUnknown)
+            #expect(error.message == "Couldn't find Surge's HTTP proxy port: surge-cli failed: The controller connection has been closed")
+        } catch {
+            Issue.record("unexpected \(error)")
+        }
+
+        #expect(ProbeController.listenerFailure(CaptureTimeoutError(seconds: 8)) == "Surge did not answer in time")
+        #expect(ProbeController.listenerFailure(SurgeError.timedOut(command: "dump event")) == "Surge did not answer in time")
+        #expect(ProbeController.listenerFailure(SurgeError.cliNotFound(path: "/x/surge-cli")) == "surge-cli was not found")
+        #expect(ProbeController.listenerFailure(SurgeError.decoding(command: "dump event", message: "bad JSON")) == "Surge's answer could not be read")
+        #expect(ProbeController.listenerFailure(URLError(.badServerResponse)) == "An unexpected error occurred")
+
+        Localizer.shared.preference = .chinese
+        defer { Localizer.shared.preference = .english }
+        guard Localizer.shared.bundle != nil else { return }
+        #expect(ProbeController.listenerFailure(SurgeError.commandFailed(command: "dump event", message: "Denied")) == "surge-cli 失败：Denied")
+        #expect(ProbeController.listenerFailure(SurgeError.timedOut(command: "dump event")) == "Surge 未及时响应")
+        #expect(ProbeController.listenerFailure(SurgeError.cliNotFound(path: "/x/surge-cli")) == "找不到 surge-cli")
+    }
+
     @Test func forwardsToTheListenerSurgeReports() async throws {
         let upstream = ProbeFakeUpstream()
         let upstreamPort = try await upstream.start()

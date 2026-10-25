@@ -269,12 +269,22 @@ final class ProbeController: ProbeActions {
                 message: tr("Surge's HTTP proxy is off. Turn on its HTTP proxy (http-listen) to run a probe.", Self.table)
             )
         } catch {
-            let detail = switch error {
-            case is CaptureTimeoutError: tr("Surge did not answer in time", Self.table)
-            case is SurgeError: CaptureEngine.message(for: error)
-            default: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            }
-            throw ProbeStartError(reason: .httpProxyUnknown, message: trf("Couldn't find Surge's HTTP proxy port: %@", Self.table, detail))
+            let raw = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            Self.log.error("Reading Surge's HTTP proxy listener failed: \(raw, privacy: .public)")
+            throw ProbeStartError(reason: .httpProxyUnknown,
+                                  message: trf("Couldn't find Surge's HTTP proxy port: %@", Self.table, Self.listenerFailure(error)))
+        }
+    }
+
+    /// Why Surge's HTTP proxy listener could not be read, short and in the UI language. Surge's own message
+    /// stays as Surge wrote it; the full English description goes to the log.
+    static func listenerFailure(_ error: any Error) -> String {
+        switch error {
+        case is CaptureTimeoutError, SurgeError.timedOut: tr("Surge did not answer in time", table)
+        case SurgeError.cliNotFound: tr("surge-cli was not found", table)
+        case SurgeError.commandFailed(_, let message): trf("surge-cli failed: %@", table, message)
+        case SurgeError.decoding: tr("Surge's answer could not be read", table)
+        default: tr("An unexpected error occurred", table)
         }
     }
 

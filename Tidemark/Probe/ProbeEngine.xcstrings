@@ -1,6 +1,11 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "An unexpected error occurred" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "发生了意外错误" } }
+      }
+    },
     "Couldn't find Surge's HTTP proxy port: %@" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "找不到 Surge 的 HTTP 代理端口：%@" } }
@@ -16,9 +21,24 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surge 未及时响应" } }
       }
     },
+    "Surge's answer could not be read" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法读取 Surge 的回答" } }
+      }
+    },
     "Surge's HTTP proxy is off. Turn on its HTTP proxy (http-listen) to run a probe." : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surge 的 HTTP 代理未开启。开启 HTTP 代理（http-listen）后才能探测。" } }
+      }
+    },
+    "surge-cli failed: %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "surge-cli 失败：%@" } }
+      }
+    },
+    "surge-cli was not found" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "找不到 surge-cli" } }
       }
     }
   },

@@ -19,6 +19,8 @@ final class EgressFakeSurge: SurgeClientDetails {
                                                       router: "192.168.1.1", dnsServers: ["223.5.5.5"], surgeMode: nil)
         /// nil: Surge's HTTP proxy is off.
         var listener: SurgeHTTPListener? = SurgeHTTPListener(interface: "0.0.0.0", port: 6152)
+        /// How reading the listener fails (before `listener` is looked at).
+        var listenerFailure: SurgeError?
         /// Policies (targets) through which the IPv6 probe succeeds.
         var ipv6Targets: Set<String> = []
         /// How the IPv6 probe fails through the other policies.
@@ -86,7 +88,9 @@ final class EgressFakeSurge: SurgeClientDetails {
     }
     func httpProxyPort() async throws -> Int { try await httpProxyListener().port }
     func httpProxyListener() async throws -> SurgeHTTPListener {
-        guard let listener = snapshot.listener else { throw SurgeHTTPProxyOff() }
+        let state = snapshot
+        if let failure = state.listenerFailure { throw failure }
+        guard let listener = state.listener else { throw SurgeHTTPProxyOff() }
         return listener
     }
     func finalRulePolicy() async throws -> String? { snapshot.finalPolicy }
