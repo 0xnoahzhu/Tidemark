@@ -28,10 +28,11 @@ final class Preferences {
 
     // MARK: Surge
     var surgeCLIPath: String { didSet { set(surgeCLIPath, "surge.cliPath") } }
-    /// `host:port` of a remote Surge controller, empty for the local one.
-    var surgeRemote: String { didSet { set(surgeRemote, "surge.remote") } }
+    /// `host:port` of a remote Surge controller, empty for this Mac's Surge. Settings offer no remote Surge, so
+    /// nothing in the app sets it (a stored `surge.remote` is ignored); the engine keeps the code path.
+    var surgeRemote = ""
     /// Device name stored with requests from the remote Surge.
-    var surgeRemoteTag: String { didSet { set(surgeRemoteTag, "surge.remoteTag") } }
+    var surgeRemoteTag = ""
 
     // MARK: Database
     /// PostgreSQL URL without the password (the password is kept in the Keychain).
@@ -77,8 +78,6 @@ final class Preferences {
         }
         let cli = SurgeEndpoint.defaultCLIPaths.first { FileManager.default.isExecutableFile(atPath: $0) } ?? SurgeEndpoint.defaultCLIPaths[0]
         surgeCLIPath = defaults.string(forKey: "surge.cliPath") ?? cli
-        surgeRemote = defaults.string(forKey: "surge.remote") ?? ""
-        surgeRemoteTag = defaults.string(forKey: "surge.remoteTag") ?? ""
 
         databaseURL = defaults.string(forKey: "db.url") ?? "postgresql://localhost:5432/tidemark"
         batchRows = defaults.object(forKey: "db.batchRows") as? Int ?? 200

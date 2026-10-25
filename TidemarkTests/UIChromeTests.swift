@@ -171,15 +171,13 @@ struct UIChromeTests {
         return rep
     }
 
-    /// One status line, rebuilt in the current language, local or remote.
+    /// One status line, rebuilt in the current language.
     @Test func surgeStatusLine() {
         withLanguage(.english) {
-            #expect(SettingsSurgePane.connectedText(remote: false) == "Found · controller connected · streaming")
-            #expect(SettingsSurgePane.connectedText(remote: true) == "Remote · controller connected · streaming")
+            #expect(SettingsSurgePane.connectedText == "Found · controller connected · streaming")
         }
         withLanguage(.chinese) {
-            #expect(SettingsSurgePane.connectedText(remote: false) == "已找到 · 控制器已连接 · 正在订阅")
-            #expect(SettingsSurgePane.connectedText(remote: true) == "远程 · 控制器已连接 · 正在订阅")
+            #expect(SettingsSurgePane.connectedText == "已找到 · 控制器已连接 · 正在订阅")
         }
     }
 

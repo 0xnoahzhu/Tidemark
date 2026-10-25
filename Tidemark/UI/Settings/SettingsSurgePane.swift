@@ -3,16 +3,10 @@ import SwiftUI
 import System
 import UniformTypeIdentifiers
 
-/// Settings › Surge: the surge-cli executable, the event subscription and a remote Surge.
+/// Settings › Surge: the surge-cli executable and the event subscription.
 struct SettingsSurgePane: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
-
-    @State private var remoteDraft = ""
-    @State private var tagDraft = ""
-    @State private var passwordDraft = ""
-    @State private var hasStoredPassword = false
-    @State private var applied = false
 
     /// The command Tidemark keeps running, shown in the Subscription block.
     static let subscriptionCommand = "$ surge-cli --raw watch request request-update real-time-speed environment reload shutdown"
@@ -49,60 +43,22 @@ struct SettingsSurgePane: View {
             } header: {
                 Text(tr("Subscription", "Settings"))
             }
-
-            Section {
-                LabeledContent(tr("Host and port", "Settings")) {
-                    TextField(text: $remoteDraft, prompt: Text(tr("Optional, same as --remote host:port", "Settings"))) {
-                        Text(tr("Host and port", "Settings"))
-                    }
-                    .labelsHidden()
-                    .multilineTextAlignment(.trailing)
-                    .font(Theme.mono(12))
-                    .autocorrectionDisabled()
-                    .onSubmit(apply)
-                }
-                SecureField(text: $passwordDraft, prompt: Text(hasStoredPassword ? tr("Saved in the Keychain", "Settings") : tr("Controller password", "Settings"))) {
-                    Text(tr("Password", "Settings"))
-                }
-                .onSubmit(apply)
-                TextField(text: $tagDraft, prompt: Text(tr("Mac mini (Office)", "Settings"))) {
-                    Text(tr("Tag requests as", "Settings"))
-                    Text(tr("The device name stored with every request from the remote Surge", "Settings"))
-                }
-                .onSubmit(apply)
-                HStack {
-                    if applied {
-                        Label(tr("Reconnecting with the new settings", "Settings"), systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Theme.ink2)
-                            .transition(.opacity)
-                    }
-                    Spacer()
-                    Button(tr("Apply", "Settings"), action: apply)
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(!hasChanges)
-                }
-            } header: {
-                Text(tr("Remote Surge", "Settings"))
-            }
         }
         .formStyle(.grouped)
         .frame(width: SettingsLayout.width, height: 600)
-        .onAppear(perform: load)
     }
 
     // MARK: Status
 
-    /// One line, built from state at render time so it follows the language and the connected endpoint.
+    /// One line, built from state at render time so it follows the language.
     @ViewBuilder
     private var status: some View {
-        // A remote Surge is also reached through the local surge-cli (`--remote`).
         if let problem = SurgeCLIPathProblem(checking: model.preferences.surgeCLIPath) {
             SettingsStatusLine(tone: .failed, text: Self.message(for: problem))
         } else {
             switch model.live.surge {
             case .connected:
-                SettingsStatusLine(tone: .ok, text: Self.connectedText(remote: model.surge.endpoint.remote != nil))
+                SettingsStatusLine(tone: .ok, text: Self.connectedText)
             case .connecting:
                 SettingsStatusLine(tone: .pending, text: tr("Connecting…", "Settings"))
             case .failed(let error):
@@ -115,11 +71,9 @@ struct SettingsSurgePane: View {
         }
     }
 
-    /// `Found · controller connected · streaming`, or the remote variant.
-    static func connectedText(remote: Bool) -> String {
-        remote
-            ? tr("Remote · controller connected · streaming", "Settings")
-            : tr("Found · controller connected · streaming", "Settings")
+    /// `Found · controller connected · streaming`
+    static var connectedText: String {
+        tr("Found · controller connected · streaming", "Settings")
     }
 
     /// Why surge-cli cannot run from the chosen path, in the app's language.
@@ -131,39 +85,6 @@ struct SettingsSurgePane: View {
     }
 
     // MARK: Actions
-
-    private var hasChanges: Bool {
-        remoteDraft.trimmingCharacters(in: .whitespaces) != model.preferences.surgeRemote
-            || tagDraft.trimmingCharacters(in: .whitespaces) != model.preferences.surgeRemoteTag
-            || !passwordDraft.isEmpty
-    }
-
-    private func load() {
-        remoteDraft = model.preferences.surgeRemote
-        tagDraft = model.preferences.surgeRemoteTag
-        hasStoredPassword = Keychain.read(account: Keychain.surgeRemoteAccount)?.isEmpty == false
-    }
-
-    /// Saves the remote settings (the password to the Keychain) and only then reconnects, so the engine
-    /// rebuilds its Surge client from what was just saved.
-    private func apply() {
-        guard hasChanges else { return }
-        model.preferences.surgeRemote = remoteDraft.trimmingCharacters(in: .whitespaces)
-        model.preferences.surgeRemoteTag = tagDraft.trimmingCharacters(in: .whitespaces)
-        if !passwordDraft.isEmpty {
-            Keychain.write(passwordDraft, account: Keychain.surgeRemoteAccount)
-            passwordDraft = ""
-            hasStoredPassword = true
-        }
-        remoteDraft = model.preferences.surgeRemote
-        tagDraft = model.preferences.surgeRemoteTag
-        model.capture.reconnect()
-        withAnimation { applied = true }
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(3))
-            withAnimation { applied = false }
-        }
-    }
 
     private func chooseCLI() {
         let panel = NSOpenPanel()

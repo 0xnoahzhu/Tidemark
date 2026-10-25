@@ -91,16 +91,6 @@
         }
       }
     },
-    "Apply" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "应用"
-          }
-        }
-      }
-    },
     "Buffer up to %@ rows on disk and replay them on reconnect" : {
       "localizations" : {
         "zh-Hans" : {
@@ -177,16 +167,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "连接中…"
-          }
-        }
-      }
-    },
-    "Controller password" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "控制器密码"
           }
         }
       }
@@ -281,16 +261,6 @@
         }
       }
     },
-    "Host and port" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "主机和端口"
-          }
-        }
-      }
-    },
     "IP info service" : {
       "localizations" : {
         "zh-Hans" : {
@@ -357,16 +327,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Liquid Glass"
-          }
-        }
-      }
-    },
-    "Mac mini (Office)" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mac mini（办公室）"
           }
         }
       }
@@ -501,16 +461,6 @@
         }
       }
     },
-    "Optional, same as --remote host:port" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "可选，等同于 --remote host:port"
-          }
-        }
-      }
-    },
     "Password" : {
       "localizations" : {
         "zh-Hans" : {
@@ -531,42 +481,12 @@
         }
       }
     },
-    "Reconnecting with the new settings" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在使用新设置重新连接"
-          }
-        }
-      }
-    },
     "Recording is paused" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "记录已暂停"
-          }
-        }
-      }
-    },
-    "Remote Surge" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "远程 Surge"
-          }
-        }
-      }
-    },
-    "Remote · controller connected · streaming" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "远程 · 控制器已连接 · 正在订阅"
           }
         }
       }
@@ -631,32 +551,12 @@
         }
       }
     },
-    "Tag requests as" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "数据来源记为"
-          }
-        }
-      }
-    },
     "Test Connection" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "测试连接"
-          }
-        }
-      }
-    },
-    "The device name stored with every request from the remote Surge" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "远程 Surge 的每条请求都会带上这个设备名"
           }
         }
       }
