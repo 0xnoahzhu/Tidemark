@@ -21,8 +21,11 @@ struct AppDetailRequestsTab: View {
     /// Bumped once fresh rows have aged out, so their tint fades even when nothing new arrives.
     @State private var freshTick = 0
 
+    /// Policy grows like the global table's (up to 200 pt), so a chip such as `AI › AT&T-RackNerd-Hysteria2` is
+    /// whole at the default window width and only shortens when the window is narrow.
     static let columns: [AnalyzeColumnsLayout.Column] = [
-        .fixed(104), .flexible(weight: 1, min: 120), .flexible(weight: 1.5, min: 150), .fixed(118), .fixed(104), .fixed(62),
+        .fixed(104), .flexible(weight: 1, min: 120), .flexible(weight: 1.5, min: 150), .fixed(118),
+        .flexible(weight: 1, min: 104, max: 200), .fixed(62),
     ]
 
     var body: some View {
@@ -258,7 +261,7 @@ private struct AppDetailRequestRow: View {
                 .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
 
-            AnalyzePolicyChip(policyPath: record.policyPath, maxWidth: 104)
+            PolicyChip(policyPath: record.policyPath, maxWidth: .infinity)
 
             sizeLabel.frame(maxWidth: .infinity, alignment: .trailing)
         }
