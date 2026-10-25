@@ -272,12 +272,15 @@ struct HostSourceTouch: Hashable, Sendable {
 }
 
 /// Database failures, classified by whether retrying the same work can succeed.
+///
+/// `errorDescription` is English, for the log. The UI describes these errors in its own language
+/// (`CaptureEngine.message(for:)`), which is why the reasons Tidemark recognizes are typed.
 enum DatabaseError: Error, Sendable, Equatable, LocalizedError {
     case notConfigured
     case invalidURL(String)
     /// The server cannot do the work right now (connection lost, timeout, shutting down, out of
     /// connections or disk, read-only, serialization failure…). Retry later; keep the data.
-    case unreachable(String)
+    case unreachable(UnreachableReason)
     /// The statement itself was rejected (bad data, constraint or foreign-key violation). Retrying the same
     /// rows fails again.
     case query(String)
@@ -286,9 +289,93 @@ enum DatabaseError: Error, Sendable, Equatable, LocalizedError {
         switch self {
         case .notConfigured: "No PostgreSQL connection is configured."
         case .invalidURL(let url): "Invalid PostgreSQL URL: \(url)"
-        case .unreachable(let message): "PostgreSQL is unreachable: \(message)"
+        case .unreachable(let reason): "PostgreSQL is unreachable: \(reason)"
         case .query(let message): "PostgreSQL error: \(message)"
         }
+    }
+
+    /// Why the server could not be reached or could not do the work. The causes Tidemark recognizes are
+    /// typed; anything else keeps the text the server, the network or the driver reported (`.message`, which
+    /// a string literal also makes). `description` is the English text, without credentials.
+    enum UnreachableReason: Sendable, Equatable, CustomStringConvertible, ExpressibleByStringLiteral {
+        /// Text as it was reported (a server message, an OS error), shown as is.
+        case message(String)
+        /// A call before `connect()` started the connection pools.
+        case notConnected
+        /// The client was shut down; a new one has to be created.
+        case shutDown
+        /// The connection pool closed under the call.
+        case poolClosed
+        /// No pooled connection became free within the lease timeout.
+        case noConnection(target: String?, within: Duration)
+        /// The host name could not be resolved.
+        case cannotResolve(host: String, detail: String)
+        /// No connection could be opened, for `reason` when known.
+        indirect case cannotConnect(target: String?, reason: UnreachableReason?)
+        case connectTimedOut(target: String?)
+        case connectionFailed(target: String?, detail: String)
+        /// macOS answered "No route to host" for a local-network address: Local Network privacy may be
+        /// blocking Tidemark.
+        case localNetworkBlocked
+        case serverClosedConnection(target: String?)
+        case connectionClosed(target: String?)
+        case passwordRequired(target: String?)
+        case unsupportedAuthentication(target: String?)
+        case authenticationFailed(target: String?)
+        /// The server does not offer TLS, which the URL's `sslmode` requires.
+        case tlsNotAccepted(target: String?)
+        case tlsUnavailable(target: String?)
+        case tlsFailed(target: String?, detail: String)
+        /// Another Mac holds the migration lock.
+        case migrationInProgress
+        /// Another Mac holds the index lock.
+        case indexBuildInProgress
+        /// A newer Tidemark applied a migration (up to `schema`) this build (`supported`) cannot write after.
+        case schemaTooNew(schema: Int, supported: Int)
+
+        init(stringLiteral value: String) {
+            self = .message(value)
+        }
+
+        var description: String {
+            switch self {
+            case .message(let text): text
+            case .notConnected: "Not connected."
+            case .shutDown: "The database connection was shut down."
+            case .poolClosed: "The connection pool is closed."
+            case .noConnection(let target, let wait): "No connection to \(Self.name(target)) within \(DatabaseError.spoken(wait))."
+            case .cannotResolve(let host, let detail): "Could not resolve \(host): \(detail)"
+            case .cannotConnect(let target, let reason?): "Could not connect to \(Self.name(target)): \(reason)"
+            case .cannotConnect(let target, nil): "Could not connect to \(Self.name(target))."
+            case .connectTimedOut(let target): "Timed out connecting to \(Self.name(target))."
+            case .connectionFailed(let target, let detail): "Connection to \(Self.name(target)) failed (\(detail))."
+            case .localNetworkBlocked:
+                "No route to host. If the server is on your local network, allow Tidemark in System Settings › Privacy & Security › Local Network."
+            case .serverClosedConnection(let target): "\(Self.name(target)) closed the connection."
+            case .connectionClosed(let target): "The connection to \(Self.name(target)) was closed."
+            case .passwordRequired(let target): "\(Self.name(target)) requires a password."
+            case .unsupportedAuthentication(let target): "\(Self.name(target)) asked for an authentication method Tidemark does not support."
+            case .authenticationFailed(let target): "SCRAM authentication with \(Self.name(target)) failed."
+            case .tlsNotAccepted(let target): "\(Self.name(target)) does not accept TLS connections; use sslmode=disable or prefer."
+            case .tlsUnavailable(let target): "Could not start TLS with \(Self.name(target))."
+            case .tlsFailed(let target, let detail): "TLS error with \(Self.name(target)): \(detail)"
+            case .migrationInProgress: "Another Mac is upgrading the database; Tidemark will try again shortly."
+            case .indexBuildInProgress: "Another Mac is building the database's indexes; Tidemark will try again shortly."
+            case .schemaTooNew(let schema, let supported):
+                "The database was upgraded by a newer version of Tidemark (schema \(schema)); this version (schema \(supported)) cannot write to it. Update Tidemark on this Mac."
+            }
+        }
+
+        /// The server as `host:port/database`, or "the server" when unknown.
+        private static func name(_ target: String?) -> String { target ?? "the server" }
+    }
+
+    /// A duration for English messages: `50 ms`, `30 s`, `5 min`.
+    static func spoken(_ duration: Duration) -> String {
+        let (seconds, attoseconds) = duration.components
+        if seconds == 0 { return "\(attoseconds / 1_000_000_000_000_000) ms" }
+        if seconds >= 120, seconds.isMultiple(of: 60) { return "\(seconds / 60) min" }
+        return "\(seconds) s"
     }
 }
 

@@ -26,14 +26,84 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@——%2$@" } }
       }
     },
+    "%@ asked for an authentication method Tidemark does not support." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 要求的认证方式 Tidemark 不支持。" } }
+      }
+    },
+    "%@ closed the connection." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 关闭了连接。" } }
+      }
+    },
+    "%@ does not accept TLS connections; use sslmode=disable or prefer." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 不接受 TLS 连接；请改用 sslmode=disable 或 prefer。" } }
+      }
+    },
+    "%@ requires a password." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 需要密码。" } }
+      }
+    },
+    "%lld min" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 分钟" } }
+      }
+    },
+    "%lld ms" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 毫秒" } }
+      }
+    },
+    "%lld s" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 秒" } }
+      }
+    },
+    "Another Mac is building the database's indexes; Tidemark will try again shortly." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "另一台 Mac 正在为数据库建立索引，Tidemark 稍后会重试。" } }
+      }
+    },
+    "Another Mac is upgrading the database; Tidemark will try again shortly." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "另一台 Mac 正在升级数据库，Tidemark 稍后会重试。" } }
+      }
+    },
     "Connected · PostgreSQL %@ · %lld ms" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已连接 · PostgreSQL %@ · %lld ms" } }
       }
     },
+    "Connection to %1$@ failed (%2$@)." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接 %1$@ 失败（%2$@）。" } }
+      }
+    },
+    "Could not connect to %1$@: %2$@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法连接到 %1$@：%2$@" } }
+      }
+    },
+    "Could not connect to %@." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法连接到 %@。" } }
+      }
+    },
     "Could not read the output of surge-cli %1$@: %2$@" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法读取 surge-cli %1$@ 的输出：%2$@" } }
+      }
+    },
+    "Could not resolve %1$@: %2$@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法解析 %1$@：%2$@" } }
+      }
+    },
+    "Could not start TLS with %@." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法与 %@ 建立 TLS 连接。" } }
       }
     },
     "First host %@" : {
@@ -51,6 +121,11 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "静音此主机" } }
       }
     },
+    "No connection to %1$@ within %2$@." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%2$@内没有可用的 %1$@ 连接。" } }
+      }
+    },
     "No hostname" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有域名" } }
@@ -59,6 +134,16 @@
     "No PostgreSQL connection is configured." : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还没有设置 PostgreSQL 连接。" } }
+      }
+    },
+    "No route to host. If the server is on your local network, allow Tidemark in System Settings › Privacy & Security › Local Network." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有通往主机的路由。如果服务器在本地网络中，请在系统设置 › 隐私与安全性 › 本地网络中允许 Tidemark。" } }
+      }
+    },
+    "Not connected." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未连接。" } }
       }
     },
     "PostgreSQL did not answer in time" : {
@@ -79,6 +164,11 @@
     "PostgreSQL refused every write: %@" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PostgreSQL 拒绝了所有写入：%@" } }
+      }
+    },
+    "SCRAM authentication with %@ failed." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "与 %@ 的 SCRAM 认证失败。" } }
       }
     },
     "Surge is shutting down" : {
@@ -104,6 +194,41 @@
     "surge-cli was not found at %@." : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在 %@ 找不到 surge-cli。" } }
+      }
+    },
+    "The connection pool is closed." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接池已关闭。" } }
+      }
+    },
+    "The connection to %@ was closed." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "到 %@ 的连接已关闭。" } }
+      }
+    },
+    "The database connection was shut down." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "数据库连接已关闭。" } }
+      }
+    },
+    "The database was upgraded by a newer version of Tidemark (schema %1$lld); this version (schema %2$lld) cannot write to it. Update Tidemark on this Mac." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "数据库已被较新版本的 Tidemark 升级（schema %1$lld），此版本（schema %2$lld）无法写入。请在这台 Mac 上更新 Tidemark。" } }
+      }
+    },
+    "the server" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器" } }
+      }
+    },
+    "Timed out connecting to %@." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接 %@ 超时。" } }
+      }
+    },
+    "TLS error with %1$@: %2$@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "与 %1$@ 的 TLS 连接出错：%2$@" } }
       }
     },
     "Unknown app" : {

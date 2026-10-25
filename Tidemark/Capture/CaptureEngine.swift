@@ -1034,7 +1034,7 @@ final class CaptureEngine {
             switch error {
             case .notConfigured: tr("No PostgreSQL connection is configured.", "Capture")
             case .invalidURL(let url): trf("Invalid PostgreSQL URL: %@", "Capture", url)
-            case .unreachable(let reason): trf("PostgreSQL is unreachable: %@", "Capture", reason)
+            case .unreachable(let reason): trf("PostgreSQL is unreachable: %@", "Capture", message(for: reason))
             case .query(let reason): trf("PostgreSQL error: %@", "Capture", reason)
             }
         case let error as SurgeError:

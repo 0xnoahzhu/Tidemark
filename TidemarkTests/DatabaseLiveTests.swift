@@ -81,11 +81,11 @@ struct DatabaseLiveTests {
                 }
                 Issue.record("pg_sleep outlived its statement timeout")
             } catch let error as DatabaseError {
-                guard case .unreachable(let message) = error else {
+                guard case .unreachable(let reason) = error else {
                     Issue.record("Expected .unreachable, got \(error)")
                     return
                 }
-                #expect(message == "Query timed out: the server cancelled it after 50 ms (statement timeout).")
+                #expect(reason.description == "Query timed out: the server cancelled it after 50 ms (statement timeout).")
             }
         }
     }
@@ -101,11 +101,11 @@ struct DatabaseLiveTests {
                 }
                 Issue.record("pg_sleep outlived the call limit")
             } catch let error as DatabaseError {
-                guard case .unreachable(let message) = error else {
+                guard case .unreachable(let reason) = error else {
                     Issue.record("Expected .unreachable, got \(error)")
                     return
                 }
-                #expect(message.contains("No reply"), "\(message)")
+                #expect(reason.description.contains("No reply"), "\(reason)")
             }
             #expect(start.duration(to: clock.now) < .seconds(2))
 
@@ -1152,11 +1152,12 @@ struct DatabaseLiveTests {
                 try await db.migrate()
                 Issue.record("migrate() accepted a schema this build cannot write to")
             } catch let error as DatabaseError {
-                guard case .unreachable(let message) = error else {
+                guard case .unreachable(let reason) = error else {
                     Issue.record("Expected .unreachable, got \(error)")
                     return
                 }
-                #expect(message.contains("Update Tidemark"))
+                #expect(reason == .schemaTooNew(schema: breaking, supported: Schema.latestVersion))
+                #expect(reason.description.contains("Update Tidemark"))
             }
         }
     }

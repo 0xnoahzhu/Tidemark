@@ -111,9 +111,7 @@ extension PostgresDatabase {
         func checkWritable() throws {
             let blocking = applied.filter { $0.key > Schema.latestVersion }.compactMap(\.value).max()
             if let blocking, blocking > Schema.latestVersion {
-                throw DatabaseError.unreachable(
-                    "The database was upgraded by a newer version of Tidemark (schema \(latest)); this version (schema \(Schema.latestVersion)) cannot write to it. Update Tidemark on this Mac."
-                )
+                throw DatabaseError.unreachable(.schemaTooNew(schema: latest, supported: Schema.latestVersion))
             }
         }
     }
@@ -161,7 +159,7 @@ extension PostgresDatabase {
             let rows = try await connection.query("SELECT pg_try_advisory_lock(\(migrationLockKey)) AS locked", logger: logger).collect()
             if try rows.first.map({ try PostgresRowReader($0)("locked", as: Bool.self) }) == true { return }
             guard clock.now < deadline else {
-                throw DatabaseError.unreachable("Another Mac is upgrading the database; Tidemark will try again shortly.")
+                throw DatabaseError.unreachable(.migrationInProgress)
             }
             try await Task.sleep(for: .milliseconds(500))
         }
@@ -319,7 +317,7 @@ extension PostgresDatabase {
         let deadline = clock.now.advanced(by: wait)
         while try await indexPass(upTo: target, lockTimeout: "0") == .busy {
             guard clock.now < deadline else {
-                throw DatabaseError.unreachable("Another Mac is building the database's indexes; Tidemark will try again shortly.")
+                throw DatabaseError.unreachable(.indexBuildInProgress)
             }
             try await Task.sleep(for: .milliseconds(500))
         }

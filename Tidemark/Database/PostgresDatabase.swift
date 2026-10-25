@@ -134,14 +134,6 @@ final class PostgresDatabase: TidemarkDatabase {
         return "\(seconds * 1_000 + attoseconds / 1_000_000_000_000_000)ms"
     }
 
-    /// A duration for messages: `50 ms`, `30 s`, `5 min`.
-    static func spoken(_ duration: Duration) -> String {
-        let (seconds, attoseconds) = duration.components
-        if seconds == 0 { return "\(attoseconds / 1_000_000_000_000_000) ms" }
-        if seconds >= 120, seconds.isMultiple(of: 60) { return "\(seconds / 60) min" }
-        return "\(seconds) s"
-    }
-
     /// Connections per pool; together they stay at the 8 connections per Mac Tidemark always used.
     static let mainPoolSize = 6
     static let writerPoolSize = 2
@@ -206,8 +198,9 @@ final class PostgresDatabase: TidemarkDatabase {
             async let main: Void = selectOne(on: .main)
             async let writer: Void = selectOne(on: .writer)
             _ = try await (main, writer)
-        } catch let error as DatabaseError {
-            throw DatabaseError.unreachable(Self.reason(error))
+        } catch DatabaseError.query(let message) {
+            // `SELECT 1` refused: the server, not the data, is the problem.
+            throw DatabaseError.unreachable(.message(message))
         }
     }
 
@@ -266,7 +259,7 @@ final class PostgresDatabase: TidemarkDatabase {
             case .running:
                 break
             case .shutDown:
-                throw DatabaseError.unreachable("The database connection was shut down.")
+                throw DatabaseError.unreachable(.shutDown)
             }
         }
     }
@@ -282,7 +275,7 @@ final class PostgresDatabase: TidemarkDatabase {
     /// The pool's client, once `connect()` started the pools.
     private func runningClient(_ pool: Pool) throws -> PostgresClient {
         let setup = try setup.get()
-        guard isRunning else { throw DatabaseError.unreachable("Not connected.") }
+        guard isRunning else { throw DatabaseError.unreachable(.notConnected) }
         switch pool {
         case .main: return setup.main
         case .writer: return setup.writer
@@ -299,7 +292,7 @@ final class PostgresDatabase: TidemarkDatabase {
         defer { group.shutdownGracefully { _ in } }
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: limit)
-        var lastError: any Error = DatabaseError.unreachable("Timed out.")
+        var lastError: any Error = DatabaseError.unreachable(.connectTimedOut(target: setup.url.redacted))
         var attempt = 0
         while true {
             try Task.checkCancellation()
@@ -356,7 +349,7 @@ final class PostgresDatabase: TidemarkDatabase {
                 group.addTask(name: "PostgreSQL lease timeout") {
                     try await Task.sleep(for: timeout)
                     guard lease.expire() else { return .leased }
-                    throw DatabaseError.unreachable("No connection to \(endpoint?.redacted ?? "the server") within \(timeout.components.seconds) s.")
+                    throw DatabaseError.unreachable(.noConnection(target: endpoint?.redacted, within: timeout))
                 }
                 while let outcome = try await group.next() {
                     if case .finished(let value) = outcome {
@@ -399,7 +392,7 @@ final class PostgresDatabase: TidemarkDatabase {
         } catch {
             switch watchdog.reason {
             case .expired:
-                throw DatabaseError.unreachable("No reply from \(endpoint?.redacted ?? "the server") within \(spoken(limit)); the connection was closed.")
+                throw DatabaseError.unreachable(.message("No reply from \(endpoint?.redacted ?? "the server") within \(DatabaseError.spoken(limit)); the connection was closed."))
             case .cancelled:
                 throw CancellationError()
             case nil:
@@ -588,14 +581,14 @@ final class PostgresDatabase: TidemarkDatabase {
             case .server:
                 let state = error.serverInfo?[.sqlState] ?? ""
                 if state == "57014", error.serverInfo?[.message]?.contains("statement timeout") == true {
-                    return DatabaseError.unreachable(timedOutMessage(statementTimeout))
+                    return DatabaseError.unreachable(.message(timedOutMessage(statementTimeout)))
                 }
-                let message = describe(error, endpoint: endpoint)
-                return isTransient(sqlState: state) ? DatabaseError.unreachable(message) : DatabaseError.query(message)
+                let reason = describe(error, endpoint: endpoint)
+                return isTransient(sqlState: state) ? DatabaseError.unreachable(reason) : DatabaseError.query(reason.description)
             case .queryCancelled:
                 return CancellationError()
             case .tooManyParameters:
-                return DatabaseError.query(describe(error, endpoint: endpoint))
+                return DatabaseError.query(describe(error, endpoint: endpoint).description)
             default:
                 return DatabaseError.unreachable(describe(error, endpoint: endpoint))
             }
@@ -609,16 +602,16 @@ final class PostgresDatabase: TidemarkDatabase {
             // _ConnectionPoolModule.ConnectionPoolError (pool shut down, request cancelled) is internal.
             let typeName = String(describing: type(of: error))
             if typeName.contains("ConnectionPoolError") {
-                return Task.isCancelled ? CancellationError() : DatabaseError.unreachable("The connection pool is closed.")
+                return Task.isCancelled ? CancellationError() : DatabaseError.unreachable(.poolClosed)
             }
-            return DatabaseError.unreachable(String(describing: error))
+            return DatabaseError.unreachable(.message(String(describing: error)))
         }
     }
 
     /// The message of a statement the server cancelled at its statement timeout.
     static func timedOutMessage(_ statementTimeout: Duration?) -> String {
         guard let statementTimeout else { return "Query timed out: the server cancelled it at its statement timeout." }
-        return "Query timed out: the server cancelled it after \(spoken(statementTimeout)) (statement timeout)."
+        return "Query timed out: the server cancelled it after \(DatabaseError.spoken(statementTimeout)) (statement timeout)."
     }
 
     /// Whether a server error says nothing about the statement or its data, so the same work can succeed
@@ -648,47 +641,49 @@ final class PostgresDatabase: TidemarkDatabase {
         }
     }
 
-    /// A short, human-readable reason for a failure, without credentials.
-    static func describe(_ error: any Error, endpoint: PostgresConnectionURL?) -> String {
-        let target = endpoint?.redacted ?? "the server"
+    /// Why a connection or a call failed, without credentials. The causes Tidemark recognizes are typed, so
+    /// the UI can describe them in its own language; the server's own message and anything unknown stay as
+    /// reported.
+    static func describe(_ error: any Error, endpoint: PostgresConnectionURL?) -> DatabaseError.UnreachableReason {
+        let target = endpoint?.redacted
         switch error {
         case let error as DatabaseError:
-            return reason(error)
+            switch error {
+            case .unreachable(let reason): return reason
+            case .query(let message): return .message(message)
+            case .notConfigured, .invalidURL: return .message(error.errorDescription ?? "\(error)")
+            }
         case let error as PSQLError:
             if let message = error.serverInfo?[.message] {
-                if let detail = error.serverInfo?[.detail], !detail.isEmpty { return "\(message) (\(detail))" }
-                return message
+                if let detail = error.serverInfo?[.detail], !detail.isEmpty { return .message("\(message) (\(detail))") }
+                return .message(message)
             }
             switch error.code {
-            case .sslUnsupported: return "\(target) does not accept TLS connections; use sslmode=disable or prefer."
-            case .failedToAddSSLHandler: return "Could not start TLS with \(target)."
-            case .unsupportedAuthMechanism: return "\(target) asked for an authentication method Tidemark does not support."
-            case .authMechanismRequiresPassword: return "\(target) requires a password."
-            case .saslError: return "SCRAM authentication with \(target) failed."
-            case .serverClosedConnection, .uncleanShutdown: return "\(target) closed the connection."
-            case .clientClosedConnection, .poolClosed: return "The connection to \(target) was closed."
+            case .sslUnsupported: return .tlsNotAccepted(target: target)
+            case .failedToAddSSLHandler: return .tlsUnavailable(target: target)
+            case .unsupportedAuthMechanism: return .unsupportedAuthentication(target: target)
+            case .authMechanismRequiresPassword: return .passwordRequired(target: target)
+            case .saslError: return .authenticationFailed(target: target)
+            case .serverClosedConnection, .uncleanShutdown: return .serverClosedConnection(target: target)
+            case .clientClosedConnection, .poolClosed: return .connectionClosed(target: target)
             default:
                 if let underlying = error.underlying { return describe(underlying, endpoint: endpoint) }
-                return "PostgreSQL error (\(error.code))."
+                return .message("PostgreSQL error (\(error.code)).")
             }
         case let error as NIOConnectionError:
-            if let dns = error.dnsAError ?? error.dnsAAAAError { return "Could not resolve \(error.host): \(dns)" }
-            if let first = error.connectionErrors.first { return "Could not connect to \(target): \(describe(first.error, endpoint: endpoint))" }
-            return "Could not connect to \(target)."
+            if let dns = error.dnsAError ?? error.dnsAAAAError { return .cannotResolve(host: error.host, detail: "\(dns)") }
+            return .cannotConnect(target: target, reason: error.connectionErrors.first.map { describe($0.error, endpoint: endpoint) })
         case let error as IOError:
-            let reason = String(cString: strerror(error.errnoCode))
             // macOS answers EHOSTUNREACH when Local Network privacy blocks the app from a LAN address.
-            if error.errnoCode == EHOSTUNREACH, let host = endpoint?.host, isLocalNetworkHost(host) {
-                return "\(reason). If the server is on your local network, allow Tidemark in System Settings › Privacy & Security › Local Network."
-            }
-            return reason
+            if error.errnoCode == EHOSTUNREACH, let host = endpoint?.host, isLocalNetworkHost(host) { return .localNetworkBlocked }
+            return .message(String(cString: strerror(error.errnoCode)))
         case let error as ChannelError:
-            if case .connectTimeout = error { return "Timed out connecting to \(target)." }
-            return "Connection to \(target) failed (\(error))."
+            if case .connectTimeout = error { return .connectTimedOut(target: target) }
+            return .connectionFailed(target: target, detail: "\(error)")
         case let error as NIOSSLError:
-            return "TLS error with \(target): \(error)"
+            return .tlsFailed(target: target, detail: "\(error)")
         default:
-            return String(describing: error)
+            return .message(String(describing: error))
         }
     }
 
@@ -706,14 +701,6 @@ final class PostgresDatabase: TidemarkDatabase {
         }
         guard lower.contains(":") else { return false }
         return lower.hasPrefix("fe80:") || lower.hasPrefix("fc") || lower.hasPrefix("fd")
-    }
-
-    /// The message of a `DatabaseError` without its "PostgreSQL is unreachable:" style prefix.
-    static func reason(_ error: DatabaseError) -> String {
-        switch error {
-        case .notConfigured, .invalidURL: error.errorDescription ?? "\(error)"
-        case .unreachable(let message), .query(let message): message
-        }
     }
 
     /// Errors that retrying cannot fix: wrong credentials, unknown database, TLS mismatch.

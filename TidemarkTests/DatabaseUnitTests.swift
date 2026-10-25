@@ -105,6 +105,27 @@ struct DatabaseUnitTests {
         }
     }
 
+    /// Causes Tidemark recognizes are typed so the UI can translate them; the log keeps the English wording.
+    @Test func describesConnectionFailuresWithTypedReasons() throws {
+        let lan = try PostgresConnectionURL("postgres://tide@192.168.1.20:5432/tidemark")
+        let blocked = IOError(errnoCode: EHOSTUNREACH, reason: "connect")
+        #expect(PostgresDatabase.describe(blocked, endpoint: lan) == .localNetworkBlocked)
+        #expect(PostgresDatabase.describe(blocked, endpoint: nil) == .message("No route to host"), "only a LAN address hints at Local Network privacy")
+        #expect(PostgresDatabase.map(ChannelError.connectTimeout(.seconds(5)), endpoint: lan) as? DatabaseError
+                == .unreachable(.connectTimedOut(target: "192.168.1.20:5432/tidemark")))
+        #expect(PostgresDatabase.describe(ChannelError.connectTimeout(.seconds(5)), endpoint: nil) == .connectTimedOut(target: nil))
+        // A reason that is already typed passes through.
+        #expect(PostgresDatabase.describe(DatabaseError.unreachable(.migrationInProgress), endpoint: lan) == .migrationInProgress)
+
+        #expect(DatabaseError.unreachable(.passwordRequired(target: "db.local:5432/t")).errorDescription
+                == "PostgreSQL is unreachable: db.local:5432/t requires a password.")
+        #expect(DatabaseError.unreachable(.cannotConnect(target: nil, reason: "Connection refused")).errorDescription
+                == "PostgreSQL is unreachable: Could not connect to the server: Connection refused")
+        #expect(DatabaseError.unreachable(.noConnection(target: "db.local:5432/t", within: .seconds(10))).errorDescription
+                == "PostgreSQL is unreachable: No connection to db.local:5432/t within 10 s.")
+        #expect(DatabaseError.unreachable(.schemaTooNew(schema: 5, supported: 3)).errorDescription?.hasSuffix("Update Tidemark on this Mac.") == true)
+    }
+
     @Test func requestQueryTimeWindow() {
         let now = Date(timeIntervalSince1970: 1_761_300_000)
         let day = PostgresDatabase.TimeWindow(RequestQuery(range: .last24Hours), now: now)
@@ -134,9 +155,9 @@ struct DatabaseUnitTests {
         #expect(PostgresDatabase.setting(.seconds(600)) == "600s")
         #expect(PostgresDatabase.setting(.milliseconds(50)) == "50ms")
         #expect(PostgresDatabase.setting(.milliseconds(1_500)) == "1500ms")
-        #expect(PostgresDatabase.spoken(.milliseconds(50)) == "50 ms")
-        #expect(PostgresDatabase.spoken(.seconds(30)) == "30 s")
-        #expect(PostgresDatabase.spoken(.seconds(300)) == "5 min")
+        #expect(DatabaseError.spoken(.milliseconds(50)) == "50 ms")
+        #expect(DatabaseError.spoken(.seconds(30)) == "30 s")
+        #expect(DatabaseError.spoken(.seconds(300)) == "5 min")
         #expect(PostgresDatabase.timedOutMessage(.seconds(300)) == "Query timed out: the server cancelled it after 5 min (statement timeout).")
         #expect(PostgresDatabase.timedOutMessage(nil).hasPrefix("Query timed out"))
     }
@@ -163,7 +184,7 @@ struct DatabaseUnitTests {
 
     @Test func callsBeforeConnectFailAsUnreachable() async {
         let database = PostgresDatabase(url: "postgres://localhost/db")
-        await #expect(throws: DatabaseError.unreachable("Not connected.")) { _ = try await database.devices() }
+        await #expect(throws: DatabaseError.unreachable(.notConnected)) { _ = try await database.devices() }
     }
 
     @Test func unreachableServerFailsWithinDeadline() async throws {
@@ -175,11 +196,11 @@ struct DatabaseUnitTests {
             try await database.connect()
             Issue.record("connect() unexpectedly succeeded")
         } catch let error as DatabaseError {
-            guard case .unreachable(let message) = error else {
+            guard case .unreachable(let reason) = error else {
                 Issue.record("Expected .unreachable, got \(error)")
                 return
             }
-            #expect(message.lowercased().contains("refused"))
+            #expect(reason.description.lowercased().contains("refused"))
         }
         #expect(start.duration(to: clock.now) < .seconds(9))
         await database.shutdown()
