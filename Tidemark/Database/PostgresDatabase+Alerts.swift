@@ -156,29 +156,4 @@ extension PostgresDatabase {
             try await execute("UPDATE alerts SET read_at = now() WHERE read_at IS NULL")
         }
     }
-
-    func deleteAlert(_ id: Int64) async throws {
-        try await execute("DELETE FROM alerts WHERE id = \(id)")
-    }
-
-    // MARK: - Mutes
-
-    /// Patterns are stored trimmed and lowercased (matching is case-insensitive), oldest first.
-    func mutes() async throws -> [String] {
-        try await rows("SELECT pattern FROM mutes ORDER BY created_at, pattern").map { try PostgresRowReader($0)("pattern", as: String.self) }
-    }
-
-    func addMute(_ pattern: String) async throws {
-        let normalized = Self.normalizedMute(pattern)
-        guard !normalized.isEmpty else { return }
-        try await execute("INSERT INTO mutes (pattern) VALUES (\(normalized)) ON CONFLICT (pattern) DO NOTHING")
-    }
-
-    func removeMute(_ pattern: String) async throws {
-        try await execute("DELETE FROM mutes WHERE pattern = \(Self.normalizedMute(pattern))")
-    }
-
-    private static func normalizedMute(_ pattern: String) -> String {
-        pattern.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    }
 }

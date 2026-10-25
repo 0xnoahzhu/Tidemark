@@ -271,7 +271,6 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var sources: [HostSourceTouch] = []
     var alertsInserted: [AlertItem] = []
     var known: [AppID: Set<String>] = [:]
-    var mutesList: [String] = []
     var appList: [MonitoredApp] = []
     var probeSessionsSaved: [ProbeSession] = []
     var egressSamples: [EgressSample] = []
@@ -306,7 +305,6 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func setHistorySharers(_ devices: [DeviceID]) { historySharers = devices }
     func setAppsDelay(_ delay: Duration) { appsDelay = delay }
     func setApps(_ apps: [MonitoredApp]) { appList = apps }
-    func setMutes(_ patterns: [String]) { mutesList = patterns }
     func setOtherMacAlerts(_ alerts: [AlertItem]) { otherMacAlerts = alerts }
     func setKnown(_ value: [AppID: Set<String>]) { known = value }
     /// Adds or replaces (by key) a row another Mac wrote.
@@ -551,10 +549,6 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func unreadAlertCount(scope: DeviceScope) async throws -> Int { alertsInserted.filter(\.isUnread).count }
     func markAlertsRead(_ ids: [Int64]) async throws {}
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws {}
-    func deleteAlert(_ id: Int64) async throws { alertsInserted.removeAll { $0.id == id } }
-    func mutes() async throws -> [String] { mutesList }
-    func addMute(_ pattern: String) async throws { mutesList.append(pattern) }
-    func removeMute(_ pattern: String) async throws { mutesList.removeAll { $0 == pattern } }
 
     func saveProbeSession(_ session: ProbeSession) async throws {
         try check()

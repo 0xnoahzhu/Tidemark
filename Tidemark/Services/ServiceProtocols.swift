@@ -194,7 +194,7 @@ protocol TidemarkDatabase: Sendable {
     func ipInfo(_ ip: String) async throws -> GeoInfo?
     func saveIPInfo(_ ip: String, geo: GeoInfo) async throws
 
-    // Alerts & mutes
+    // Alerts
     @discardableResult func insertAlerts(_ alerts: [AlertItem]) async throws -> [AlertItem]
     func alerts(filter: AlertFilter, appID: AppID?, scope: DeviceScope, limit: Int) async throws -> [AlertItem]
     func alerts(after id: Int64, excluding: DeviceID?) async throws -> [AlertItem]
@@ -202,10 +202,6 @@ protocol TidemarkDatabase: Sendable {
     func markAlertsRead(_ ids: [Int64]) async throws
     /// Marks every unread alert read, limited to `appID` when given and to the scope's Mac.
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws
-    func deleteAlert(_ id: Int64) async throws
-    func mutes() async throws -> [String]
-    func addMute(_ pattern: String) async throws
-    func removeMute(_ pattern: String) async throws
 
     // Site probes
     func saveProbeSession(_ session: ProbeSession) async throws

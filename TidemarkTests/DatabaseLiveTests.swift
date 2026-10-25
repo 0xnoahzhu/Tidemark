@@ -29,7 +29,9 @@ struct DatabaseLiveTests {
                 #expect(tables.contains(table), "missing table \(table)")
             }
             #expect(!tables.contains("schema_migrations"))
-            #expect(try await db.mutes() == ["*.apple.com", "*.icloud.com", "*.mzstatic.com"])
+            // `mutes` stays as schema v1 made it, though Tidemark no longer reads or writes it.
+            let patterns = try await db.rows("SELECT pattern FROM mutes ORDER BY pattern").map { try PostgresRowReader($0)("pattern", as: String.self) }
+            #expect(patterns == ["*.apple.com", "*.icloud.com", "*.mzstatic.com"])
             let requires = try await db.rows("SELECT version, requires_version FROM schema_migrations ORDER BY version").map { row in
                 let read = PostgresRowReader(row)
                 return "\(try read("version", as: Int.self)):\(try read("requires_version", as: Int?.self).map(String.init) ?? "-")"
@@ -115,7 +117,7 @@ struct DatabaseLiveTests {
             // Capture gave up on a write: the transaction rolls back and the writer connection is free at once.
             let write = Task {
                 try await db.withTransaction(on: .writer) { connection in
-                    _ = try await connection.query("INSERT INTO mutes (pattern) VALUES ('abandoned.example')", logger: PostgresDatabase.logger).collect()
+                    _ = try await connection.query("INSERT INTO ip_info (ip) VALUES ('192.0.2.1')", logger: PostgresDatabase.logger).collect()
                     _ = try await connection.query("SELECT pg_sleep(3)", logger: PostgresDatabase.logger).collect()
                 }
             }
@@ -128,9 +130,9 @@ struct DatabaseLiveTests {
             }
             #expect(cancelledAt.duration(to: clock.now) < .seconds(1))
             for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await DatabaseWait.result { try await db.ping() }.get() }
-            #expect(!(try await db.mutes()).contains("abandoned.example"))
+            #expect(try await db.ipInfo("192.0.2.1") == nil)
             try await Task.sleep(for: .seconds(3))
-            #expect(!(try await db.mutes()).contains("abandoned.example"))
+            #expect(try await db.ipInfo("192.0.2.1") == nil)
         }
     }
 
@@ -168,7 +170,7 @@ struct DatabaseLiveTests {
             // Cancelled (capture gave up on it): the transaction's COMMIT goes to the closed connection.
             let write = Task {
                 try await db.withTransaction(on: .writer) { connection in
-                    _ = try await connection.query("INSERT INTO mutes (pattern) VALUES ('abandoned.example')", logger: PostgresDatabase.logger).collect()
+                    _ = try await connection.query("INSERT INTO ip_info (ip) VALUES ('192.0.2.1')", logger: PostgresDatabase.logger).collect()
                     await busy(milliseconds: 300)
                 }
             }
@@ -180,7 +182,7 @@ struct DatabaseLiveTests {
             case .failure(let error): #expect(error is CancellationError, "\(error)")
             }
             #expect(start.duration(to: clock.now) < .seconds(5))
-            #expect(!(try await db.mutes()).contains("abandoned.example"))
+            #expect(try await db.ipInfo("192.0.2.1") == nil)
 
             // Past its limit: the next statement goes to the closed connection.
             start = clock.now
@@ -210,7 +212,7 @@ struct DatabaseLiveTests {
 
             // No pool kept a closed connection.
             for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await DatabaseWait.result { try await db.ping() }.get() }
-            for _ in 0..<(2 * PostgresDatabase.mainPoolSize) { _ = try await DatabaseWait.result { try await db.mutes() }.get() }
+            for _ in 0..<(2 * PostgresDatabase.mainPoolSize) { _ = try await DatabaseWait.result { try await db.ipInfo("192.0.2.1") }.get() }
         }
     }
 
@@ -250,7 +252,7 @@ struct DatabaseLiveTests {
 
             // The pools replaced the closed connections.
             for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await db.ping() }
-            for _ in 0..<PostgresDatabase.mainPoolSize { _ = try await db.mutes() }
+            for _ in 0..<PostgresDatabase.mainPoolSize { _ = try await db.ipInfo("192.0.2.1") }
         }
     }
 
@@ -261,13 +263,13 @@ struct DatabaseLiveTests {
             struct ConnectionLost: Error {}
             let failure = await Self.failure(within: .seconds(10)) {
                 try await db.withTransaction(on: .writer) { connection in
-                    _ = try await connection.query("INSERT INTO mutes (pattern) VALUES ('lost.example')", logger: PostgresDatabase.logger).collect()
+                    _ = try await connection.query("INSERT INTO ip_info (ip) VALUES ('192.0.2.2')", logger: PostgresDatabase.logger).collect()
                     try await connection.close()
                     throw ConnectionLost()
                 }
             }
             #expect(failure is DatabaseError, "\(String(describing: failure))")
-            #expect(!(try await db.mutes()).contains("lost.example"))
+            #expect(try await db.ipInfo("192.0.2.2") == nil)
             for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await db.ping() }
         }
     }
@@ -294,7 +296,7 @@ struct DatabaseLiveTests {
 
             // The pools replaced the closed connections.
             for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await db.ping() }
-            for _ in 0..<PostgresDatabase.mainPoolSize { _ = try await db.mutes() }
+            for _ in 0..<PostgresDatabase.mainPoolSize { _ = try await db.ipInfo("192.0.2.1") }
         }
     }
 
@@ -1015,7 +1017,7 @@ struct DatabaseLiveTests {
         }
     }
 
-    // MARK: - Alerts & mutes
+    // MARK: - Alerts
 
     @Test func alertsLifecycle() async throws {
         try await withTestDatabase { db in
@@ -1064,21 +1066,6 @@ struct DatabaseLiveTests {
             #expect(try await db.unreadAlertCount(scope: .all) == 1)
             try await db.markAllAlertsRead(appID: nil, scope: .all)
             #expect(try await db.unreadAlertCount(scope: .all) == 0)
-
-            try await db.deleteAlert(inserted[0].id)
-            #expect(try await db.alerts(filter: .all, appID: nil, scope: .all, limit: 10).count == 1)
-        }
-    }
-
-    @Test func mutesCRUD() async throws {
-        try await withTestDatabase { db in
-            try await db.addMute("  API.Notion.com ")
-            try await db.addMute("api.notion.com")
-            try await db.addMute("104.16.98.215")
-            #expect(try await db.mutes() == ["*.apple.com", "*.icloud.com", "*.mzstatic.com", "api.notion.com", "104.16.98.215"])
-            try await db.removeMute("API.NOTION.COM")
-            try await db.removeMute("*.apple.com")
-            #expect(try await db.mutes() == ["*.icloud.com", "*.mzstatic.com", "104.16.98.215"])
         }
     }
 

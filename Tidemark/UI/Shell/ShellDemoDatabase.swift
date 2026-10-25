@@ -123,10 +123,6 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func unreadAlertCount(scope: DeviceScope) async throws -> Int { try await base.unreadAlertCount(scope: scope) }
     func markAlertsRead(_ ids: [Int64]) async throws { try await base.markAlertsRead(ids) }
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws { try await base.markAllAlertsRead(appID: appID, scope: scope) }
-    func deleteAlert(_ id: Int64) async throws { try await base.deleteAlert(id) }
-    func mutes() async throws -> [String] { try await base.mutes() }
-    func addMute(_ pattern: String) async throws { try await base.addMute(pattern) }
-    func removeMute(_ pattern: String) async throws { try await base.removeMute(pattern) }
     func saveProbeSession(_ session: ProbeSession) async throws { try await base.saveProbeSession(session) }
     func probeSessions(limit: Int) async throws -> [ProbeSession] { try await base.probeSessions(limit: limit) }
     func hostInsight(_ host: String, language: String) async throws -> HostInsight? { try await base.hostInsight(host, language: language) }

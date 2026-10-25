@@ -747,10 +747,6 @@ private struct RequestsStubDatabase: TidemarkDatabase {
     func unreadAlertCount(scope: DeviceScope) async throws -> Int { 0 }
     func markAlertsRead(_ ids: [Int64]) async throws {}
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws {}
-    func deleteAlert(_ id: Int64) async throws {}
-    func mutes() async throws -> [String] { [] }
-    func addMute(_ pattern: String) async throws {}
-    func removeMute(_ pattern: String) async throws {}
     func saveProbeSession(_ session: ProbeSession) async throws {}
     func probeSessions(limit: Int) async throws -> [ProbeSession] { [] }
     func hostInsight(_ host: String, language: String) async throws -> HostInsight? { nil }
