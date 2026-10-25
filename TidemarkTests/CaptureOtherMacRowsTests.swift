@@ -3,6 +3,7 @@ import Testing
 @testable import Tidemark
 
 /// Paging through the rows other Macs write (`CaptureOtherMacRows`) against an in-memory server.
+@Suite(.timeLimit(.minutes(1)))
 struct CaptureOtherMacRowsTests {
     let me = UUID()
     let mini = UUID()

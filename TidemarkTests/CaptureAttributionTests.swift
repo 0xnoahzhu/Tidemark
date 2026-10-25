@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import Tidemark
 
+@Suite(.timeLimit(.minutes(1)))
 struct CaptureAttributionTests {
     let boot = Date(timeIntervalSince1970: 1_792_000_000)
 

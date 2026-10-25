@@ -5,7 +5,7 @@ import Testing
 
 /// The capture pipeline against the PostgreSQL server in `TIDEMARK_TEST_DATABASE_URL` (skipped when unset):
 /// how real constraint violations are handled. Every test uses a fresh `tm_test_<8 hex>` schema and drops it.
-@Suite(.serialized, .enabled(if: captureLiveDatabaseURL != nil, "Set TIDEMARK_TEST_DATABASE_URL to run"))
+@Suite(.serialized, .enabled(if: captureLiveDatabaseURL != nil, "Set TIDEMARK_TEST_DATABASE_URL to run"), .timeLimit(.minutes(1)))
 struct CaptureLiveTests {
     let nodePath = "/Users/me/Library/Application Support/com.raycast.macos/node/bin/node"
     let boot = Date(timeIntervalSince1970: 1_792_000_000)

@@ -3,6 +3,7 @@ import Testing
 @testable import Tidemark
 
 /// Surge sessions (engine restarts), stream gaps, recycled request IDs and late updates.
+@Suite(.timeLimit(.minutes(1)))
 struct CaptureSessionTests {
     let device = UUID()
     let nodePath = "/Users/me/Library/Application Support/com.raycast.macos/node/bin/node"

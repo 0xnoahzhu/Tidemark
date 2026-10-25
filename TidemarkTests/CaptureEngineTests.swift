@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import Tidemark
 
+@Suite(.timeLimit(.minutes(1)))
 @MainActor
 struct CaptureEngineTests {
     let temp = CaptureTempDirectory()
@@ -278,7 +279,7 @@ struct CaptureEngineTests {
         await engine.checkSurgeSession()
         #expect(await eventually { await engine.pipeline.currentSession == 1_792_000_600_000 })
         #expect(surge.snapshot.eventsCalls == 2)
-        await engine.stopStream()
+        #expect(await CaptureWait.finishes { await engine.stopStream() })
     }
 
     @Test func aSilentStreamIsRestarted() async {
@@ -295,7 +296,7 @@ struct CaptureEngineTests {
 
         await engine.checkStreamLiveness(now: .now.addingTimeInterval(20))
         #expect(await eventually { surge.snapshot.eventsCalls == 2 })
-        await engine.stopStream()
+        #expect(await CaptureWait.finishes { await engine.stopStream() })
     }
 
     // MARK: Alerts and notifications
@@ -480,7 +481,7 @@ struct CaptureEngineTests {
         await database.setAppsDelay(.zero)
         let app = try await engine.monitorApp(path: "/Applications/Imaginary Tool.app", includeChildren: true, alertOnDomain: true,
                                               alertOnIP: true, backfill: false)
-        await refresh.value
+        #expect(await CaptureWait.finishes { await refresh.value })
         #expect(model.catalog.apps.map(\.id) == [app.id])
         #expect(await engine.pipeline.isMonitoring(app.id))
     }

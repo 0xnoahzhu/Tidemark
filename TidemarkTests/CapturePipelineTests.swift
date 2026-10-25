@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import Tidemark
 
+@Suite(.timeLimit(.minutes(1)))
 struct CapturePipelineTests {
     let device = UUID()
     let ownExecutable = "/Applications/Tidemark.app/Contents/MacOS/Tidemark"

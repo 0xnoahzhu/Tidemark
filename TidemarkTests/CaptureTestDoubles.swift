@@ -215,12 +215,15 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var enforcesForeignKeys = false
     /// Request rows with these hosts are always refused (`DatabaseError.query`).
     var refusedHosts: Set<String> = []
-    /// Request writes hang until cancelled (a black-holed connection).
+    /// Request writes hang until cancelled (a black-holed connection), `stallLimit` at most.
     var stallingRequests = false
     /// Request writes fail at their statement timeout (`DatabaseError.timedOut`).
     var timingOutRequests = false
-    /// Probe saves hang until cancelled.
+    /// Probe saves hang until cancelled, `stallLimit` at most.
     var stallingProbeSaves = false
+    /// A stalled call that nobody cancels fails after this long (as on a connection that never answers), so a
+    /// write the code under test forgot to abandon fails its test instead of holding it for good.
+    static let stallLimit: Duration = .seconds(60)
     /// Closing rows of ended sessions fails at its statement timeout (`DatabaseError.timedOut`) while everything
     /// else works.
     var failingMaintenance = false
@@ -334,8 +337,8 @@ actor CaptureFakeDatabase: TidemarkDatabase {
         try check()
         requestWriteCalls += 1
         if stallingRequests {
-            try await Task.sleep(for: .seconds(3600))
-            throw CancellationError()
+            try await Task.sleep(for: Self.stallLimit)
+            throw DatabaseError.timedOut(.noReply(target: nil, within: Self.stallLimit))
         }
         if timingOutRequests { throw DatabaseError.timedOut(.statement(PostgresDatabase.SessionLimits.writer.statement)) }
         if refusingEverything { throw DatabaseError.query("could not extend file: No space left on device") }
@@ -481,8 +484,8 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func saveProbeSession(_ session: ProbeSession) async throws {
         try check()
         if stallingProbeSaves {
-            try await Task.sleep(for: .seconds(3600))
-            throw CancellationError()
+            try await Task.sleep(for: Self.stallLimit)
+            throw DatabaseError.timedOut(.noReply(target: nil, within: Self.stallLimit))
         }
         probeSessionsSaved.append(session)
     }
@@ -501,6 +504,18 @@ actor CaptureFakeDatabase: TidemarkDatabase {
         egressChangeList.insert(c, at: 0)
     }
     func egressChanges(deviceID: DeviceID, limit: Int) async throws -> [EgressChange] { try check(); return egressChangeList }
+}
+
+/// Waits with a deadline in the capture tests: work that never finishes fails its test at once instead of hanging
+/// the whole run (Swift Testing has no time limit by default, and awaiting a task ignores cancellation).
+enum CaptureWait {
+    /// Whether `work` finished within `timeout`. Work still running then is left to finish in the background.
+    static func finishes(within timeout: Duration = .seconds(10), _ work: @escaping @Sendable () async -> Void) async -> Bool {
+        await CaptureTimeout.value(within: timeout) { () async -> Bool? in
+            await work()
+            return true
+        } ?? false
+    }
 }
 
 /// A temporary directory removed when the test ends.

@@ -4,6 +4,7 @@ import Testing
 
 /// Write failures, deleted apps, Tidemark's own requests, global inventory sources and the files kept
 /// beside the spool.
+@Suite(.timeLimit(.minutes(1)))
 struct CaptureResilienceTests {
     let device = UUID()
     let ownExecutable = "/Applications/Tidemark.app/Contents/MacOS/Tidemark"
@@ -224,7 +225,7 @@ struct CaptureResilienceTests {
         var spool = CaptureSpool(directory: temp.url, limit: 10_000)
         #expect(spool.count >= 2, "the stuck batch is on disk before Tidemark quits")
         // Let the abandoned write time out before the directory goes away.
-        await stuck.value
+        #expect(await CaptureWait.finishes { await stuck.value }, "the abandoned write gives up at its timeout")
     }
 
     @Test func quittingDuringAStuckFlushKeepsItsFirstContactWork() async throws {
@@ -244,7 +245,7 @@ struct CaptureResilienceTests {
             #expect(await eventually { await pipeline.isFlushing })
             await pipeline.flushAll(now: base.addingTimeInterval(3), final: true)
             // Let the abandoned write time out before the directory goes away.
-            await stuck.value
+            #expect(await CaptureWait.finishes { await stuck.value }, "the abandoned write gives up at its timeout")
         }
 
         let database = CaptureFakeDatabase()
