@@ -131,20 +131,6 @@ struct AnalyzeHeaderRow<Content: View>: View {
     }
 }
 
-/// Policy chip that hugs short names and truncates long ones at `maxWidth`.
-struct AnalyzePolicyChip: View {
-    var policyPath: [String]
-    var maxWidth: CGFloat
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            PolicyChip(policyPath: policyPath)
-            PolicyChip(policyPath: policyPath, maxWidth: maxWidth)
-        }
-        .frame(maxWidth: maxWidth, alignment: .leading)
-    }
-}
-
 /// A rounded chip such as `4 new domains in 24 h` or `Rule FINAL`.
 struct AnalyzePill: View {
     enum Style { case new, neutral }

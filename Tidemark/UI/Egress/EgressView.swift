@@ -159,8 +159,11 @@ private struct EgressPolicyCard: View {
     var samples: [EgressSample]
     var isChecking: Bool
 
+    /// Policy takes room before Location (which holds a country name) and stops at 200 pt, so chips such as
+    /// `AI › AT&T-RackNerd-Hysteria2` are whole, as in the current-egress card.
     private static let columns: [AnalyzeColumnsLayout.Column] = [
-        .fixed(128), .fixed(150), .flexible(weight: 1, min: 70), .flexible(weight: 1.3, min: 90), .fixed(56),
+        .flexible(weight: 1.3, min: 128, max: 200), .fixed(150), .flexible(weight: 1, min: 70),
+        .flexible(weight: 1.3, min: 90), .fixed(56),
     ]
 
     var body: some View {
@@ -205,7 +208,7 @@ private struct EgressPolicyCard: View {
     private func row(_ sample: EgressSample) -> some View {
         let network = [sample.network, EgressFormat.networkType(sample.networkType)].compactMap { $0 }.filter { !$0.isEmpty }
         return AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
-            AnalyzePolicyChip(policyPath: sample.policyPath, maxWidth: 128)
+            PolicyChip(policyPath: sample.policyPath, maxWidth: .infinity)
             HStack(spacing: 6) {
                 Text(sample.ip ?? "—").font(Theme.mono(11.5)).lineLimit(1).truncationMode(.middle).layoutPriority(1).textSelection(.enabled)
                 if sample.isCurrent {
@@ -243,7 +246,9 @@ private struct EgressPolicyCard: View {
 private struct EgressChangesCard: View {
     var changes: [EgressChange]
 
-    private static let columns: [AnalyzeColumnsLayout.Column] = [.fixed(110), .fixed(128), .fixed(128), .flexible(weight: 1, min: 100)]
+    private static let columns: [AnalyzeColumnsLayout.Column] = [
+        .fixed(110), .fixed(128), .flexible(weight: 1, min: 128, max: 200), .flexible(weight: 1, min: 100),
+    ]
 
     var body: some View {
         EgressCard {
@@ -265,7 +270,7 @@ private struct EgressChangesCard: View {
                 AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
                     Text(AnalyzeFormat.seen(change.changedAt, timeOnlyToday: true)).foregroundStyle(Theme.ink2).lineLimit(1)
                     Text(change.ip).font(Theme.mono(11.5)).lineLimit(1).textSelection(.enabled)
-                    AnalyzePolicyChip(policyPath: change.policyPath, maxWidth: 128)
+                    PolicyChip(policyPath: change.policyPath, maxWidth: .infinity)
                     Text(EgressView.localizedReason(change.reason)).foregroundStyle(Theme.ink2).lineLimit(1)
                 }
                 .font(.system(size: 12))
