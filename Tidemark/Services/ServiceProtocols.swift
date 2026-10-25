@@ -143,13 +143,18 @@ protocol TidemarkDatabase: Sendable {
     func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64
     /// Upserts like `upsertRequests` and also reports how many rows were inserted rather than updated.
     func upsertRequestsCountingInserts(_ rows: [RequestRecord]) async throws -> RequestUpsertResult
-    /// Marks `deviceID`'s rows that are still `active` from Surge sessions before `session` as completed at
-    /// `date`: Surge restarted, so they will never be updated again. Returns the rows changed.
+    /// Marks `deviceID`'s rows that are still `active` from Surge sessions before `session` completed: Surge
+    /// restarted, so they will never be updated again. A stored `completed_at` is kept; otherwise it becomes
+    /// `GREATEST(started_at, LEAST(updated_at, date))`, the row's last write (its last observed change) capped
+    /// at `date` (the new session's start) and never before the request started. `updated_at` moves on, so
+    /// other Macs see the change. Returns the rows changed.
     func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64
     /// Marks `deviceID`'s rows of `session` that are still `active` but that Surge no longer lists as active
-    /// (`keeping` holds the IDs `dump active` returned) completed at `date`. Rows that started at or after
-    /// `startedBefore` are left alone: they may be newer than the listing. Closes connections that ended
-    /// while Tidemark was not running. Returns the rows changed.
+    /// (`keeping` holds the IDs `dump active` returned) completed, with the same `completed_at` as
+    /// `closeActiveRequests`: a stored one, otherwise the row's last write capped at `date` (the listing's
+    /// time) and never before the request started. Rows that started at or after `startedBefore` are left
+    /// alone: they may be newer than the listing. Closes connections that ended while Tidemark was not
+    /// running. Returns the rows changed.
     func closeVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date, at date: Date) async throws -> Int64
     /// The number of rows `closeVanishedRequests` would close with the same arguments, without closing them.
     func countVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date) async throws -> Int64
