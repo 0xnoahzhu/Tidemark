@@ -7,7 +7,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ 条最新记录 · %2$@ 条本次写入"
+            "value" : "显示最近 %1$@ 条 · 本次写入 %2$@ 条"
           }
         }
       }
