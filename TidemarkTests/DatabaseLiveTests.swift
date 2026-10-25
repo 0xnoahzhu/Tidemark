@@ -83,6 +83,16 @@ struct DatabaseLiveTests {
                 #expect(error == .timedOut(.statement(.milliseconds(50))))
                 #expect(error.errorDescription == "PostgreSQL query timed out: The server cancelled it after 50 ms (statement timeout).")
             }
+            // A statement cancelled from elsewhere (here by its own session) did not time out.
+            do {
+                _ = try await db.rows("SELECT pg_cancel_backend(pg_backend_pid()), pg_sleep(1)")
+                Issue.record("pg_cancel_backend did not cancel the statement")
+            } catch let error as DatabaseError {
+                guard case .unreachable = error else {
+                    Issue.record("Expected .unreachable, got \(error)")
+                    return
+                }
+            }
         }
     }
 

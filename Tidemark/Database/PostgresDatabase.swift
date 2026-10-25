@@ -337,13 +337,15 @@ final class PostgresDatabase: TidemarkDatabase {
         let timeout = leaseTimeout
         let endpoint = self.endpoint
         let clientLimit = limit.duration(on: pool)
+        let statementTimeout = limit.statementTimeout(on: pool)
         let closesOnCancel = pool == .writer
         do {
             return try await withThrowingTaskGroup(of: LeaseOutcome<Result>.self) { group in
                 group.addTask(name: "PostgreSQL lease") {
                     try await client.withConnection { connection in
                         guard lease.claim() else { return LeaseOutcome.abandoned }
-                        let value = try await Self.run(body, on: connection, limit: clientLimit, closesOnCancel: closesOnCancel, endpoint: endpoint)
+                        let value = try await Self.run(body, on: connection, limit: clientLimit, statementTimeout: statementTimeout,
+                                                       closesOnCancel: closesOnCancel, endpoint: endpoint)
                         return LeaseOutcome.finished(value)
                     }
                 }
@@ -361,20 +363,23 @@ final class PostgresDatabase: TidemarkDatabase {
                 throw CancellationError()
             }
         } catch {
-            throw Self.map(error, endpoint: endpoint, statementTimeout: limit.statementTimeout(on: pool))
+            throw Self.map(error, endpoint: endpoint, statementTimeout: statementTimeout)
         }
     }
 
     /// Runs `body` on a leased connection, closing the connection when `limit` passes first or, with
-    /// `closesOnCancel`, when the task is cancelled.
+    /// `closesOnCancel`, when the task is cancelled. The errors of `body` are mapped here, where it is known
+    /// how long the call held its connection (`isStatementTimeout`).
     private static func run<Result: Sendable>(
         _ body: @escaping @Sendable (PostgresConnection) async throws -> Result,
         on connection: PostgresConnection,
         limit: Duration,
+        statementTimeout: Duration?,
         closesOnCancel: Bool,
         endpoint: PostgresConnectionURL?
     ) async throws -> Result {
         let watchdog = ConnectionWatchdog(connection)
+        let started = ContinuousClock.now
         let timer = Task(name: "PostgreSQL call limit") {
             do { try await Task.sleep(for: limit) } catch { return }
             watchdog.close(.expired)
@@ -397,7 +402,7 @@ final class PostgresDatabase: TidemarkDatabase {
             case .cancelled:
                 throw CancellationError()
             case nil:
-                throw error
+                throw map(error, endpoint: endpoint, statementTimeout: statementTimeout, ranFor: started.duration(to: .now))
             }
         }
     }
@@ -570,8 +575,9 @@ final class PostgresDatabase: TidemarkDatabase {
     /// the statement or its data, or a reply could not be decoded); everything else — including errors
     /// of unknown origin — is `.unreachable`, so callers keep the data and retry later. A statement the
     /// server cancelled at its `statementTimeout` (SQLSTATE 57014) is `.timedOut`: the server answered, the
-    /// query was just too slow.
-    static func map(_ error: any Error, endpoint: PostgresConnectionURL? = nil, statementTimeout: Duration? = nil) -> any Error {
+    /// query was just too slow. `ranFor` is how long the call held its connection (`isStatementTimeout`).
+    static func map(_ error: any Error, endpoint: PostgresConnectionURL? = nil, statementTimeout: Duration? = nil,
+                    ranFor: Duration? = nil) -> any Error {
         switch error {
         case let error as DatabaseError:
             return error
@@ -582,7 +588,8 @@ final class PostgresDatabase: TidemarkDatabase {
             case .server:
                 let state = error.serverInfo?[.sqlState] ?? ""
                 // 57014 is also an administrator's `pg_cancel_backend`, which stays `.unreachable` below.
-                if state == "57014", error.serverInfo?[.message]?.contains("statement timeout") == true {
+                if state == "57014",
+                   isStatementTimeout(message: error.serverInfo?[.message], statementTimeout: statementTimeout, ranFor: ranFor) {
                     return DatabaseError.timedOut(.statement(statementTimeout))
                 }
                 let reason = describe(error, endpoint: endpoint)
@@ -635,6 +642,20 @@ final class PostgresDatabase: TidemarkDatabase {
         default:
             return false
         }
+    }
+
+    /// Whether a `query_canceled` (SQLSTATE 57014) is the server's statement timeout rather than an
+    /// administrator's `pg_cancel_backend` or a conflict with recovery on a standby. A server that writes its
+    /// messages in English names the cause. One whose `lc_messages` translates them (a superuser-only
+    /// setting, so Tidemark cannot ask for English) is judged by time instead: the call held its connection
+    /// at least as long as its statement timeout, which a timeout guarantees and a cancel from elsewhere
+    /// rarely does.
+    static func isStatementTimeout(message: String?, statementTimeout: Duration?, ranFor: Duration?) -> Bool {
+        let message = message ?? ""
+        if message.contains("statement timeout") { return true }
+        if message.hasPrefix("canceling statement due to") { return false }
+        guard let statementTimeout, let ranFor else { return false }
+        return ranFor >= statementTimeout
     }
 
     /// Why a connection or a call failed, without credentials. The causes Tidemark recognizes are typed, so

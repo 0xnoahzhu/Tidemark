@@ -60,6 +60,9 @@ The capture writes and the session closing stay below capture's own 20 s bound p
 cancels a statement capture already gave up on. A statement cancelled at its statement timeout fails as
 timed out ("PostgreSQL query timed out: the server cancelled it after …"), so a slow query is not mistaken
 for a server that cannot be reached; like an unreachable server, it never makes capture set rows aside.
+The server's message names the timeout; when the server writes its messages in another language
+(`lc_messages`, which only a superuser can change), a cancelled call that ran at least as long as its
+statement timeout counts as timed out, and other cancels (`pg_cancel_backend`) as unreachable.
 
 On top of these, Tidemark closes a connection whose call has gone unanswered for twice its statement
 timeout plus 5 s, 15 min for a migration and 6 h for index builds (a server that vanished without closing

@@ -89,6 +89,26 @@ struct DatabaseUnitTests {
         }
     }
 
+    /// A 57014 is the statement timeout when an English server says so, or, when the server translates its
+    /// messages, when the call ran at least as long as its statement timeout.
+    @Test func tellsAStatementTimeoutFromAnotherCancel() {
+        let timeout = Duration.seconds(30)
+        #expect(PostgresDatabase.isStatementTimeout(message: "canceling statement due to statement timeout", statementTimeout: nil, ranFor: nil))
+        #expect(PostgresDatabase.isStatementTimeout(message: "canceling statement due to statement timeout", statementTimeout: timeout, ranFor: .seconds(1)))
+        for message in ["canceling statement due to user request", "canceling statement due to conflict with recovery"] {
+            #expect(!PostgresDatabase.isStatementTimeout(message: message, statementTimeout: timeout, ranFor: .seconds(40)), "\(message)")
+        }
+
+        // A server whose lc_messages is, say, de_DE or zh_CN.
+        let translated = "<the server's message in its own language>"
+        #expect(PostgresDatabase.isStatementTimeout(message: translated, statementTimeout: timeout, ranFor: .seconds(30)))
+        #expect(PostgresDatabase.isStatementTimeout(message: translated, statementTimeout: timeout, ranFor: .seconds(31)))
+        #expect(!PostgresDatabase.isStatementTimeout(message: translated, statementTimeout: timeout, ranFor: .seconds(12)))
+        #expect(!PostgresDatabase.isStatementTimeout(message: translated, statementTimeout: nil, ranFor: .seconds(600)))
+        #expect(!PostgresDatabase.isStatementTimeout(message: translated, statementTimeout: timeout, ranFor: nil))
+        #expect(!PostgresDatabase.isStatementTimeout(message: nil, statementTimeout: timeout, ranFor: .seconds(1)))
+    }
+
     @Test func mapsClientSideErrors() {
         #expect(PostgresDatabase.map(CancellationError()) is CancellationError)
         #expect(PostgresDatabase.map(DatabaseError.query("x")) as? DatabaseError == .query("x"))
