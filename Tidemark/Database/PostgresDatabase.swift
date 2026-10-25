@@ -128,6 +128,11 @@ final class PostgresDatabase: TidemarkDatabase {
         private static func margin(_ statement: Duration) -> Duration { statement * 2 + .seconds(5) }
     }
 
+    /// How often a call looks at whether something other than the call closed its connection (the server, the
+    /// network, the pool shutting down). A call whose `body` has not finished one look after such a close ends
+    /// without it (`LeasedCall`): within about two of these after the close instead of at its limit.
+    static let closedConnectionCheck: Duration = .seconds(1)
+
     /// A duration as a PostgreSQL setting: whole seconds as `30s`, anything else in milliseconds.
     static func setting(_ duration: Duration) -> String {
         let (seconds, attoseconds) = duration.components
@@ -327,7 +332,9 @@ final class PostgresDatabase: TidemarkDatabase {
     /// calling task closes the connection right away and throws `CancellationError`: the transaction rolls
     /// back instead of committing after the caller gave up (capture keeps or spools that work and writes
     /// it again). Either way the call ends once the connection is closed, even if `body` is stuck on it
-    /// (`LeasedCall`). On the main pool a cancelled call's statement runs to completion first.
+    /// (`LeasedCall`). On the main pool a cancelled call's statement runs to completion first. A connection
+    /// something else closed (the server, the network, the pool shutting down) fails the call with
+    /// `.unreachable` within about two seconds unless `body` finished first (`closedConnectionCheck`).
     func withConnection<Result: Sendable>(
         on pool: Pool = .main,
         limit: CallLimit = .pool,
@@ -370,8 +377,8 @@ final class PostgresDatabase: TidemarkDatabase {
 
     /// Runs `body` on a leased connection (`LeasedCall`), closing the connection when `limit` passes first or,
     /// with `closesOnCancel`, when the task is cancelled; the call then ends as soon as the connection is
-    /// closed, whether `body` noticed or not. The errors of `body` are mapped here, where it is known how
-    /// long the call held its connection (`isStatementTimeout`).
+    /// closed, whether `body` noticed or not, and soon after something else closed it. The errors of `body`
+    /// are mapped here, where it is known how long the call held its connection (`isStatementTimeout`).
     private static func run<Result: Sendable>(
         _ body: @escaping @Sendable (PostgresConnection) async throws -> Result,
         on connection: PostgresConnection,
@@ -392,7 +399,9 @@ final class PostgresDatabase: TidemarkDatabase {
             return value
         case .finished(.failure(let error), closedBy: nil):
             throw map(error, endpoint: endpoint, statementTimeout: statementTimeout, ranFor: started.duration(to: .now))
-        case .finished(.failure, closedBy: let reason?), .abandoned(let reason):
+        case .abandoned(nil):
+            throw DatabaseError.unreachable(.connectionClosed(target: endpoint?.redacted))
+        case .finished(.failure, closedBy: let reason?), .abandoned(let reason?):
             switch reason {
             case .expired: throw DatabaseError.timedOut(.noReply(target: endpoint?.redacted, within: limit))
             case .cancelled: throw CancellationError()
@@ -774,8 +783,10 @@ private enum CallCloseReason: Sendable {
 /// waits: PostgresNIO never answers a statement sent after its connection finished closing (NIO drops the
 /// write into the torn-down channel pipeline without failing the statement, and the wait cannot be
 /// cancelled), so a `body` caught rolling back, cleaning up or between two statements would otherwise hold
-/// its caller forever, call limit or not. The abandoned `body` is cancelled and ends, or waits, on its own,
-/// on a dead connection.
+/// its caller forever, call limit or not. A connection something else closed (the server, the network, the
+/// pool shutting down) ends the call too when `body` has not finished one `closedConnectionCheck` later, and
+/// `body` never starts on a connection that is already closed. The abandoned `body` is cancelled and ends,
+/// or waits, on its own, on a dead connection.
 ///
 /// A closed connection goes back to the pool only once its close future completed: the pool, which watches
 /// the same future, has then dropped it and never leases it again.
@@ -783,8 +794,9 @@ private final class LeasedCall<Value: Sendable>: Sendable {
     enum Outcome: Sendable {
         /// `body` finished; `closedBy` tells why the call closed the connection meanwhile, if it did.
         case finished(Result<Value, any Error>, closedBy: CallCloseReason?)
-        /// The call closed the connection, which is now closed, and `body` has not finished.
-        case abandoned(CallCloseReason)
+        /// The connection is closed and `body` has not finished: why the call closed it, or nil when something
+        /// else did.
+        case abandoned(CallCloseReason?)
     }
 
     private struct State {
@@ -793,6 +805,8 @@ private final class LeasedCall<Value: Sendable>: Sendable {
         var early: Outcome?
         var result: Result<Value, any Error>?
         var reason: CallCloseReason?
+        /// Something else closed the connection, and `body` did not finish one check later (or never started).
+        var lost = false
         var cancelled = false
         /// Whether the connection's close future is watched, and whether it completed.
         var watchingClose = false
@@ -826,16 +840,16 @@ private final class LeasedCall<Value: Sendable>: Sendable {
                 continuation.resume(returning: early)
                 return
             }
+            // Closed before the call began (the pool had not seen it close yet): every statement of `body` would
+            // fail, or never be answered.
+            guard !connection.isClosed else { return lose() }
             let connection = connection
             let work = Task(name: "PostgreSQL call") {
                 let result: Result<Value, any Error>
                 do { result = .success(try await body(connection)) } catch { result = .failure(error) }
                 self.finished(result)
             }
-            let timer = Task(name: "PostgreSQL call limit") {
-                do { try await Task.sleep(for: limit) } catch { return }
-                self.close(.expired)
-            }
+            let timer = Task(name: "PostgreSQL call limit") { await self.watch(limit: limit) }
             let cancel = state.withLock { state -> [Task<Void, Never>] in
                 if state.ended { return [work, timer] }
                 state.work = work
@@ -857,10 +871,26 @@ private final class LeasedCall<Value: Sendable>: Sendable {
         work?.cancel()
     }
 
+    /// Closes the connection when `limit` passes. Until then it looks at the connection every
+    /// `closedConnectionCheck`: when something else closed it, `body` gets one more check to finish.
+    private func watch(limit: Duration) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: limit)
+        let check = PostgresDatabase.closedConnectionCheck
+        var sawClosed = false
+        while clock.now < deadline {
+            do { try await Task.sleep(for: min(clock.now.duration(to: deadline), check)) } catch { return }
+            guard connection.isClosed else { continue }
+            if sawClosed { return lose() }
+            sawClosed = true
+        }
+        close(.expired)
+    }
+
     /// Closes the connection, unless the call ended, `body` finished or the connection is being closed.
     func close(_ reason: CallCloseReason) {
         let closes = state.withLock { state -> Bool in
-            guard !state.ended, state.result == nil, state.reason == nil else { return false }
+            guard !state.ended, state.result == nil, state.reason == nil, !state.lost else { return false }
             state.reason = reason
             state.watchingClose = true
             return true
@@ -889,8 +919,24 @@ private final class LeasedCall<Value: Sendable>: Sendable {
         perform(step)
     }
 
+    /// Something else closed the connection while `body` runs, or before it started: the call ends once the
+    /// close future completed, unless it closed the connection itself or `body` finished meanwhile.
+    private func lose() {
+        let step = state.withLock { state -> Step in
+            guard !state.ended, state.result == nil, state.reason == nil, !state.lost else { return Step() }
+            state.lost = true
+            var step = settle(&state)
+            if !state.ended, !state.watchingClose {
+                state.watchingClose = true
+                step.watchClose = true
+            }
+            return step
+        }
+        perform(step)
+    }
+
     /// Ends the call once it can end: `body` finished on a connection that is open (or whose close the pool
-    /// saw), or the call closed the connection and it is closed.
+    /// saw), or the connection is closed and the call closed it or gave up on `body` (`lost`).
     private func settle(_ state: inout State) -> Step {
         var step = Step()
         guard !state.ended else { return step }
@@ -904,8 +950,8 @@ private final class LeasedCall<Value: Sendable>: Sendable {
                 return step
             }
             outcome = .finished(result, closedBy: state.reason)
-        } else if let reason = state.reason, state.closed {
-            outcome = .abandoned(reason)
+        } else if state.closed, state.reason != nil || state.lost {
+            outcome = .abandoned(state.reason)
         } else {
             return step
         }
