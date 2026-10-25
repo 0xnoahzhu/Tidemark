@@ -960,6 +960,9 @@ final class CaptureEngine {
         var poller = otherMacRows
         let generation = otherMacRowsGeneration
         guard let poll = try? await poller.poll(database, excluding: me), generation == otherMacRowsGeneration else { return }
+        if poll.skipped > 0 {
+            Self.log.info("Skipped \(Int(poll.skipped)) s of rows other Macs wrote: the live table fell more than \(Int(poller.lookback)) s behind")
+        }
         if poll.capped, otherMacRows.resumeAfter == nil {
             Self.log.info("Other Macs wrote more than \(poller.pageSize * poller.maxPages) rows since the last poll; the next polls read the rest")
         }

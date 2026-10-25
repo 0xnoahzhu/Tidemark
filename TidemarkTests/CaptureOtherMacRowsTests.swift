@@ -40,7 +40,7 @@ struct CaptureOtherMacRowsTests {
         #expect(!first.capped)
         #expect(first.rows.map(\.key.surgeID) == Array(1...25).map(Int64.init), "every row once, in write order, none of this Mac's")
         #expect(await database.writtenPages == 3, "until a page came back short")
-        #expect(rows.cursor == RequestWriteCursor(updatedAt: now.addingTimeInterval(-8), rowID: 25))
+        #expect(rows.cursor == RequestWriteCursor(updatedAt: now, rowID: 0), "read everything: up to the server's clock")
 
         let second = try await rows.poll(database, excluding: me)
         #expect(second.rows.isEmpty && !second.capped)
@@ -80,14 +80,16 @@ struct CaptureOtherMacRowsTests {
 
     @Test func rowsCommittedLateOrWrittenAgainAreReadOnce() async throws {
         let database = CaptureFakeDatabase()
-        for id in 1...5 { await database.write(row(Int64(id), rowID: Int64(id), at: -10 + Double(id))) }
+        for id in 1...5 { await database.write(row(Int64(id), rowID: Int64(id), at: -3 + Double(id) / 2)) }
         var rows = poller(pageSize: 10, maxPages: 5)
         #expect(try await rows.poll(database, excluding: me).rows.count == 5)
         let cursor = try #require(rows.cursor)
 
-        // A transaction that started before the newest row read commits now; another one writes row 2 again.
-        await database.write(row(6, rowID: 6, at: -6.5))
-        await database.write(row(2, rowID: 2, at: -4, state: .completed))
+        // A transaction that started before the newest row read commits a second later; another one writes
+        // row 2 again.
+        await database.setServerNow(now.addingTimeInterval(1))
+        await database.write(row(6, rowID: 6, at: -1.25))
+        await database.write(row(2, rowID: 2, at: 0.5, state: .completed))
         let next = try await rows.poll(database, excluding: me)
         #expect(next.rows.map(\.key.surgeID) == [6, 2])
         #expect(next.rows.last?.state == .completed)
@@ -109,6 +111,59 @@ struct CaptureOtherMacRowsTests {
         var later: [Int64] = []
         for _ in 0..<3 { later += try await rows.poll(database, excluding: me).rows.map(\.key.surgeID) }
         #expect(later == [51])
+    }
+
+    @Test func whileOtherMacsWriteNothingAPollStepsBackOnlyFromTheServersClock() async throws {
+        let database = CaptureFakeDatabase()
+        await database.write(row(1, rowID: 1, at: -30))
+        var rows = poller(pageSize: 10, maxPages: 5)
+        #expect(try await rows.poll(database, excluding: me).rows.count == 1)
+
+        // Only this Mac writes (rows the poll leaves out): each poll starts just behind the previous one's
+        // clock, not behind the last row another Mac wrote.
+        for step in 1...3 {
+            let at = Double(step * 20)
+            await database.write(row(Int64(100 + step), rowID: Int64(100 + step), at: at, device: me))
+            await database.setServerNow(now.addingTimeInterval(at))
+            let poll = try await rows.poll(database, excluding: me)
+            #expect(poll.rows.isEmpty && poll.skipped == 0)
+            #expect(await database.writtenCursors.last == RequestWriteCursor(updatedAt: now.addingTimeInterval(at - 23), rowID: 0))
+            #expect(rows.cursor == RequestWriteCursor(updatedAt: now.addingTimeInterval(at), rowID: 0))
+        }
+    }
+
+    @Test func aPollThatFellFarBehindSkipsToTheLastMinute() async throws {
+        let database = CaptureFakeDatabase()
+        await database.write(row(1, rowID: 1, at: -1))
+        var rows = poller(pageSize: 10, maxPages: 2)
+        #expect(try await rows.poll(database, excluding: me).rows.map(\.key.surgeID) == [1])
+
+        // This Mac slept for ten hours while the other Mac kept writing.
+        let gap: TimeInterval = 36_000
+        for id in 2...101 { await database.write(row(Int64(id), rowID: Int64(id), at: Double(id - 1) * gap / 100)) }
+        await database.setServerNow(now.addingTimeInterval(gap))
+        let poll = try await rows.poll(database, excluding: me)
+        #expect(poll.rows.map(\.key.surgeID) == [101], "only rows the live table can still show")
+        #expect(poll.skipped == gap - 60)
+        #expect(await database.writtenCursors.last == RequestWriteCursor(updatedAt: now.addingTimeInterval(gap - 63), rowID: 0))
+        #expect(!poll.capped)
+        #expect(try await rows.poll(database, excluding: me).skipped == 0)
+    }
+
+    @Test func aBurstTooLargeToKeepUpWithIsSkippedOnceItFallsBehind() async throws {
+        let database = CaptureFakeDatabase()
+        for id in 1...30 { await database.write(row(Int64(id), rowID: Int64(id), at: -1)) }
+        var rows = poller(pageSize: 10, maxPages: 1)
+        let first = try await rows.poll(database, excluding: me)
+        #expect(first.capped && rows.resumeAfter != nil)
+
+        // Two minutes later the rest of the burst is too old to matter: the poll starts from the last minute.
+        await database.setServerNow(now.addingTimeInterval(120))
+        await database.write(row(31, rowID: 31, at: 119))
+        let next = try await rows.poll(database, excluding: me)
+        #expect(next.rows.map(\.key.surgeID) == [31])
+        #expect(next.skipped == 61 && !next.capped)
+        #expect(rows.resumeAfter == nil)
     }
 
     @Test func aFailedPollChangesNothing() async throws {

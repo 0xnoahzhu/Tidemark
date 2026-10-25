@@ -252,8 +252,10 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var writtenRows: [RequestRecord] = []
     /// The server clock `requestWritePosition()` reports.
     var serverNow = Date(timeIntervalSince1970: 1_800_000_000)
+    /// The cursor of every `requestsWritten(after:)` call.
+    var writtenCursors: [RequestWriteCursor] = []
     /// Number of `requestsWritten(after:)` calls.
-    var writtenPages = 0
+    var writtenPages: Int { writtenCursors.count }
     private var nextID: Int64 = 1
 
     func setFailing(_ on: Bool) { failing = on }
@@ -392,7 +394,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram { Histogram(start: .now, end: .now, counts: []) }
     func requestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] {
         try check()
-        writtenPages += 1
+        writtenCursors.append(cursor)
         let after = writtenRows.compactMap { row in RequestWriteCursor(row).map { ($0, row) } }
             .filter { $0.0 > cursor && $0.1.deviceID != excluding }
             .sorted { $0.0 < $1.0 }

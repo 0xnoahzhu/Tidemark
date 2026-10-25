@@ -131,8 +131,9 @@ protocol TidemarkDatabase: Sendable {
     /// transaction that commits late adds rows just behind positions already read: poll again from a few
     /// seconds behind the newest position read and skip the positions already seen.
     func requestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord]
-    /// The server's current position in that order (its own clock, before every row written from now on),
-    /// where polling `requestsWritten(after:)` starts. This Mac's clock never takes part.
+    /// The server's current position in that order (its own clock, before every row written from now on). A
+    /// poll of `requestsWritten(after:)` starts from it and never falls far behind it, so this Mac's clock
+    /// never takes part.
     func requestWritePosition() async throws -> RequestWriteCursor
     func distinctPolicies(since: Date?) async throws -> [String]
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64
