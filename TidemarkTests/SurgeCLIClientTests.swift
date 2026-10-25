@@ -19,7 +19,7 @@ struct SurgeCLIClientTests {
     }
 
     @Test func sendsTheRemotePasswordOnStandardInputOnly() async throws {
-        let cli = try SurgeFakeCLI(#"printf '%s\n' "$*"; cat"#)
+        let cli = try await SurgeFakeCLI(#"printf '%s\n' "$*"; cat"#)
         defer { cli.remove() }
         let client = cli.client(remote: "10.0.0.2:6171", password: "correct horse")
         let invocation = client.invocation(["status"])
@@ -32,7 +32,7 @@ struct SurgeCLIClientTests {
     }
 
     @Test func keepsStandardInputEmptyForTheLocalInstance() async throws {
-        let cli = try SurgeFakeCLI(#"cat; printf 'done'"#)
+        let cli = try await SurgeFakeCLI(#"cat; printf 'done'"#)
         defer { cli.remove() }
         let output = try await SurgeCLIClient.execute(cli.client().invocation(["status"]), killGrace: .seconds(1))
         #expect(String(decoding: output.stdout, as: UTF8.self) == "done")
@@ -40,7 +40,7 @@ struct SurgeCLIClientTests {
 
     @Test func decodesLargeOutputWithoutBlocking() async throws {
         // ~1 MB, far beyond a pipe buffer: the output must be drained while the child runs.
-        let cli = try SurgeFakeCLI(#"""
+        let cli = try await SurgeFakeCLI(#"""
         printf '{"requests":['
         i=0
         while [ $i -lt 1000 ]; do
@@ -58,7 +58,7 @@ struct SurgeCLIClientTests {
     }
 
     @Test func mapsFailuresToCommandFailed() async throws {
-        let cli = try SurgeFakeCLI(#"echo "Error: Policy doesn't exist" >&2; exit 1"#)
+        let cli = try await SurgeFakeCLI(#"echo "Error: Policy doesn't exist" >&2; exit 1"#)
         defer { cli.remove() }
         await #expect(throws: SurgeError.commandFailed(command: "test-policy-external-ip Missing", message: "Policy doesn't exist")) {
             try await cli.client().externalIP(policy: "Missing")
@@ -80,7 +80,7 @@ struct SurgeCLIClientTests {
     }
 
     @Test func timesOutWithSIGTERM() async throws {
-        let cli = try SurgeFakeCLI("exec sleep 30")
+        let cli = try await SurgeFakeCLI(SurgeFakeCLI.waitWhileTheTestRuns)
         defer { cli.remove() }
         let client = cli.client(timeouts: .init(standard: .milliseconds(300), network: .seconds(60), killGrace: .seconds(5)))
         let clock = ContinuousClock()
@@ -92,20 +92,28 @@ struct SurgeCLIClientTests {
     }
 
     @Test func escalatesToSIGKILLWhenSIGTERMIsIgnored() async throws {
-        let cli = try SurgeFakeCLI("trap '' TERM\nwhile true; do :; done")
-        defer { cli.remove() }
-        let client = cli.client(timeouts: .init(standard: .milliseconds(200), network: .seconds(60), killGrace: .milliseconds(300)))
+        let pidFile = FileManager.default.temporaryDirectory.appending(path: "tidemark-kill-\(UUID().uuidString).pid")
+        // The PID is written once SIGTERM is ignored.
+        let cli = try await SurgeFakeCLI("trap '' TERM\necho $$ > '\(pidFile.path)'\n" + SurgeFakeCLI.waitWhileTheTestRuns)
+        defer {
+            cli.remove()
+            try? FileManager.default.removeItem(at: pidFile)
+        }
+        let client = cli.client(timeouts: .init(standard: .milliseconds(500), network: .seconds(60), killGrace: .milliseconds(300)))
         let clock = ContinuousClock()
         let started = clock.now
         await #expect(throws: SurgeError.timedOut(command: "dump active")) {
             try await client.activeRequests()
         }
         #expect(clock.now - started < .seconds(3))
+        // A fake that set its trap before the timeout could only be ended by SIGKILL.
+        let pid = try #require(Self.pid(in: pidFile), "the fake ignored SIGTERM before the timeout")
+        #expect(await Self.waitUntilGone(pid), "killed and reaped")
     }
 
     @Test func cancellingACommandTerminatesTheChild() async throws {
         let pidFile = FileManager.default.temporaryDirectory.appending(path: "tidemark-cancel-\(UUID().uuidString).pid")
-        let cli = try SurgeFakeCLI("echo $$ > '\(pidFile.path)'\nexec sleep 30")
+        let cli = try await SurgeFakeCLI("echo $$ > '\(pidFile.path)'\n" + SurgeFakeCLI.waitWhileTheTestRuns)
         defer {
             cli.remove()
             try? FileManager.default.removeItem(at: pidFile)
@@ -120,7 +128,7 @@ struct SurgeCLIClientTests {
     // MARK: - Events
 
     @Test func streamsEventsUntilTheChildExits() async throws {
-        let cli = try SurgeFakeCLI("cat '\(SurgeFixtures.url("surge-watch.jsonl").path)'")
+        let cli = try await SurgeFakeCLI("cat '\(SurgeFixtures.url("surge-watch.jsonl").path)'")
         defer { cli.remove() }
         var kinds: [String] = []
         for try await event in cli.client().events() {
@@ -135,7 +143,7 @@ struct SurgeCLIClientTests {
     }
 
     @Test func passesTheWatchedEventNames() async throws {
-        let cli = try SurgeFakeCLI(#"printf '%s\n' "$*""#)
+        let cli = try await SurgeFakeCLI(#"printf '%s\n' "$*""#)
         defer { cli.remove() }
         var lines: [String] = []
         for try await event in cli.client().events() {
@@ -145,7 +153,7 @@ struct SurgeCLIClientTests {
     }
 
     @Test func failsTheStreamWithStandardErrorOnNonZeroExit() async throws {
-        let cli = try SurgeFakeCLI(#"echo '{"result":"Event subscribed"}'; echo "Error: The controller connection has been closed" >&2; exit 2"#)
+        let cli = try await SurgeFakeCLI(#"echo '{"result":"Event subscribed"}'; echo "Error: The controller connection has been closed" >&2; exit 2"#)
         defer { cli.remove() }
         var subscribed = false
         var failure: (any Error)?
@@ -163,7 +171,7 @@ struct SurgeCLIClientTests {
 
     @Test func stoppingTheConsumerTerminatesTheWatch() async throws {
         let pidFile = FileManager.default.temporaryDirectory.appending(path: "tidemark-watch-\(UUID().uuidString).pid")
-        let cli = try SurgeFakeCLI("echo $$ > '\(pidFile.path)'\necho '{\"result\":\"Event subscribed\"}'\nexec sleep 30")
+        let cli = try await SurgeFakeCLI("echo $$ > '\(pidFile.path)'\necho '{\"result\":\"Event subscribed\"}'\n" + SurgeFakeCLI.waitWhileTheTestRuns)
         defer {
             cli.remove()
             try? FileManager.default.removeItem(at: pidFile)
@@ -179,13 +187,16 @@ struct SurgeCLIClientTests {
 
     private static func waitForPID(in file: URL) async throws -> pid_t {
         for _ in 0..<100 {
-            if let text = try? String(contentsOf: file, encoding: .utf8),
-               let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                return pid
-            }
+            if let pid = pid(in: file) { return pid }
             try await Task.sleep(for: .milliseconds(50))
         }
         throw CancellationError()
+    }
+
+    /// The PID a fake wrote to `file`, nil when it has not written it.
+    private static func pid(in file: URL) -> pid_t? {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        return pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// Polls until no process has `pid` (at most 5 s).
@@ -203,13 +214,37 @@ private struct SurgeFakeCLI {
     let directory: URL
     let path: String
 
-    init(_ body: String) throws {
+    /// Script lines that keep a fake running while the test host that launched it lives, for a minute at most,
+    /// without a grandchild holding the output pipes open. A fake orphaned by a test run that was killed or
+    /// crashed (before Tidemark could stop it) ends on its own instead of running, or spinning, forever.
+    static let waitWhileTheTestRuns = """
+    i=0
+    while [ $i -lt 600 ] && kill -0 $PPID 2>/dev/null; do sleep 0.1 </dev/null >/dev/null 2>&1; i=$((i + 1)); done
+    """
+
+    /// Writes the script and launches it once, doing nothing. macOS checks a new executable on its first launch,
+    /// which can take longer than the short timeouts these tests use (a busy Mac took 0.2–1.6 s): SIGTERM would
+    /// then reach the script before it ran a line, and a test of what the script does about it would prove nothing.
+    init(_ body: String) async throws {
         directory = FileManager.default.temporaryDirectory.appending(path: "TidemarkFakeSurge-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appending(path: "surge-cli")
-        try ("#!/bin/sh\n" + body + "\n").write(to: url, atomically: true, encoding: .utf8)
+        let script = "#!/bin/sh\n[ -n \"$TIDEMARK_FAKE_WARM_UP\" ] && exit 0\n" + body + "\n"
+        try script.write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         path = url.path
+
+        let warmUp = Process()
+        warmUp.executableURL = url
+        warmUp.environment = ["TIDEMARK_FAKE_WARM_UP": "1"]
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            warmUp.terminationHandler = { _ in continuation.resume() }
+            do {
+                try warmUp.run()
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
     }
 
     func client(remote: String? = nil, password: String? = nil, timeouts: SurgeCLIClient.Timeouts = .init()) -> SurgeCLIClient {
