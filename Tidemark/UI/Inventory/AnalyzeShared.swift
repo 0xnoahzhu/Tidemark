@@ -179,60 +179,6 @@ enum AnalyzeFormat {
     }
 }
 
-// MARK: - Muting
-
-/// Mute state of a host or IP, shown as the hover action on inventory rows.
-enum AnalyzeMuteState: Equatable {
-    case unmuted
-    case muted
-    /// Matched by a wildcard pattern (`*.apple.com`), which Tidemark offers no way to unmute.
-    case mutedByRule
-
-    @MainActor
-    init(_ value: String, alerts: AlertState) {
-        if alerts.isMutedByRule(value) { self = .mutedByRule } else if alerts.isMuted(value) { self = .muted } else { self = .unmuted }
-    }
-}
-
-/// Small borderless Mute / Unmute / "Muted by rule" button for inventory rows.
-struct AnalyzeMuteButton: View {
-    @Environment(AppModel.self) private var model
-    var value: String
-
-    var body: some View {
-        let state = AnalyzeMuteState(value, alerts: model.alerts)
-        Button {
-            Task { await Self.toggle(value, state: state, model: model) }
-        } label: {
-            Text(Self.title(state))
-                .font(.system(size: 11, weight: .medium))
-                .padding(.horizontal, 7)
-                .frame(height: 20)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(state == .mutedByRule ? Theme.ink3 : Theme.ink)
-        .disabled(state == .mutedByRule)
-        .fixedSize()
-    }
-
-    static func title(_ state: AnalyzeMuteState) -> String {
-        switch state {
-        case .unmuted: tr("Mute", "Inventory")
-        case .muted: tr("Unmute", "Inventory")
-        case .mutedByRule: tr("Muted by rule", "Inventory")
-        }
-    }
-
-    static func toggle(_ value: String, state: AnalyzeMuteState, model: AppModel) async {
-        switch state {
-        case .unmuted: await model.capture.mute(value, dismissingAlert: nil)
-        case .muted: await model.capture.unmute(value)
-        case .mutedByRule: break
-        }
-    }
-}
-
 // MARK: - CSV export
 
 /// Builds RFC 4180 CSV text for the Domains & IPs exports.
@@ -247,13 +193,12 @@ enum AnalyzeCSV {
     }
 
     /// One row per domain or IP of a monitored app's inventory.
-    static func appHosts(_ hosts: [AppHost], mutes: [String], now: Date = .now) -> String {
-        let header = ["kind", "value", "site", "first_seen", "last_seen", "requests", "new", "muted",
+    static func appHosts(_ hosts: [AppHost], now: Date = .now) -> String {
+        let header = ["kind", "value", "site", "first_seen", "last_seen", "requests", "new",
                       "by_ip_only", "resolved_from", "country", "asn", "organization", "policy", "first_process"]
         let rows = hosts.map { host in
             [host.kind.rawValue, host.value, host.site ?? "", timestamp(host.firstSeen), timestamp(host.lastSeen),
              String(host.requestCount), host.isNew(now: now) ? "yes" : "no",
-             AlertState.matches(host.value, patterns: mutes) ? "yes" : "no",
              host.kind == .ip && host.isDirect ? "yes" : "no", host.hosts.joined(separator: " "),
              host.geo?.countryCode ?? "", host.geo?.asn.map { "AS\($0)" } ?? "", host.geo?.organization ?? "",
              host.policy ?? "", host.processName ?? ""]

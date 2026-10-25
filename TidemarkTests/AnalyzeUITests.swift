@@ -66,19 +66,20 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(csv == "a,b\r\n1,\"x,y\"\r\n")
     }
 
-    @Test func exportsAppInventoryWithMutesAndDirectIPs() {
+    /// One row per domain or IP, with no "muted" column: Tidemark has no mutes.
+    @Test func exportsAppInventoryWithDirectIPs() {
         let now = Date()
         let hosts = [
             host("api.github.com", site: "github.com", ageHours: 2, requests: 12, now: now),
             host("149.154.175.60", kind: .ip, direct: true, now: now),
         ]
-        let lines = AnalyzeCSV.appHosts(hosts, mutes: ["*.github.com"], now: now).components(separatedBy: "\r\n")
-        #expect(lines[0].hasPrefix("kind,value,site,first_seen"))
+        let lines = AnalyzeCSV.appHosts(hosts, now: now).components(separatedBy: "\r\n")
+        #expect(lines[0] == "kind,value,site,first_seen,last_seen,requests,new,by_ip_only,resolved_from,country,asn,organization,policy,first_process")
         let domain = lines[1].components(separatedBy: ",")
         #expect(domain[0] == "domain" && domain[1] == "api.github.com" && domain[2] == "github.com")
-        #expect(domain[5] == "12" && domain[6] == "yes" && domain[7] == "yes")
+        #expect(domain[5] == "12" && domain[6] == "yes" && domain[7] == "no")
         let ip = lines[2].components(separatedBy: ",")
-        #expect(ip[0] == "ip" && ip[8] == "yes" && ip[7] == "no")
+        #expect(ip[0] == "ip" && ip[7] == "yes")
     }
 }
 

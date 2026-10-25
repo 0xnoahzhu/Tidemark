@@ -211,26 +211,6 @@
         }
       }
     },
-    "Mute" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "静音"
-          }
-        }
-      }
-    },
-    "Muted by rule" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "规则已静音"
-          }
-        }
-      }
-    },
     "Name" : {
       "localizations" : {
         "zh-Hans" : {
@@ -377,16 +357,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未知网络"
-          }
-        }
-      }
-    },
-    "Unmute" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "取消静音"
           }
         }
       }

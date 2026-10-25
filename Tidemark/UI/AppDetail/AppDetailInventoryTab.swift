@@ -303,7 +303,7 @@ struct AppDetailInventoryTab: View {
     }
 
     private func export() {
-        exportDocument = AnalyzeCSVDocument(text: AnalyzeCSV.appHosts(hosts, mutes: model.alerts.mutes))
+        exportDocument = AnalyzeCSVDocument(text: AnalyzeCSV.appHosts(hosts))
         isExporting = true
     }
 }
