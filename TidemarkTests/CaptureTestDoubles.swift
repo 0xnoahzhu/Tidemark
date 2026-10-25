@@ -208,11 +208,29 @@ final class CaptureFakeSurge: SurgeClient {
 
 /// In-memory database that records what the engine writes. `failing` makes every write throw
 /// `DatabaseError.unreachable`; `refusingEverything` makes request writes throw `DatabaseError.query`;
-/// `enforcesForeignKeys` refuses rows that name an app missing from `appList`, like PostgreSQL's foreign keys.
+/// `enforcesForeignKeys` refuses rows that name an app missing from `appList`, and `enforcesDeviceKeys` request rows
+/// of a device that was not registered (or was merged away), like PostgreSQL's foreign keys.
 actor CaptureFakeDatabase: TidemarkDatabase {
     var failing = false
     var refusingEverything = false
     var enforcesForeignKeys = false
+    var enforcesDeviceKeys = false
+    /// Devices `upsertDevice` registered, less the ones merged away.
+    var registeredDevices: Set<DeviceID> = []
+    /// What `devices()` answers.
+    var deviceList: [Device] = []
+    /// Every device `upsertDevice` wrote, in order.
+    var upsertedDevices: [Device] = []
+    /// Every `mergeDevice` call, in order, with the number of request rows written before it.
+    var deviceMerges: [(from: DeviceID, into: DeviceID, idleFor: Duration?, writesBefore: Int)] = []
+    /// `mergeDevice` throws this while set.
+    var mergeFailure: DatabaseError?
+    /// What `mergeDevice` answers for these devices, without merging them.
+    var mergeRefusals: [DeviceID: DeviceMergeResult.Refusal] = [:]
+    /// What `devicesSharingHistory` answers.
+    var historySharers: [DeviceID] = []
+    /// Every `devicesSharingHistory` call, in order.
+    var historyLookups: [(device: DeviceID, sessions: [Int64])] = []
     /// Request rows with these hosts are always refused (`DatabaseError.query`).
     var refusedHosts: Set<String> = []
     /// Request writes hang until cancelled (a black-holed connection), `stallLimit` at most.
@@ -273,11 +291,19 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func setOnUpsertDevice(_ hook: @escaping @Sendable () async -> Bool) { onUpsertDevice = hook }
     func setRefusingEverything(_ on: Bool) { refusingEverything = on }
     func setEnforcesForeignKeys(_ on: Bool) { enforcesForeignKeys = on }
+    func setEnforcesDeviceKeys(_ on: Bool) { enforcesDeviceKeys = on }
+    /// Pretends `device`'s row exists (registered by an earlier run).
+    func register(_ device: DeviceID) { registeredDevices.insert(device) }
     func setRefusedHosts(_ hosts: Set<String>) { refusedHosts = hosts }
     func setStallingRequests(_ on: Bool) { stallingRequests = on }
     func setTimingOutRequests(_ on: Bool) { timingOutRequests = on }
     func setStallingProbeSaves(_ on: Bool) { stallingProbeSaves = on }
     func setFailingMaintenance(_ on: Bool) { failingMaintenance = on }
+    /// `mergeDevice` fails at its statement timeout while set.
+    func setFailingMerges(_ on: Bool) { mergeFailure = on ? .timedOut(.statement(PostgresDatabase.maintenanceTimeout)) : nil }
+    func setMergeFailure(_ error: DatabaseError?) { mergeFailure = error }
+    func setMergeRefusal(_ refusal: DeviceMergeResult.Refusal?, for device: DeviceID) { mergeRefusals[device] = refusal }
+    func setHistorySharers(_ devices: [DeviceID]) { historySharers = devices }
     func setAppsDelay(_ delay: Duration) { appsDelay = delay }
     func setApps(_ apps: [MonitoredApp]) { appList = apps }
     func setMutes(_ patterns: [String]) { mutesList = patterns }
@@ -303,6 +329,11 @@ actor CaptureFakeDatabase: TidemarkDatabase {
         guard enforcesForeignKeys, let appID, !appList.contains(where: { $0.id == appID }) else { return }
         throw DatabaseError.query("insert or update violates foreign key constraint (app \(appID))")
     }
+    /// The foreign key `device_id → devices(id)`.
+    private func checkDevice(_ deviceID: DeviceID) throws {
+        guard enforcesDeviceKeys, !registeredDevices.contains(deviceID) else { return }
+        throw DatabaseError.query("insert or update violates foreign key constraint \"requests_device_id_fkey\" (device \(deviceID))")
+    }
     private func newID() -> Int64 {
         defer { nextID += 1 }
         return nextID
@@ -317,10 +348,44 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func upsertDevice(_ device: Device) async throws {
         try check()
         deviceUpserts.append(device.id)
+        upsertedDevices.append(device)
+        registeredDevices.insert(device.id)
         if let onUpsertDevice { onlineWhenRegistered.append(await onUpsertDevice()) }
     }
-    func devices() async throws -> [Device] { [] }
+    func devices() async throws -> [Device] { deviceList }
+    func setDevices(_ devices: [Device]) { deviceList = devices }
     func renameDevice(_ id: DeviceID, name: String) async throws {}
+    /// Moves `from`'s request rows to `into`; a row `into` already has is dropped.
+    func mergeDevice(_ from: DeviceID, into: DeviceID, idleFor: Duration?) async throws -> DeviceMergeResult {
+        try check()
+        deviceMerges.append((from, into, idleFor, writes.count))
+        if let mergeFailure { throw mergeFailure }
+        guard from != into else { return DeviceMergeResult() }
+        if let refusal = mergeRefusals[from] { return DeviceMergeResult(refusal: refusal) }
+        var result = DeviceMergeResult(merged: registeredDevices.contains(from) || rows.keys.contains { $0.deviceID == from })
+        for (key, row) in rows where key.deviceID == from {
+            var moved = row
+            moved.key.deviceID = into
+            rows[key] = nil
+            let id = rowIDs.removeValue(forKey: key)
+            if rows[moved.key] == nil {
+                rows[moved.key] = moved
+                rowIDs[moved.key] = id
+                result.requestsMoved += 1
+            } else {
+                result.duplicatesDropped += 1
+            }
+        }
+        registeredDevices.remove(from)
+        deviceList.removeAll { $0.id == from }
+        historySharers.removeAll { $0 == from }
+        return result
+    }
+    func devicesSharingHistory(with device: DeviceID, sessions: [Int64]) async throws -> [DeviceID] {
+        try check()
+        historyLookups.append((device, sessions))
+        return historySharers.filter { $0 != device }
+    }
 
     func apps() async throws -> [MonitoredApp] {
         try check()
@@ -355,6 +420,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
         for row in rows {
             if refusedHosts.contains(row.host) { throw DatabaseError.query("value too long for \(row.host)") }
             try checkApp(row.appID)
+            try checkDevice(row.key.deviceID)
         }
         var result: [RequestKey: Int64] = [:]
         var inserted = 0

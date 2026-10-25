@@ -675,6 +675,8 @@ private struct RequestsStubDatabase: TidemarkDatabase {
     func upsertDevice(_ device: Device) async throws {}
     func devices() async throws -> [Device] { [] }
     func renameDevice(_ id: DeviceID, name: String) async throws {}
+    func mergeDevice(_ from: DeviceID, into: DeviceID, idleFor: Duration?) async throws -> DeviceMergeResult { DeviceMergeResult() }
+    func devicesSharingHistory(with device: DeviceID, sessions: [Int64]) async throws -> [DeviceID] { [] }
     func apps() async throws -> [MonitoredApp] { [] }
     func insertApp(_ app: MonitoredApp) async throws {}
     func updateApp(_ app: MonitoredApp) async throws {}

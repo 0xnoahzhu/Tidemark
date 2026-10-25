@@ -23,7 +23,7 @@ domain or IP it has never used before.
 | `Model/` | Value types shared by every layer (`RequestRecord`, `MonitoredApp`, `AlertItem`, …) | Foundation |
 | `Services/` | Protocols (`SurgeClient`, `ProcessInspecting`, `SiteClassifying`, `TidemarkDatabase`, `CaptureActions`, `ProbeActions`, `EgressActions`, `HostInsightProviding`), Surge wire types, inert placeholders | Model |
 | `State/` | `@MainActor @Observable` state objects and `AppModel`, the root injected into SwiftUI | Model, Services |
-| `Support/` | Formatters, Keychain, request timing builder, `AppNaming` (an app's name everywhere: Finder's display name of its bundle) | Model |
+| `Support/` | Formatters, Keychain, request timing builder, `AppNaming` (an app's name everywhere: Finder's display name of its bundle), `DeviceIdentity` (this Mac's device ID) | Model |
 | `Localization/` | `Localizer`, `tr()` / `trf()` / `trn()` | — |
 | `Surge/` | `SurgeCLIClient`: runs surge-cli, parses events, reconnects | Services |
 | `Process/` | `LibProcInspector` (libproc), `PublicSuffixClassifier` (bundled PSL) | Services |
@@ -176,7 +176,20 @@ migration runner and every time limit.
   `~/Library/Application Support/Tidemark/spool/` (up to 500,000 rows) and replayed on reconnect.
   `shared-state.json` keeps the last known apps, mutes and inventory index so attribution and first-contact
   detection keep working when Tidemark starts without a database, and `auxiliary.json` keeps unwritten
-  inventory and alert work across a quit.
+  inventory and alert work across a quit. Everything on disk is this Mac's own, so it is replayed under this
+  Mac's current device ID, whatever ID it was saved under: an earlier ID may have been merged away meanwhile (see
+  [Multi-Mac](#multi-mac)), and a row of a device that no longer exists would be refused. A replayed row whose key
+  now matches a stored row merges into it like any rewrite. The ID it was saved under is this Mac's too, and is
+  merged into the current one.
+* **Merging devices** — `mergeDevice(from, into:, idleFor:)` moves everything one device ID wrote to another and
+  deletes the first: requests in batches of 1,000, each its own transaction (a request the target already has is
+  merged into the target's row and dropped), then, with `from`'s row locked, processes, installs, host sources and
+  the rest. Every transaction waits at most 1 s for a lock, less than capture's writes, so the merge gives way to
+  capture (and tries again) instead of the other way round. With `idleFor` it leaves `from` alone when something
+  wrote under it during that time or while the merge ran. It is resumable and idempotent. Capture runs it as
+  maintenance beside the writes, after the closes of a round (requests it moves that earlier sessions left active
+  are closed in the next round), with its own retry time and backoff, and never takes capture offline.
+  [DATABASE.md › Merging devices](DATABASE.md#merging-devices) has the statements.
 * **Pools** — a 6-connection pool for reads and a separate 2-connection writer pool, each with server-side
   `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout`, so a slow page query can
   never starve the writer. Reads over a long history (History pages, totals and histogram, an app's counters…)
@@ -195,7 +208,29 @@ migration runner and every time limit.
 
 ## Multi-Mac
 
-Every row carries `device_id`. Each Mac records and alerts on its own requests, and every Mac posts the
+Every row carries `device_id`. A Mac's ID is derived from its hardware UUID (`DeviceIdentity`): a name-based UUID
+(version 5) of the `IOPlatformUUID` under Tidemark's own namespace, so a Mac keeps its ID whether or not its
+preferences can be read, and across reinstalls, while the hardware UUID itself never reaches the shared database
+([DATABASE.md › Device identity](DATABASE.md#device-identity) has the derivation). Only a Mac whose hardware UUID
+cannot be read falls back to a random ID stored in its preferences (`device.id`).
+
+Earlier versions always used that stored random ID, so a launch that could not read the preferences registered the
+Mac a second time, under an ID stored nowhere. Capture merges every earlier ID of this Mac into the derived one
+(`mergeDevice`, see [Database](#database)):
+
+* the ID still stored in the preferences, when it differs: the derived ID's row is registered (before writes
+  resume, as always) with the earlier row's name, color and age, and the stored ID is forgotten once merged;
+* an ID named in the spool or in `auxiliary.json`;
+* an ID that shares history with this Mac (`devicesSharingHistory`): a Mac (not a remote Surge) that recorded one
+  of this Mac's Surge sessions, identified by that Surge's start time in milliseconds, or two of its processes (PID
+  and start time). Looked for once merging is due, hourly, and right after a merge moved rows, whose sessions lead
+  to an ID invented while the preferences could not be read.
+
+Merging waits two minutes after the launch first reached PostgreSQL and for the spool to be replayed, and skips an
+ID that something wrote under since then (an older build beside this one, a Mac the preferences were copied to)
+until the next launch. Until an ID has been merged the Mac is listed more than once.
+
+Each Mac records and alerts on its own requests, and every Mac posts the
 notifications of every Mac's alerts. The sidebar's Mac menu scopes every page to one Mac or all, except alerts:
 the Notifications page, its unread count, "Mark All as Read" and the menu bar list every Mac's alerts. The live
 table merges this Mac's stream with rows other Macs wrote (polled by `updated_at` through

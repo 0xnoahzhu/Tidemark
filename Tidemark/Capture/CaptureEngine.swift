@@ -187,6 +187,7 @@ final class CaptureEngine {
         startJobs()
         databaseTask = Task { [weak self] in
             guard let self else { return }
+            await self.scheduleLegacyDeviceMerge()
             let connected = await self.connectDatabase()
             if !connected { await self.restoreSavedState() }
             self.startStream()
@@ -383,24 +384,50 @@ final class CaptureEngine {
         }
     }
 
-    /// Upserts this Mac's row (and the remote Surge's row) and loads every device.
+    /// Upserts this Mac's row (and the remote Surge's row) and loads every device. A Mac registering its derived ID
+    /// for the first time (`DeviceIdentity`) keeps the name, color and age its earlier ID had, whose rows are merged
+    /// into it in the background (`scheduleLegacyDeviceMerge`).
     private func registerDevices() async {
         let existing = (try? await database.devices()) ?? []
         let id = thisDeviceID
         let current = existing.first { $0.id == id }
+        let earlier = model.preferences.legacyDeviceID.flatMap { legacy in existing.first { $0.id == legacy } }
         let product = CaptureDeviceInfo.productName()
-        let name = current?.name ?? CaptureDeviceInfo.computerName()
+        let name = current?.name ?? earlier?.name ?? CaptureDeviceInfo.computerName()
         let device = Device(
-            id: id, name: name, model: CaptureDeviceInfo.modelDescription(product: product) ?? current?.model,
+            id: id, name: name, model: CaptureDeviceInfo.modelDescription(product: product) ?? current?.model ?? earlier?.model,
             shortName: CaptureDeviceInfo.shortName(name: name, product: product),
-            hue: current?.hue ?? CaptureDeviceInfo.hue(for: id), isRemoteSurge: false,
-            rowCount: current?.rowCount ?? 0, lastWriteAt: current?.lastWriteAt, createdAt: current?.createdAt ?? .now
+            hue: current?.hue ?? earlier?.hue ?? CaptureDeviceInfo.hue(for: id), isRemoteSurge: false,
+            rowCount: current?.rowCount ?? 0, lastWriteAt: current?.lastWriteAt, createdAt: current?.createdAt ?? earlier?.createdAt ?? .now
         )
         do { try await database.upsertDevice(device) } catch {
             Self.log.error("Registering this Mac failed: \(error.localizedDescription, privacy: .public)")
         }
         if let remote = remoteDevice(existing: existing) { try? await database.upsertDevice(remote) }
         await refreshDevices()
+    }
+
+    /// An earlier version stored a different ID for this Mac (`Preferences.legacyDeviceID`): its rows are merged into
+    /// this Mac's ID as background maintenance, once PostgreSQL is reachable, the spool is replayed (spooled rows are
+    /// written under the current ID) and nothing wrote under the earlier ID for a while (`CapturePipeline
+    /// .deviceMergeDelay`). Until then the Mac shows twice in the Mac list. The pipeline also merges IDs of this Mac
+    /// that are stored nowhere: found in the spool, or by the Surge sessions and processes they share with this Mac.
+    func scheduleLegacyDeviceMerge() async {
+        guard let legacy = model.preferences.legacyDeviceID else { return }
+        await pipeline.scheduleDeviceMerge(from: legacy, into: thisDeviceID)
+    }
+
+    /// Earlier IDs of this Mac whose rows were merged: forgotten, so the merge never runs again. The Mac list and the
+    /// pages scoped to a Mac reload without them.
+    private func devicesMerged(_ ids: [DeviceID]) {
+        for id in ids {
+            model.preferences.forgetLegacyDeviceID(id)
+            if model.devices.scope == .device(id) { model.devices.scope = .device(thisDeviceID) }
+        }
+        debounce("devices-merged", .milliseconds(500)) { engine in
+            await engine.refreshDevices()
+            await engine.reloadScoped()
+        }
     }
 
     private func remoteDevice(existing: [Device]) -> Device? {
@@ -721,6 +748,7 @@ final class CaptureEngine {
         if update.lostInventoryRace {
             debounce("inventory-merge", .seconds(5)) { await $0.mergeInventory() }
         }
+        if !update.mergedDevices.isEmpty { devicesMerged(update.mergedDevices) }
         for signal in update.signals {
             switch signal {
             case .environmentChanged:

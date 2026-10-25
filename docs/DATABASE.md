@@ -51,6 +51,7 @@ Tidemark opens a 6-connection pool for reads and a 2-connection writer pool (`Ti
 | Reads, settings (`Tidemark`) | 30 s | 10 s | 60 s |
 | Reads over a long history: History pages, totals and histogram, the policy list, an app's counters and process tree, the backfill preview | 5 min (`SET LOCAL` in its own transaction) | 10 s | 60 s |
 | Maintenance: backfill, deleting an app | 10 min (`SET LOCAL`) | 10 s | 60 s |
+| Merging devices: every transaction of a merge | 10 min (`SET LOCAL`) | 1 s (`SET LOCAL`, below capture's; the transaction is tried again) | 60 s |
 | Capture writes (`Tidemark writer`) | 15 s | 5 s | 15 s |
 | Closing (or counting) requests of ended sessions or that ended while Tidemark was not running | 15 s (`SET LOCAL`) | 10 s | 60 s |
 | Migration transactions | 5 min | 3 s per statement (retried) | 60 s |
@@ -83,7 +84,7 @@ loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`)
 
 | Table | One row per | Notes |
 |---|---|---|
-| `devices` | Mac (or remote Surge) writing to the database | `row_count` and `last_write_at` drive the "Macs writing to this database" list |
+| `devices` | Mac (or remote Surge) writing to the database | `id` is derived from the Mac's hardware UUID ([Device identity](#device-identity)); `row_count` and `last_write_at` drive the "Macs writing to this database" list |
 | `apps` | monitored app, shared by every Mac | matched by bundle `path`; `archived_at` set when archived |
 | `app_installs` | (app, Mac) | whether the bundle path exists on that Mac |
 | `requests` | Surge request | the main log; upserted as the request progresses |
@@ -142,6 +143,93 @@ everything moves its position up to the server's clock, so while the other Macs 
 the last few seconds of this Mac's own rows. Because `updated_at` is the writing transaction's start, a
 transaction that commits late adds rows just behind a position already read: each poll that starts afresh steps
 back 3 s and skips the `(id, updated_at)` positions it already returned.
+
+## Devices
+
+### Device identity
+
+A Mac's `devices.id`, the `device_id` of every row it writes, is a name-based UUID (RFC 9562 version 5, SHA-1) of
+its hardware UUID under Tidemark's own namespace:
+
+```
+device_id = uuid5(52DEF2FE-CE96-4221-91B0-8045B3FD8255, IOPlatformUUID in uppercase, as UTF-8)
+```
+
+The namespace never changes. The hardware UUID is `IOPlatformUUID` of `IOPlatformExpertDevice` (what System
+Information calls Hardware UUID). A Mac keeps its ID whether or not its preferences can be read and across
+reinstalls, and the hardware UUID itself never reaches the database. This prints a Mac's ID:
+
+```bash
+python3 -c 'import re, subprocess, uuid
+hw = re.search(r"\"IOPlatformUUID\" = \"([^\"]+)\"", subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], capture_output=True, text=True).stdout).group(1)
+print(str(uuid.uuid5(uuid.UUID("52DEF2FE-CE96-4221-91B0-8045B3FD8255"), hw.upper())).upper())'
+```
+
+Only a Mac whose hardware UUID cannot be read uses a random ID, generated once and stored in its preferences
+(`device.id` in `io.tidemark.Tidemark`). Earlier versions always did, so a launch that could not read the
+preferences registered the Mac a second time under a new random ID, stored nowhere. Tidemark merges every earlier
+ID of the Mac into the derived one ([below](#merging-devices)), however it finds it:
+
+* The ID still stored in the preferences, when it differs from the derived one. The derived ID is registered with
+  the stored row's name, color and age, and the stored ID is forgotten once merged.
+* An ID named in the spool or in `auxiliary.json`: those only ever hold this Mac's own work.
+* An ID that shares history with the Mac (`devicesSharingHistory`): a Mac, not a remote Surge, that recorded one of
+  the Mac's Surge sessions (a session is identified by that Surge's start time in milliseconds) or at least two of
+  its processes (same PID and start time, to the microsecond). No other Mac shares either. Tidemark looks once
+  merging is due, then hourly, and again right after a merge moved rows: merging the stored ID brings its sessions
+  to the derived ID, which finds an ID invented while the preferences could not be read.
+
+Merging starts two minutes after the launch first reached PostgreSQL, once the spool is replayed, as maintenance
+beside the writes, and only merges an ID nothing wrote under since then (`idleFor`): one that something still writes
+under (an older build beside this one, a Mac the preferences were copied to) is left alone until the next launch. A
+merge that failed is tried again ten minutes later, then after twice as long each time (four hours at most); once
+the server refused it three times in a row it waits for the next launch. It never takes capture offline.
+
+The spool and `auxiliary.json` are written under the Mac's current ID, whatever ID they were saved under: an ID
+merged away meanwhile no longer exists, and `requests.device_id` would refuse every row. A replayed row whose key
+now matches a stored row merges into it like any rewrite.
+
+### Merging devices
+
+`mergeDevice(from, into, idleFor)` makes one Mac of two device IDs: everything `from` wrote moves to `into`, and
+the `from` row is deleted. Its statements are `DeviceMergeSQL` in `Tidemark/Database/PostgresDatabase+DeviceMerge.swift`,
+with `$1` = `from` and `$2` = `into`. It runs beside capture's writes, so every transaction is short, has the 10 min
+maintenance statement timeout and waits at most 1 s for a lock: when capture holds a row the merge needs, the merge's
+transaction fails and is tried again (three times, 1 s apart) rather than capture waiting until it goes offline
+(5 s). Should the two still wait for each other, PostgreSQL ends one of the transactions and that one is tried again.
+
+1. `begin`: nothing to do when `from` does not exist (merged already). A remote Surge is never merged, nor merged
+   into. With `idleFor`, `since` is that long before the server's clock, and a `from` that wrote at or after it
+   (`last_write_at`) is left alone: something still writes under it. Otherwise `into` is created as a copy of `from`
+   when missing; it keeps its name unless it has no requests yet (a row registered moments ago under the computer's
+   name), it exists since the earlier `created_at` of the two and last wrote at the later `last_write_at`.
+2. `requests`, 1,000 rows of `from` per transaction (`$3` = their IDs), 250 ms apart, none once `from` wrote at or
+   after `since`. A row whose `(surge_session, surge_id)` `into` already has is a duplicate: `into`'s row is locked
+   (in key order, like capture's upserts), takes what only the duplicate knew (completion and state, IP, GeoIP,
+   policy, app, process, NEW…) and, when that changes it, a new `updated_at` (other Macs' live tables see it); alerts
+   that linked to the duplicate link to it, and the duplicate is deleted. The rest moves (`device_id = into`); a row
+   whose process `into` has too (same PID and start time) links to `into`'s. Moved rows keep their `updated_at`: a
+   new one would make other Macs read the whole history again and widen every range of `requests_updated_brin_idx`,
+   so another Mac shows them under `from` until it reloads. A row whose key capture wrote under `into` meanwhile
+   stays for the next batch, which merges it as a duplicate. `row_count` follows on both rows.
+3. One last transaction locks `from`'s row (`finishing`, `FOR UPDATE`): every row referencing `from` now waits, so
+   nothing can be written under it any more. A `from` that wrote at or after `since` is left in place (what moved
+   stays moved); requests written under it since its batches moved go back to step 2. Then:
+   * `processes`: one both have (same PID and start time) is merged into `into`'s (earlier first seen, later last
+     seen, app, path, parent), its children and requests link to `into`'s, and it is deleted; the rest moves.
+   * `app_installs` (the later check wins) and `host_sources` (earlier first seen, later last seen and its title,
+     counts added) merge the same way. A request both IDs recorded may count twice in a merged `request_count`:
+     only when the second ID saw it live, since a launch never counts a request it read back from Surge's recent
+     list. (`processes.request_count` is not maintained.)
+   * `alerts`, `probe_sessions`, `egress_checks`, `egress_changes` move, `app_hosts.first_device_id` follows, and
+     `from` is deleted.
+
+Every step only touches what is still `from`'s, so a merge that stopped half way finishes when it runs again, and
+merging twice does nothing. By hand, in psql, once nothing writes under `from` any more: `\set from …` and
+`\set into …`, then the same statements with `:'from'::uuid` and `:'into'::uuid` for `$1` and `$2` and NULL for
+`begin`'s `$3` and for `since`, the request statements without their batch condition (`… id = ANY($3) AND`, one
+batch holding every row) and `rowCounts` with the counts that `dropDuplicates` and `moveRequests` report, then the
+statements of step 3 in one transaction.
 
 ## Useful queries
 
@@ -207,6 +295,12 @@ GROUP BY host ORDER BY requests DESC LIMIT 25;
   background build's progress (`SELECT * FROM pg_stat_progress_create_index;`). It waits for transactions
   older than itself (a long `pg_dump`, a psql session left idle in a transaction) before it can finish.
   Tidemark logs failed builds under the `database` category of `io.tidemark.Tidemark` and retries them.
+* **Merging devices** — Tidemark merges a Mac's earlier IDs by itself ([Device identity](#device-identity)):
+  the one its preferences store, the ones its spool names and the ones that share its Surge sessions or processes.
+  Its log (`capture` category of `io.tidemark.Tidemark`) says when it merged one or left one alone. A Mac still
+  listed twice ("Macs writing to this database"), for instance an ID whose sessions and processes all ended before
+  a restart of the Mac and that no longer is in the preferences, is merged by hand with the statements of
+  [Merging devices](#merging-devices), once the ID merged away no longer writes.
 * **Backfill** — monitoring an app with "include past requests" attributes its past requests in windows of
   50,000 row IDs, then its processes and host sources, each in a statement of its own, then merges the
   rebuilt inventory 500 entries per transaction; capture's writes to the same rows never wait long.

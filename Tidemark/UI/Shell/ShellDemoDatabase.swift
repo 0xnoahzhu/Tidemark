@@ -83,6 +83,8 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func upsertDevice(_ device: Device) async throws { try await base.upsertDevice(device) }
     func devices() async throws -> [Device] { try await base.devices() }
     func renameDevice(_ id: DeviceID, name: String) async throws { try await base.renameDevice(id, name: name) }
+    func mergeDevice(_ from: DeviceID, into: DeviceID, idleFor: Duration?) async throws -> DeviceMergeResult { try await base.mergeDevice(from, into: into, idleFor: idleFor) }
+    func devicesSharingHistory(with device: DeviceID, sessions: [Int64]) async throws -> [DeviceID] { try await base.devicesSharingHistory(with: device, sessions: sessions) }
     func apps() async throws -> [MonitoredApp] { try await base.apps() }
     func insertApp(_ app: MonitoredApp) async throws { try await base.insertApp(app) }
     func updateApp(_ app: MonitoredApp) async throws { try await base.updateApp(app) }

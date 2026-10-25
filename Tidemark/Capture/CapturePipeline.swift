@@ -54,6 +54,8 @@ struct CaptureUIUpdate: Sendable {
     var databaseOnline = false
     /// Another Mac had already recorded inventory entries this Mac believed were new: the local index is stale.
     var lostInventoryRace = false
+    /// Earlier IDs of this Mac whose rows were merged into its current ID (`scheduleDeviceMerge`).
+    var mergedDevices: [DeviceID] = []
 }
 
 /// Processes Surge events off the main actor: maps and attributes requests, resolves remote IPs and GeoIP
@@ -137,6 +139,21 @@ actor CapturePipeline {
     let maintenanceBudget: Duration = .seconds(60)
     /// A failed maintenance statement is tried again after this long, or after the next reconnect.
     let maintenanceRetryInterval: TimeInterval = 600
+    /// Longest wait for merging an earlier ID of this Mac (`mergeDevice`, many statements over the whole request
+    /// log). An unfinished merge carries on where it stopped the next time.
+    let deviceMergeBudget: Duration = .seconds(3_600)
+    /// Merging earlier IDs of this Mac waits this long after this launch first reached PostgreSQL, and an ID is only
+    /// merged when nothing wrote under it since then: something still writing under it (an older build, a Mac its
+    /// preferences were copied to) shows itself meanwhile.
+    let deviceMergeDelay: TimeInterval = 120
+    /// Earlier IDs of this Mac are looked for again this often (`devicesSharingHistory`), and right after a merge
+    /// moved rows (their sessions and processes may lead to more).
+    let deviceLookInterval: TimeInterval = 3_600
+    /// Merging earlier IDs of this Mac is given up until the next launch once the server refused it this many times
+    /// in a row. Any other failure is tried again later, `maintenanceRetryInterval` after the first and twice as long
+    /// after each further one, `deviceMergeMaxRetryInterval` at most.
+    let deviceMergeRefusalLimit = 3
+    let deviceMergeMaxRetryInterval: TimeInterval = 4 * 3_600
     /// A remote Surge's `dump active` closes only rows that started this long before the newest start it or the
     /// `dump recent` taken before it lists (that Surge's clock, which may also step back a little).
     let remoteListingMargin: TimeInterval = 5
@@ -168,6 +185,21 @@ actor CapturePipeline {
     var lastEventAt: Date?
     var sessionCloses: [DeviceID: SessionClose] = [:]
     var vanishedCloses: [VanishedClose] = []
+    /// Earlier ID of this Mac → the ID its rows are merged into (`scheduleDeviceMerge`).
+    var deviceMerges: [DeviceID: DeviceID] = [:]
+    /// IDs merged in this launch, or left alone (something still writes under them, a remote Surge): not scheduled
+    /// again before the next launch.
+    var settledDevices: Set<DeviceID> = []
+    /// When to look for earlier IDs of this Mac by the history they share with it.
+    var nextDeviceLookAt = Date.distantPast
+    /// When this launch first reached PostgreSQL.
+    var writingSince: Date?
+    var deviceMergeRetryAt = Date.distantPast
+    /// Merge attempts that failed in a row, and how many of them the server refused.
+    var deviceMergeFailures = 0
+    var deviceMergeRefusals = 0
+    /// Merging was refused `deviceMergeRefusalLimit` times in a row: given up until the next launch.
+    var deviceMergesStopped = false
     /// The maintenance round in progress (one at a time).
     var maintenanceTask: Task<Void, Never>?
     var maintenanceRetryAt = Date.distantPast

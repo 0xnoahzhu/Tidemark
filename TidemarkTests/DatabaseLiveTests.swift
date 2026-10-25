@@ -1597,6 +1597,338 @@ struct DatabaseLiveTests {
         }
     }
 
+    // MARK: - Merging devices
+
+    @Test func mergingADeviceMovesEverythingAndDropsDuplicates() async throws {
+        try await withTestDatabase { db in
+            let old = Fixture.device("Noah’s Mac mini")
+            var new = Fixture.device("Mac mini")
+            new.createdAt = Fixture.now.addingTimeInterval(60)
+            let other = Fixture.device("MacBook Pro")
+            for device in [old, new, other] { try await db.upsertDevice(device) }
+            let cursor = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            let raycast = Fixture.app("Raycast", path: "/Applications/Raycast.app")
+            try await db.insertApp(cursor)
+            try await db.insertApp(raycast)
+
+            // Processes: both IDs recorded the same root process (a conflict); its child only under the old ID.
+            let t = Fixture.now.addingTimeInterval(-600)
+            let root = ProcessLink(name: "Cursor", pid: 812, path: "/Applications/Cursor.app/Contents/MacOS/Cursor", startTime: t)
+            let child = ProcessLink(name: "node", pid: 1201, path: "/usr/local/bin/node", startTime: t.addingTimeInterval(3))
+            let oldChild = try #require(try await db.upsertProcessChain(deviceID: old.id, chain: [root, child], appID: cursor.id))
+            let newRoot = try #require(try await db.upsertProcessChain(deviceID: new.id, chain: [root], appID: nil))
+            _ = try await db.upsertProcessChain(deviceID: other.id, chain: [root], appID: nil)
+
+            // Requests: 1 and 3 only under the old ID; 2 under both (the new row knows less); 4 only under the new ID.
+            var old1 = Fixture.request(device: old.id, id: 1, host: "registry.npmjs.org")
+            old1.chain = [root, child]
+            var old2 = Fixture.request(device: old.id, id: 2, host: "api2.cursor.sh")
+            old2.chain = [root]
+            old2.state = .completed
+            old2.completedAt = Fixture.now
+            old2.remoteIP = "104.18.19.125"
+            old2.geo = GeoInfo(countryCode: "US", asn: 13335, organization: "Cloudflare, Inc.")
+            old2.appID = cursor.id
+            old2.isNew = true
+            old2.inBytes = 4_096
+            var old3 = Fixture.request(device: old.id, id: 3, host: "api3.cursor.sh")
+            old3.chain = [root]
+            var new2 = Fixture.request(device: new.id, id: 2, host: "api2.cursor.sh")
+            new2.inBytes = 1_024
+            let new4 = Fixture.request(device: new.id, id: 4, host: "example.org")
+            // 5: the same request under both IDs, identical.
+            let ids = try await db.upsertRequests([old1, old2, old3, new2, new4, Fixture.request(device: old.id, id: 5, host: "same.example"),
+                                                   Fixture.request(device: new.id, id: 5, host: "same.example"), Fixture.request(device: other.id, id: 2)])
+            let old2Row = try #require(ids[old2.key])
+            let new2Row = try #require(ids[new2.key])
+            func updatedAt() async throws -> [Int64: Date] {
+                var updated: [Int64: Date] = [:]
+                for row in try await db.rows("SELECT surge_id, updated_at FROM requests WHERE device_id <> \(other.id)") {
+                    let read = PostgresRowReader(row)
+                    updated[try read("surge_id", as: Int64.self)] = try read("updated_at", as: Date.self)
+                }
+                return updated
+            }
+            let writtenAt = try await updatedAt()
+
+            // Everything else the old ID wrote.
+            let alert = try #require(try await db.insertAlerts([
+                AlertItem(id: 0, deviceID: old.id, appID: cursor.id, kind: .domain, scope: .host, value: "api2.cursor.sh", site: "cursor.sh",
+                          host: "api2.cursor.sh", ip: nil, geo: nil, processName: "Cursor", isDirect: false, requestRowID: old2Row,
+                          createdAt: Fixture.now, readAt: nil),
+            ]).first)
+            try await db.setInstalled(appID: cursor.id, deviceID: new.id, installed: false)
+            try await db.setInstalled(appID: cursor.id, deviceID: old.id, installed: true)
+            try await db.execute("UPDATE app_installs SET checked_at = now() + interval '1 hour' WHERE device_id = \(old.id)")
+            try await db.setInstalled(appID: raycast.id, deviceID: old.id, installed: true)
+            var earlierSource = Fixture.source(.domain, "github.com", device: old.id, app: cursor.id, path: "/usr/bin/git", title: "git (old)")
+            earlierSource.seenAt = Fixture.now.addingTimeInterval(-3_600)
+            earlierSource.requestDelta = 2
+            let laterSource = Fixture.source(.domain, "github.com", device: new.id, app: nil, path: "/usr/bin/git", title: "git")
+            try await db.touchHostSources([earlierSource, laterSource, Fixture.source(.domain, "example.org", device: old.id, app: nil)])
+            try await db.saveProbeSession(ProbeSession(id: UUID(), deviceID: old.id, url: "https://github.com", host: "github.com", mode: .desktop,
+                                                       startedAt: Fixture.now, endedAt: nil, steps: [], hosts: []))
+            try await db.saveEgressSamples([EgressSample(policyPath: ["DIRECT"], ip: "203.0.113.7", location: nil, network: nil, latencyMs: 9,
+                                                         isCurrent: true, checkedAt: Fixture.now, error: nil)], deviceID: old.id)
+            try await db.insertEgressChange(EgressChange(id: 0, changedAt: Fixture.now, ip: "203.0.113.7", policyPath: ["DIRECT"], reason: "Surge restarted"),
+                                            deviceID: old.id)
+            var firstContact = Fixture.host(app: cursor.id, "api2.cursor.sh")
+            firstContact.firstDeviceID = old.id
+            _ = try await db.insertAppHosts([firstContact])
+
+            // Two requests per transaction: the log moves in several batches.
+            let merged = try await db.mergeDevice(old.id, into: new.id, batchSize: 2)
+            #expect(merged == DeviceMergeResult(merged: true, requestsMoved: 2, duplicatesDropped: 2))
+
+            let devices = try await db.devices()
+            #expect(Set(devices.map(\.id)) == [new.id, other.id])
+            let survivor = try #require(devices.first { $0.id == new.id })
+            #expect(survivor.name == "Mac mini", "a Mac with rows of its own keeps its name")
+            #expect(survivor.rowCount == 5)
+            #expect(Fixture.close(survivor.createdAt, old.createdAt), "the Mac exists since its earlier ID")
+
+            let rows = try await db.queryRequests(RequestQuery(range: .all)).rows
+            #expect(rows.count == 6)
+            #expect(Set(rows.filter { $0.deviceID == new.id }.map(\.key.surgeID)) == [1, 2, 3, 4, 5])
+            #expect(rows.allSatisfy { $0.deviceID != old.id })
+            // Other Macs poll by `updated_at`: the duplicate the merge completed is newer; moved rows and a duplicate
+            // that taught nothing are not.
+            let updated = try await updatedAt()
+            let completed = try #require(updated[2])
+            #expect(completed > (try #require(writtenAt[2])))
+            for id: Int64 in [1, 3, 4, 5] { #expect(updated[id] == writtenAt[id], "row \(id)") }
+            let duplicate = try #require(rows.first { $0.key == new2.key })
+            #expect(duplicate.rowID == new2Row, "the row it already had stays")
+            #expect(duplicate.state == .completed && duplicate.completedAt.map { Fixture.close($0, Fixture.now) } == true)
+            #expect(duplicate.remoteIP == "104.18.19.125" && duplicate.geo == old2.geo && duplicate.appID == cursor.id && duplicate.isNew)
+            #expect(duplicate.inBytes == 4_096)
+
+            // Requests link to the process of the new ID when both had it.
+            let links = try await db.rows("SELECT surge_id, process_id FROM requests WHERE device_id = \(new.id) ORDER BY surge_id").map { row in
+                let read = PostgresRowReader(row)
+                return "\(try read("surge_id", as: Int64.self)):\(try read("process_id", as: Int64?.self).map(String.init) ?? "-")"
+            }
+            #expect(links == ["1:\(oldChild)", "2:\(newRoot)", "3:\(newRoot)", "4:-", "5:-"])
+            let processes = try await db.rows("SELECT id, device_id, parent_id, app_id FROM processes WHERE device_id <> \(other.id) ORDER BY id").map { row in
+                let read = PostgresRowReader(row)
+                return (id: try read("id", as: Int64.self), device: try read("device_id", as: UUID.self), parent: try read("parent_id", as: Int64?.self),
+                        app: try read("app_id", as: UUID?.self))
+            }
+            #expect(processes.map { $0.id } == [oldChild, newRoot].sorted())
+            #expect(processes.allSatisfy { $0.device == new.id })
+            #expect(processes.first { $0.id == oldChild }?.parent == newRoot)
+            #expect(processes.first { $0.id == newRoot }?.app == cursor.id, "what only the old process knew")
+
+            let alerts = try await db.alerts(filter: .all, appID: nil, scope: .all, limit: 10)
+            #expect(alerts.map(\.id) == [alert.id])
+            #expect(alerts.first?.deviceID == new.id && alerts.first?.requestRowID == new2Row)
+            #expect(try await db.installs() == [cursor.id: [new.id: true], raycast.id: [new.id: true]], "the later check wins")
+            let sources = try await db.rows("SELECT value, device_id, first_seen, last_seen, request_count, source_title FROM host_sources ORDER BY value")
+                .map { row in
+                    let read = PostgresRowReader(row)
+                    return (value: try read("value", as: String.self), device: try read("device_id", as: UUID.self), first: try read("first_seen", as: Date.self),
+                            last: try read("last_seen", as: Date.self), count: try read("request_count", as: Int64.self), title: try read("source_title", as: String.self))
+                }
+            #expect(sources.map { $0.value } == ["example.org", "github.com"])
+            #expect(sources.allSatisfy { $0.device == new.id })
+            let github = try #require(sources.last)
+            #expect(Fixture.close(github.first, earlierSource.seenAt) && Fixture.close(github.last, laterSource.seenAt))
+            #expect(github.count == 3 && github.title == "git")
+            for table in ["probe_sessions", "egress_checks", "egress_changes"] {
+                let owners = try await db.rows(PostgresQuery(unsafeSQL: "SELECT DISTINCT device_id FROM \(table)"))
+                    .map { try PostgresRowReader($0)("device_id", as: UUID.self) }
+                #expect(owners == [new.id], "\(table)")
+            }
+            #expect(try await db.appHosts(cursor.id, scope: .all).map(\.firstDeviceID) == [new.id])
+
+            // Idempotent: nothing left to merge, and nothing changes.
+            #expect(try await db.mergeDevice(old.id, into: new.id) == DeviceMergeResult())
+            #expect(try await db.mergeDevice(new.id, into: new.id) == DeviceMergeResult())
+            #expect(try await db.mergeDevice(UUID(), into: new.id) == DeviceMergeResult())
+            #expect(try await db.queryRequests(RequestQuery(range: .all)).rows.count == 6)
+            #expect(try await db.devices().first { $0.id == new.id }?.rowCount == 5)
+        }
+    }
+
+    @Test func aDeviceMergedIntoAFreshOrMissingRowKeepsItsName() async throws {
+        try await withTestDatabase { db in
+            // The new ID was registered moments ago under the computer's name: the name the user chose for the old one stays.
+            let old = Fixture.device("Office Mac")
+            var fresh = Fixture.device("Noah’s Mac mini")
+            fresh.hue = 150
+            try await db.upsertDevice(old)
+            try await db.upsertDevice(fresh)
+            try await db.upsertRequests([Fixture.request(device: old.id, id: 1)])
+            #expect(try await db.mergeDevice(old.id, into: fresh.id).requestsMoved == 1)
+            let renamed = try #require(try await db.devices().first)
+            #expect(renamed.id == fresh.id && renamed.name == "Office Mac" && renamed.shortName == old.shortName)
+            #expect(abs(renamed.hue - 150) < 0.001, "its own color")
+            #expect(renamed.rowCount == 1)
+
+            // Merged into an ID without a row: the row is created from the old one's.
+            var studio = Fixture.device("Studio")
+            studio.hue = 65
+            studio.model = "Mac Studio · M2 Max"
+            try await db.upsertDevice(studio)
+            try await db.upsertRequests([Fixture.request(device: studio.id, id: 7), Fixture.request(device: studio.id, id: 8)])
+            let missing = UUID()
+            #expect(try await db.mergeDevice(studio.id, into: missing) == DeviceMergeResult(merged: true, requestsMoved: 2, duplicatesDropped: 0))
+            let created = try #require(try await db.devices().first { $0.id == missing })
+            #expect(created.name == "Studio" && created.model == studio.model && abs(created.hue - 65) < 0.001 && created.rowCount == 2)
+            #expect(Fixture.close(created.createdAt, studio.createdAt))
+            #expect(!(try await db.devices()).contains { $0.id == studio.id })
+        }
+    }
+
+    @Test func aMergeThatStoppedHalfwayFinishesWhenItRunsAgain() async throws {
+        try await withTestDatabase { db in
+            let old = Fixture.device("Old ID")
+            let new = Fixture.device("New ID")
+            try await db.upsertDevice(old)
+            try await db.upsertDevice(new)
+            let app = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            try await db.insertApp(app)
+            try await db.upsertRequests((1...5).map { Fixture.request(device: old.id, id: $0) } + [Fixture.request(device: new.id, id: 5)])
+            try await db.insertAlerts([Fixture.alert(device: old.id, app: app.id, value: "api2.cursor.sh")])
+
+            // The last step fails: the requests moved, the old row and its alert are still there.
+            try await db.execute(PostgresQuery(unsafeSQL: """
+                CREATE FUNCTION tm_refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'refused by the test'; END $$
+                """))
+            try await db.execute(PostgresQuery(unsafeSQL: "CREATE TRIGGER tm_refuse BEFORE UPDATE ON alerts FOR EACH ROW EXECUTE FUNCTION tm_refuse()"))
+            await #expect(throws: DatabaseError.self) { try await db.mergeDevice(old.id, into: new.id, batchSize: 2, attempts: 1) }
+            try await db.execute(PostgresQuery(unsafeSQL: "DROP TRIGGER tm_refuse ON alerts"))
+            #expect(try await db.devices().contains { $0.id == old.id })
+            #expect(try await db.queryRequests(RequestQuery(range: .all)).rows.allSatisfy { $0.deviceID == new.id })
+
+            // Meanwhile the old ID wrote once more. Running again moves only what is left.
+            var late = Fixture.request(device: old.id, id: 99, host: "late.example")
+            late.key.session = Fixture.session + 1
+            try await db.upsertRequests([late])
+            let again = try await db.mergeDevice(old.id, into: new.id, batchSize: 2)
+            #expect(again == DeviceMergeResult(merged: true, requestsMoved: 1, duplicatesDropped: 0))
+            let rows = try await db.queryRequests(RequestQuery(range: .all)).rows
+            #expect(rows.count == 6 && rows.allSatisfy { $0.deviceID == new.id })
+            #expect(Set(rows.map(\.key.surgeID)) == [1, 2, 3, 4, 5, 99])
+            #expect(try await db.devices().map(\.id) == [new.id])
+            #expect(try await db.devices().first?.rowCount == 6)
+            #expect(try await db.alerts(filter: .all, appID: nil, scope: .all, limit: 10).map(\.deviceID) == [new.id])
+        }
+    }
+
+    @Test func aDeviceSomethingStillWritesUnderIsNeverMergedAway() async throws {
+        try await withTestDatabase { db in
+            let old = Fixture.device("Old ID")
+            let new = Fixture.device("New ID")
+            var remote = Fixture.device("Remote Surge")
+            remote.isRemoteSurge = true
+            for device in [old, new, remote] { try await db.upsertDevice(device) }
+            try await db.upsertRequests((1...3).map { Fixture.request(device: old.id, id: $0) } + [Fixture.request(device: remote.id, id: 1)])
+
+            // The old ID wrote moments ago: nothing moves.
+            #expect(try await db.mergeDevice(old.id, into: new.id, idleFor: .seconds(60)) == DeviceMergeResult(refusal: .stillWriting))
+            #expect(try await db.devices().contains { $0.id == old.id })
+            #expect(try await db.queryRequests(RequestQuery(range: .all)).rows.filter { $0.deviceID == old.id }.count == 3)
+
+            // A remote Surge is not a Mac: never merged, nor merged into.
+            #expect(try await db.mergeDevice(remote.id, into: new.id) == DeviceMergeResult(refusal: .remoteSurge))
+            #expect(try await db.mergeDevice(new.id, into: remote.id) == DeviceMergeResult(refusal: .remoteSurge))
+
+            // Idle for an hour, but it writes again once the merge began (a trigger stands in for the other writer): the
+            // merge stops, and the old ID stays.
+            try await db.execute("UPDATE devices SET last_write_at = now() - interval '1 hour' WHERE id = \(old.id)")
+            try await db.execute(PostgresQuery(unsafeSQL: """
+                CREATE FUNCTION tm_touch() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN UPDATE devices SET last_write_at = now() WHERE id = '\(old.id.uuidString)'; RETURN NULL; END $$
+                """))
+            try await db.execute(PostgresQuery(unsafeSQL: "CREATE TRIGGER tm_touch AFTER UPDATE ON requests FOR EACH STATEMENT EXECUTE FUNCTION tm_touch()"))
+            let interrupted = try await db.mergeDevice(old.id, into: new.id, idleFor: .seconds(60), batchSize: 1)
+            #expect(interrupted == DeviceMergeResult(merged: false, requestsMoved: 1, duplicatesDropped: 0, refusal: .stillWriting))
+            #expect(try await db.devices().contains { $0.id == old.id })
+            try await db.execute(PostgresQuery(unsafeSQL: "DROP TRIGGER tm_touch ON requests"))
+
+            // Once it stopped writing, the merge finishes.
+            try await db.execute("UPDATE devices SET last_write_at = now() - interval '1 hour' WHERE id = \(old.id)")
+            #expect(try await db.mergeDevice(old.id, into: new.id, idleFor: .seconds(60))
+                    == DeviceMergeResult(merged: true, requestsMoved: 2, duplicatesDropped: 0))
+            #expect(Set(try await db.devices().map(\.id)) == [new.id, remote.id])
+        }
+    }
+
+    @Test func aMergeGivesWayToARowCaptureHolds() async throws {
+        try await withTestDatabase { db in
+            let old = Fixture.device("Old ID")
+            let new = Fixture.device("New ID")
+            try await db.upsertDevice(old)
+            try await db.upsertDevice(new)
+            let ids = try await db.upsertRequests([Fixture.request(device: old.id, id: 1), Fixture.request(device: new.id, id: 1),
+                                                   Fixture.request(device: old.id, id: 2)])
+            let held = try #require(ids[RequestKey(deviceID: new.id, session: Fixture.session, surgeID: 1)])
+
+            // Capture is rewriting the row the merge would complete, and holds it for a while.
+            let locked = AsyncStream<Void>.makeStream()
+            let writer = Task {
+                try await db.withTransaction(on: .writer) { connection in
+                    _ = try await connection.query("SELECT id FROM requests WHERE id = \(held) FOR UPDATE", logger: PostgresDatabase.logger).collect()
+                    locked.continuation.yield()
+                    _ = try await connection.query("SELECT pg_sleep(4)", logger: PostgresDatabase.logger).collect()
+                }
+            }
+            var signals = locked.stream.makeAsyncIterator()
+            _ = await signals.next()
+            let started = ContinuousClock.now
+            let attempt = try await DatabaseWait.result(within: .seconds(10)) { try await db.mergeDevice(old.id, into: new.id, batchSize: 10, attempts: 1) }
+            #expect(throws: DatabaseError.self) { try attempt.get() }
+            #expect(started.duration(to: .now) < .seconds(3), "the merge waits less than capture would before giving up")
+            #expect(try await db.queryRequests(RequestQuery(range: .all)).rows.filter { $0.deviceID == old.id }.count == 2, "its batch rolled back")
+
+            try await writer.value
+            #expect(try await db.mergeDevice(old.id, into: new.id) == DeviceMergeResult(merged: true, requestsMoved: 1, duplicatesDropped: 1))
+        }
+    }
+
+    @Test func aMacsOtherIDsShareItsSurgeSessionsOrProcesses() async throws {
+        try await withTestDatabase { db in
+            func device(_ name: String, minutes: Double, remote: Bool = false) -> Device {
+                var device = Fixture.device(name)
+                device.createdAt = Fixture.now.addingTimeInterval(minutes * 60)
+                device.isRemoteSurge = remote
+                return device
+            }
+            let mac = device("This Mac", minutes: 0)
+            let earlier = device("Earlier ID", minutes: 1)
+            let current = device("Current Surge session", minutes: 2)
+            let processes = device("Same processes", minutes: 3)
+            let oneProcess = device("One process", minutes: 4)
+            let remote = device("Remote Surge", minutes: 5, remote: true)
+            let other = device("Other Mac", minutes: 6)
+            for device in [mac, earlier, current, processes, oneProcess, remote, other] { try await db.upsertDevice(device) }
+            func request(_ device: Device, session: Int64) -> RequestRecord {
+                var row = Fixture.request(device: device.id, id: 1)
+                row.key.session = session
+                return row
+            }
+            try await db.upsertRequests([
+                request(mac, session: 1_000), request(mac, session: 2_000), request(earlier, session: 2_000), request(current, session: 3_000),
+                request(remote, session: 1_000), request(other, session: 4_000), request(processes, session: 5_000), request(oneProcess, session: 6_000),
+            ])
+            let t = Fixture.now.addingTimeInterval(-3_600)
+            let raycast = ProcessLink(name: "Raycast", pid: 540, path: "/Applications/Raycast.app/Contents/MacOS/Raycast", startTime: t)
+            let node = ProcessLink(name: "node", pid: 1388, path: "/usr/local/bin/node", startTime: t.addingTimeInterval(5))
+            _ = try await db.upsertProcessChain(deviceID: mac.id, chain: [raycast, node], appID: nil)
+            _ = try await db.upsertProcessChain(deviceID: processes.id, chain: [raycast, node], appID: nil)
+            _ = try await db.upsertProcessChain(deviceID: oneProcess.id, chain: [raycast], appID: nil)
+            // The same PID started a millisecond later is another process.
+            var later = node
+            later.startTime = t.addingTimeInterval(5.001)
+            _ = try await db.upsertProcessChain(deviceID: other.id, chain: [raycast, later], appID: nil)
+
+            #expect(try await db.devicesSharingHistory(with: mac.id, sessions: [3_000]) == [earlier.id, current.id, processes.id])
+            #expect(try await db.devicesSharingHistory(with: mac.id, sessions: []) == [earlier.id, processes.id])
+            #expect(try await db.devicesSharingHistory(with: UUID(), sessions: []) == [])
+        }
+    }
+
     // MARK: - Harness
 
     /// The storage parameters of an index of the test schema (`pg_class.reloptions`).

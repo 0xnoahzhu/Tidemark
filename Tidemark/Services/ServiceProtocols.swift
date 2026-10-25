@@ -103,6 +103,22 @@ protocol TidemarkDatabase: Sendable {
     func upsertDevice(_ device: Device) async throws
     func devices() async throws -> [Device]
     func renameDevice(_ id: DeviceID, name: String) async throws
+    /// Moves everything `from` wrote to `into` and deletes the `from` row: two IDs of one Mac become one. A request
+    /// `into` already has (same Surge session and request) is a duplicate: the `into` row stays and takes what only
+    /// the duplicate knew, and the duplicate is dropped; processes, installs and host sources both have are merged
+    /// the same way. `into` keeps its name unless it has no requests yet (its row is then created from `from`'s
+    /// when missing). Idempotent: merging a device that no longer exists, or a device into itself, does nothing.
+    ///
+    /// Nothing else may still write under `from`. With `idleFor`, the merge checks that: it only starts when `from`
+    /// wrote nothing during the last `idleFor` (`devices.last_write_at`, on the server's clock), stops when `from`
+    /// writes after that moment, and checks again with `from`'s row locked before it deletes it; it then reports
+    /// `stillWriting` (what moved so far stays moved). A remote Surge is never merged, nor merged into (`remoteSurge`).
+    @discardableResult func mergeDevice(_ from: DeviceID, into: DeviceID, idleFor: Duration?) async throws -> DeviceMergeResult
+    /// Macs (never remote Surges) other than `device` that recorded a request of one of `device`'s Surge sessions or of
+    /// `sessions`, or at least two of `device`'s processes (same PID and start time, to the microsecond): IDs `device`'s
+    /// Mac had before. A Surge session is identified by that Surge's start time in milliseconds, and a process by
+    /// its PID and start time, which no other Mac shares.
+    func devicesSharingHistory(with device: DeviceID, sessions: [Int64]) async throws -> [DeviceID]
 
     // Apps
     func apps() async throws -> [MonitoredApp]
@@ -206,6 +222,27 @@ protocol TidemarkDatabase: Sendable {
     func egressChanges(deviceID: DeviceID, limit: Int) async throws -> [EgressChange]
 }
 
+/// What `mergeDevice` did.
+struct DeviceMergeResult: Equatable, Sendable {
+    /// Why a merge left `from` in place.
+    enum Refusal: Equatable, Sendable {
+        /// `from` wrote within the `idleFor` the merge was given, or after the merge began: something still writes
+        /// under it.
+        case stillWriting
+        /// `from` or `into` is a remote Surge, not a Mac.
+        case remoteSurge
+    }
+
+    /// The `from` device existed and is gone now; false when there was nothing to merge, or when it was refused.
+    var merged = false
+    /// `from`'s requests that now belong to `into`.
+    var requestsMoved: Int64 = 0
+    /// `from`'s requests `into` already had, dropped after their data was merged into `into`'s rows.
+    var duplicatesDropped: Int64 = 0
+    /// Set when `from` was left in place although it exists.
+    var refusal: Refusal?
+}
+
 /// Result of `upsertRequestsCountingInserts`.
 struct RequestUpsertResult: Sendable {
     var ids: [RequestKey: Int64]
@@ -239,6 +276,11 @@ struct RequestWriteCursor: Hashable, Comparable, Sendable {
 }
 
 extension TidemarkDatabase {
+    /// `mergeDevice(_:into:idleFor:)` without the check that nothing writes under `from` any more.
+    @discardableResult func mergeDevice(_ from: DeviceID, into: DeviceID) async throws -> DeviceMergeResult {
+        try await mergeDevice(from, into: into, idleFor: nil)
+    }
+
     /// Default for test doubles: every written row counts as inserted.
     func upsertRequestsCountingInserts(_ rows: [RequestRecord]) async throws -> RequestUpsertResult {
         let ids = try await upsertRequests(rows)

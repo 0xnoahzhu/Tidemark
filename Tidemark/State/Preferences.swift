@@ -21,8 +21,11 @@ final class Preferences {
     @ObservationIgnored private let defaults: UserDefaults
 
     // MARK: Identity
-    /// This Mac's row in `devices`; generated once.
+    /// This Mac's row in `devices`, derived from its hardware UUID (`DeviceIdentity`), so it never changes.
     let thisDeviceID: DeviceID
+    /// The different ID an earlier version stored for this Mac, while capture still has to merge its rows into
+    /// `thisDeviceID`; nil once they were merged (or when there never was one).
+    @ObservationIgnored private(set) var legacyDeviceID: DeviceID?
 
     // MARK: Surge
     var surgeCLIPath: String { didSet { set(surgeCLIPath, "surge.cliPath") } }
@@ -57,15 +60,12 @@ final class Preferences {
     /// Send the Global Privacy Control signal from the probe browser.
     var probeGlobalPrivacyControl: Bool { didSet { set(probeGlobalPrivacyControl, "probe.globalPrivacyControl") } }
 
-    init(defaults: UserDefaults = .standard) {
+    /// `hardwareUUID` is this Mac's (`DeviceIdentity.hardwareUUID()`); tests pass their own.
+    init(defaults: UserDefaults = .standard, hardwareUUID: String? = DeviceIdentity.hardwareUUID()) {
         self.defaults = defaults
-        if let s = defaults.string(forKey: "device.id"), let id = UUID(uuidString: s) {
-            thisDeviceID = id
-        } else {
-            let id = UUID()
-            defaults.set(id.uuidString, forKey: "device.id")
-            thisDeviceID = id
-        }
+        let identity = DeviceIdentity.resolve(defaults: defaults, hardwareUUID: hardwareUUID)
+        thisDeviceID = identity.id
+        legacyDeviceID = identity.legacy
         let cli = SurgeEndpoint.defaultCLIPaths.first { FileManager.default.isExecutableFile(atPath: $0) } ?? SurgeEndpoint.defaultCLIPaths[0]
         surgeCLIPath = defaults.string(forKey: "surge.cliPath") ?? cli
 
@@ -85,6 +85,13 @@ final class Preferences {
         probeOwnWindow = defaults.object(forKey: "probe.ownWindow") as? Bool ?? true
         probeMode = defaults.string(forKey: "probe.mode").flatMap(ProbeDeviceMode.init(rawValue:)) ?? .desktop
         probeGlobalPrivacyControl = defaults.object(forKey: "probe.globalPrivacyControl") as? Bool ?? false
+    }
+
+    /// The legacy ID's rows were merged into `thisDeviceID`: forgets it, so the merge never runs again.
+    func forgetLegacyDeviceID(_ id: DeviceID) {
+        guard legacyDeviceID == id else { return }
+        DeviceIdentity.forgetLegacy(id, defaults: defaults)
+        legacyDeviceID = nil
     }
 
     var batchPreset: BatchPreset {

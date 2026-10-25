@@ -201,6 +201,97 @@ struct CaptureLiveTests {
         }
     }
 
+    @Test func anEarlierIDsSpoolAndRowsEndUpUnderThisMacsID() async throws {
+        try await withTestDatabase { db in
+            let temp = CaptureTempDirectory()
+            let earlier = device()
+            let current = device()
+            try await db.upsertDevice(earlier)
+            try await db.upsertDevice(current)
+            func row(_ id: Int64, _ state: RequestState) -> RequestRecord {
+                RequestRecord(
+                    key: RequestKey(deviceID: earlier.id, session: 1_000, surgeID: id), rowID: nil, startedAt: base.addingTimeInterval(-60),
+                    setupCompletedAt: nil, completedAt: state == .active ? nil : base, method: "HTTPS", host: "h\(id).example", port: 443,
+                    url: nil, remoteIP: nil, remoteAddress: nil, geo: nil, policyPath: ["DIRECT"], rule: nil, state: state, inBytes: 0, outBytes: 0,
+                    pid: nil, processPath: nil, bundlePath: nil, chain: [], appID: nil, localAddress: nil, interface: nil, notes: [], isNew: false,
+                    writtenAt: nil, probeSessionID: nil
+                )
+            }
+            // The earlier ID wrote 1 (still active) and 3, then spooled 1's completion and 2 while offline, an hour ago.
+            try await db.upsertRequests([row(1, .active), row(3, .completed)])
+            try await db.execute("UPDATE devices SET last_write_at = now() - interval '1 hour' WHERE id = \(earlier.id)")
+            do {
+                var spool = CaptureSpool(directory: temp.url, limit: 10_000)
+                try spool.append([row(1, .completed), row(2, .completed)])
+            }
+
+            let pipeline = makePipeline(db, device: current.id, directory: temp.url)
+            await pipeline.scheduleDeviceMerge(from: earlier.id, into: current.id)
+            await pipeline.setDatabaseOnline(true)
+            await pipeline.tick(now: base)
+            #expect(await pipeline.bufferedRows == 0, "the spool drained without a foreign-key failure")
+            await pipeline.tick(now: base.addingTimeInterval(130))
+
+            #expect(await pipeline.isOnline)
+            #expect(await pipeline.drainUpdate().mergedDevices == [earlier.id])
+            let rows = try await db.rows("SELECT device_id, surge_id, state FROM requests ORDER BY surge_id").map { row in
+                let read = PostgresRowReader(row)
+                return "\(try read("device_id", as: UUID.self) == current.id ? "this Mac" : "earlier"):\(try read("surge_id", as: Int64.self)):\(try read("state", as: String.self))"
+            }
+            #expect(rows == ["this Mac:1:completed", "this Mac:2:completed", "this Mac:3:completed"])
+            #expect(try await db.devices().map(\.id) == [current.id])
+            #expect(try await db.devices().first?.rowCount == 3)
+            #expect(!FileManager.default.fileExists(atPath: temp.url.appending(path: "rejected.jsonl").path(percentEncoded: false)))
+        }
+    }
+
+    @Test func theSameMacListedUnderThreeIDsBecomesOne() async throws {
+        try await withTestDatabase { db in
+            let temp = CaptureTempDirectory()
+            // The ID the preferences still hold, one an earlier launch invented while it could not read them (stored
+            // nowhere), this Mac's hardware-derived ID, and another Mac.
+            let stored = device()
+            let invented = device()
+            let current = device()
+            let other = device()
+            for mac in [stored, invented, current, other] { try await db.upsertDevice(mac) }
+            func row(_ mac: Device, session: Int64, _ id: Int64) -> RequestRecord {
+                RequestRecord(
+                    key: RequestKey(deviceID: mac.id, session: session, surgeID: id), rowID: nil, startedAt: base.addingTimeInterval(-60),
+                    setupCompletedAt: nil, completedAt: base, method: "HTTPS", host: "h\(id).example", port: 443, url: nil, remoteIP: nil,
+                    remoteAddress: nil, geo: nil, policyPath: ["DIRECT"], rule: nil, state: .completed, inBytes: 0, outBytes: 0, pid: nil,
+                    processPath: nil, bundlePath: nil, chain: [], appID: nil, localAddress: nil, interface: nil, notes: [], isNew: false,
+                    writtenAt: nil, probeSessionID: nil
+                )
+            }
+            // Both earlier IDs recorded Surge session 1,000 (request 3 under both); the invented one also a later one.
+            try await db.upsertRequests([row(stored, session: 1_000, 1), row(stored, session: 1_000, 2), row(stored, session: 1_000, 3),
+                                         row(invented, session: 1_000, 3), row(invented, session: 1_000, 4), row(invented, session: 2_000, 1),
+                                         row(other, session: 1_500, 1)])
+            try await db.execute("UPDATE devices SET last_write_at = now() - interval '1 hour'")
+
+            let pipeline = makePipeline(db, device: current.id, directory: temp.url)
+            await pipeline.scheduleDeviceMerge(from: stored.id, into: current.id)
+            await pipeline.setDatabaseOnline(true)
+            await pipeline.tick(now: base)
+            await pipeline.tick(now: base.addingTimeInterval(130))
+            #expect(await pipeline.drainUpdate().mergedDevices == [stored.id])
+            // The stored ID's rows brought session 1,000 to this Mac's ID, which leads to the invented one.
+            await pipeline.tick(now: base.addingTimeInterval(131))
+            #expect(await pipeline.drainUpdate().mergedDevices == [invented.id])
+            #expect(await pipeline.isOnline)
+
+            #expect(Set(try await db.devices().map(\.id)) == [current.id, other.id])
+            let rows = try await db.rows("SELECT device_id, surge_session, surge_id FROM requests ORDER BY surge_session, surge_id").map { row in
+                let read = PostgresRowReader(row)
+                let owner = try read("device_id", as: UUID.self) == current.id ? "this Mac" : "other"
+                return "\(owner):\(try read("surge_session", as: Int64.self)):\(try read("surge_id", as: Int64.self))"
+            }
+            #expect(rows == ["this Mac:1000:1", "this Mac:1000:2", "this Mac:1000:3", "this Mac:1000:4", "other:1500:1", "this Mac:2000:1"])
+            #expect(try await db.devices().first { $0.id == current.id }?.rowCount == 5)
+        }
+    }
+
     // MARK: Harness
 
     private func withTestDatabase(_ body: (CaptureLivePostgres) async throws -> Void) async throws {

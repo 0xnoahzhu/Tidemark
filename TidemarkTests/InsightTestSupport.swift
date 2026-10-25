@@ -42,6 +42,8 @@ struct InsightTestDatabase: TidemarkDatabase {
     func upsertDevice(_ device: Device) async throws { throw DatabaseError.notConfigured }
     func devices() async throws -> [Device] { [] }
     func renameDevice(_ id: DeviceID, name: String) async throws { throw DatabaseError.notConfigured }
+    func mergeDevice(_ from: DeviceID, into: DeviceID, idleFor: Duration?) async throws -> DeviceMergeResult { throw DatabaseError.notConfigured }
+    func devicesSharingHistory(with device: DeviceID, sessions: [Int64]) async throws -> [DeviceID] { [] }
 
     func apps() async throws -> [MonitoredApp] { [] }
     func insertApp(_ app: MonitoredApp) async throws { throw DatabaseError.notConfigured }

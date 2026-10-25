@@ -349,7 +349,7 @@ extension CapturePipeline {
         let database = self.database
         var start = 0
         while start < segment.lines.count {
-            let rows = CaptureSpool.decode(segment.lines[start..<min(start + chunkSize, segment.lines.count)])
+            let rows = ownedByThisDevice(CaptureSpool.decode(segment.lines[start..<min(start + chunkSize, segment.lines.count)]))
             start += chunkSize
             guard !rows.isEmpty else { continue }
             let deadline = ContinuousClock.now.advanced(by: writeTimeout)
@@ -371,6 +371,32 @@ extension CapturePipeline {
         spool.removeSegment(segment.id)
     }
 
+    /// Rows kept on disk are this Mac's own (`settings.deviceID`), whatever ID they were spooled under: an earlier ID
+    /// of this Mac (`DeviceIdentity`) may have been merged away meanwhile, and a row of a device that no longer exists
+    /// is refused (`requests.device_id` references `devices`), so the spool would never drain. A row whose key now
+    /// matches a stored row merges into it like any rewrite. The earlier ID itself is this Mac's too, so whatever else
+    /// it wrote is merged into this Mac's ID (`scheduleEarlierDeviceIDs`).
+    func ownedByThisDevice(_ rows: [RequestRecord]) -> [RequestRecord] {
+        let device = settings.deviceID
+        guard rows.contains(where: { $0.key.deviceID != device }) else { return rows }
+        scheduleEarlierDeviceIDs(Set(rows.map(\.key.deviceID)))
+        return rows.map { row in
+            var row = row
+            row.key.deviceID = device
+            return row
+        }
+    }
+
+    /// IDs found in the spool or in `auxiliary.json` other than this Mac's: earlier IDs of this Mac, merged into its
+    /// current one.
+    func scheduleEarlierDeviceIDs(_ ids: Set<DeviceID>) {
+        guard !settings.isRemote else { return }
+        for id in ids where id != settings.deviceID && !settledDevices.contains(id) && deviceMerges[id] == nil {
+            Self.log.info("Found work saved under an earlier ID of this Mac: written under its current ID, and the earlier ID is merged into it")
+            scheduleDeviceMerge(from: id, into: settings.deviceID)
+        }
+    }
+
     func spoolRows(_ rows: [RequestRecord]) {
         guard !rows.isEmpty else { return }
         do {
@@ -390,12 +416,14 @@ extension CapturePipeline {
 
     // MARK: Files beside the spool
 
-    /// First-contact work saved when an earlier run quit offline goes back into the queue (once per launch).
+    /// First-contact work saved when an earlier run quit offline goes back into the queue (once per launch), as this
+    /// Mac's own like the spool's rows (`ownedByThisDevice`).
     func restoreAuxiliaryIfNeeded() {
         guard !auxiliaryRestored else { return }
         auxiliaryRestored = true
         guard let saved = sidecar.takeAuxiliary() else { return }
-        buffer.restore(saved)
+        scheduleEarlierDeviceIDs(saved.deviceIDs)
+        buffer.restore(saved.recorded(as: settings.deviceID))
     }
 
     func shouldSaveSnapshot(now: Date) -> Bool {
@@ -409,5 +437,31 @@ extension CapturePipeline {
         guard knownLoaded, !allApps.isEmpty || known.count > 0 else { return }
         lastSnapshotAt = now
         sidecar.saveSnapshot(CaptureStateSnapshot(savedAt: now, apps: allApps, mutes: mutes, known: known.exported))
+    }
+}
+
+extension CaptureWriteBuffer.Batch {
+    /// Every device this work names.
+    var deviceIDs: Set<DeviceID> {
+        var ids = Set(chains.compactMap(\.deviceID))
+        ids.formUnion(newHosts.compactMap(\.firstDeviceID))
+        ids.formUnion(drafts.map(\.requestKey.deviceID))
+        ids.formUnion(touches.compactMap(\.firstDeviceID))
+        ids.formUnion(sources.map(\.deviceID))
+        ids.formUnion(alerts.map(\.deviceID))
+        return ids
+    }
+
+    /// The same work as `device`'s: its process chains, host sources and alerts, the requests its alert drafts
+    /// belong to and the first Mac of its inventory entries (see `CapturePipeline.ownedByThisDevice`).
+    func recorded(as device: DeviceID) -> Self {
+        var batch = self
+        for index in batch.chains.indices { batch.chains[index].deviceID = device }
+        for index in batch.newHosts.indices where batch.newHosts[index].firstDeviceID != nil { batch.newHosts[index].firstDeviceID = device }
+        for index in batch.drafts.indices { batch.drafts[index].requestKey.deviceID = device }
+        for index in batch.touches.indices where batch.touches[index].firstDeviceID != nil { batch.touches[index].firstDeviceID = device }
+        for index in batch.sources.indices { batch.sources[index].deviceID = device }
+        for index in batch.alerts.indices { batch.alerts[index].deviceID = device }
+        return batch
     }
 }
