@@ -82,7 +82,10 @@ final class CaptureEngine {
     private var writtenSinceEstimate: Int64 = 0
     private var lastAlertID: Int64 = 0
     private var notifiedAlerts: Set<Int64> = []
-    private var liveCursor = Date.now.addingTimeInterval(-60)
+    /// Position of the poll for rows other Macs write (positions of the current database's server).
+    private var otherMacRows = CaptureOtherMacRows()
+    /// Bumped when that position is dropped, so a poll still running for the old one cannot store it back.
+    private var otherMacRowsGeneration = 0
     /// The explanation a notification is waiting for. One at a time: while it runs, later notifications use
     /// the cache only, so a burst never queues one generation after another.
     private var notificationInsight: Task<HostInsight?, Never>?
@@ -312,6 +315,7 @@ final class CaptureEngine {
         self.database = database
         model.database = database
         databaseFingerprint = fingerprint
+        resetOtherMacRows()
         databaseChanged?(database)
         await pipeline.setServices(surge: surge, database: database)
         if let retire = retireDatabase { Task.detached { await retire(old) } }
@@ -928,8 +932,9 @@ final class CaptureEngine {
         model.live.totalRows = estimate
     }
 
-    /// Rows other Macs wrote, merged into the live table while the scope includes them. Polls with a small
-    /// overlap: a row committed late can carry an `updated_at` just before the previous cursor.
+    /// Rows other Macs wrote, merged into the live table while the scope includes them, in the server's write
+    /// order (see `CaptureOtherMacRows`). While the scope leaves them out the position is dropped: the next
+    /// poll that includes them starts again from the server's clock.
     private func pollOtherMacRows() async {
         guard databaseReady, model.devices.devices.count > 1 else { return }
         let me = recordingDeviceID
@@ -939,13 +944,23 @@ final class CaptureEngine {
         case .device(let id): id != me
         }
         guard includesOthers else {
-            liveCursor = .now
+            resetOtherMacRows()
             return
         }
-        guard let rows = try? await database.requestsWritten(after: liveCursor.addingTimeInterval(-3), excluding: me, limit: 300),
-              !rows.isEmpty else { return }
-        liveCursor = max(liveCursor, rows.compactMap(\.writtenAt).max() ?? liveCursor)
-        model.live.upsert(rows.filter { scope.includes($0.deviceID) })
+        // Polled on a copy: the position is stored only when the poll succeeded and is still current.
+        var poller = otherMacRows
+        let generation = otherMacRowsGeneration
+        guard let poll = try? await poller.poll(database, excluding: me), generation == otherMacRowsGeneration else { return }
+        if poll.capped, otherMacRows.resumeAfter == nil {
+            Self.log.info("Other Macs wrote more than \(poller.pageSize * poller.maxPages) rows since the last poll; the next polls read the rest")
+        }
+        otherMacRows = poller
+        model.live.upsert(poll.rows.filter { scope.includes($0.deviceID) })
+    }
+
+    private func resetOtherMacRows() {
+        otherMacRows.reset()
+        otherMacRowsGeneration += 1
     }
 
     /// Alerts other Macs wrote since the last poll. Apps this Mac doesn't know yet are loaded first.

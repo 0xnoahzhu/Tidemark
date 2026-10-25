@@ -504,7 +504,8 @@ private struct RequestsStubDatabase: TidemarkDatabase {
     func countRequests(inBundle bundlePath: String) async throws -> Int64 { 0 }
     func backfill(appID: AppID, bundlePath: String) async throws -> Int64 { 0 }
     func upsertRequests(_ rows: [RequestRecord]) async throws -> [RequestKey: Int64] { [:] }
-    func requestsWritten(after cursor: Date, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] { [] }
+    func requestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] { [] }
+    func requestWritePosition() async throws -> RequestWriteCursor { .start }
     func distinctPolicies(since: Date?) async throws -> [String] { [] }
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64 { 0 }
     func estimatedRequestCount() async throws -> Int64 { 0 }

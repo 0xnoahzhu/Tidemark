@@ -58,7 +58,8 @@ struct InsightTestDatabase: TidemarkDatabase {
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram {
         Histogram(start: .now, end: .now, counts: Array(repeating: 0, count: buckets))
     }
-    func requestsWritten(after cursor: Date, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] { [] }
+    func requestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] { [] }
+    func requestWritePosition() async throws -> RequestWriteCursor { .start }
     func distinctPolicies(since: Date?) async throws -> [String] { [] }
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64 { 0 }
     func estimatedRequestCount() async throws -> Int64 { 0 }

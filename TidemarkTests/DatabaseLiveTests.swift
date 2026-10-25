@@ -513,22 +513,44 @@ struct DatabaseLiveTests {
             try await db.upsertDevice(mac)
             try await db.upsertDevice(mini)
             try await db.upsertRequests([Fixture.request(device: mac.id, id: 1), Fixture.request(device: mini.id, id: 1)])
-            let initial = try await db.requestsWritten(after: .distantPast, excluding: nil, limit: 10)
+            let initial = try await db.requestsWritten(after: .start, excluding: nil, limit: 10)
             #expect(initial.count == 2)
-            let cursor = try #require(initial.compactMap(\.writtenAt).max())
+            // One transaction writes one `updated_at`: its rows follow each other by ID.
+            let positions = initial.compactMap(RequestWriteCursor.init)
+            #expect(positions.count == 2 && positions.first?.updatedAt == positions.last?.updatedAt)
+            #expect(positions == positions.sorted() && Set(positions).count == 2)
+            let cursor = try #require(positions.last)
 
+            // The server's clock is past every row written so far; this Mac's clock plays no part.
+            let now = try await db.requestWritePosition()
+            #expect(now.updatedAt >= cursor.updatedAt)
+            #expect(try await db.requestsWritten(after: now, excluding: nil, limit: 10).isEmpty)
             #expect(try await db.requestsWritten(after: cursor, excluding: mac.id, limit: 10).isEmpty)
+
             try await Task.sleep(for: .milliseconds(20))
             var update = Fixture.request(device: mini.id, id: 1)
             update.state = .completed
             try await db.upsertRequests([update, Fixture.request(device: mini.id, id: 2), Fixture.request(device: mac.id, id: 2)])
 
+            // Written again, mini's first row moves behind the cursor's position, oldest row ID first.
             let fresh = try await db.requestsWritten(after: cursor, excluding: mac.id, limit: 10)
-            #expect(Set(fresh.map(\.key.surgeID)) == [1, 2])
+            #expect(fresh.map(\.key.surgeID) == [1, 2])
             #expect(fresh.allSatisfy { $0.deviceID == mini.id })
-            #expect(fresh.first { $0.key.surgeID == 1 }?.state == .completed)
-            #expect(try await db.requestsWritten(after: cursor, excluding: mac.id, limit: 1).count == 1)
-            #expect(try await db.requestsWritten(after: cursor, excluding: nil, limit: 10).count == 3)
+            #expect(fresh.first?.state == .completed)
+            #expect(try await db.requestsWritten(after: cursor, excluding: mac.id, limit: 1).map(\.key.surgeID) == [1])
+
+            // Page by page, each page strictly after the last row of the one before.
+            let all = try await db.requestsWritten(after: cursor, excluding: nil, limit: 10)
+            #expect(all.count == 3)
+            var paged: [RequestKey] = []
+            var position = cursor
+            while true {
+                let page = try await db.requestsWritten(after: position, excluding: nil, limit: 1)
+                guard let last = page.last.flatMap(RequestWriteCursor.init) else { break }
+                paged += page.map(\.key)
+                position = last
+            }
+            #expect(paged == all.map(\.key))
         }
     }
 
@@ -1264,8 +1286,8 @@ struct DatabaseLiveTests {
             #expect(second.ids[RequestKey(deviceID: mac.id, session: old, surgeID: 1)] == first.ids[RequestKey(deviceID: mac.id, session: old, surgeID: 1)])
             #expect(try await db.devices().first { $0.id == mac.id }?.rowCount == 4)
 
-            let written = try await db.requestsWritten(after: .distantPast, excluding: nil, limit: 10)
-            let cursor = try #require(written.compactMap(\.writtenAt).max())
+            let written = try await db.requestsWritten(after: .start, excluding: nil, limit: 10)
+            let cursor = try #require(written.last.flatMap(RequestWriteCursor.init))
             func lastWrite(_ device: DeviceID, _ session: Int64, _ id: Int64) throws -> Date {
                 try #require(written.first { $0.key == RequestKey(deviceID: device, session: session, surgeID: id) }?.writtenAt)
             }
@@ -1317,7 +1339,7 @@ struct DatabaseLiveTests {
                 Fixture.request(device: mac.id, id: 1), Fixture.request(device: mac.id, id: 2),
                 Fixture.request(device: mac.id, id: 3), late, otherSession,
             ])
-            let lastWrite = try #require(try await db.requestsWritten(after: .distantPast, excluding: nil, limit: 10).compactMap(\.writtenAt).max())
+            let lastWrite = try #require(try await db.requestsWritten(after: .start, excluding: nil, limit: 10).last?.writtenAt)
             // Surge still lists 1; 4 started after the listing; 5 belongs to another session.
             #expect(try await db.closeVanishedRequests(deviceID: mac.id, session: Fixture.session, keeping: [1],
                                                        startedBefore: listedAt, at: listedAt) == 2)
@@ -1402,7 +1424,10 @@ struct DatabaseLiveTests {
             let searchPlan = try await plan(search)
             #expect(searchPlan.contains("requests_search_trgm_idx") && searchPlan.contains("requests_app_started_idx"), "\(searchPlan)")
             #expect(!searchPlan.contains("Seq Scan"), "\(searchPlan)")
-            let pollPlan = try await plan(PostgresDatabase.SQL("EXPLAIN SELECT 1 FROM requests r WHERE r.updated_at > now() - interval '5 seconds'"))
+            var poll = PostgresDatabase.SQL("EXPLAIN ")
+            let position = RequestWriteCursor(updatedAt: Date.now.addingTimeInterval(-5), rowID: 1)
+            PostgresDatabase.appendRequestsWritten(after: position, excluding: mac.id, limit: 300, to: &poll)
+            let pollPlan = try await plan(poll)
             #expect(pollPlan.contains("requests_updated_brin_idx") && !pollPlan.contains("Seq Scan"), "\(pollPlan)")
 
             // The indexed text joins columns with newlines; a term never matches across two of them.

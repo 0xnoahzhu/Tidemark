@@ -243,7 +243,7 @@ extension PostgresDatabase {
         """
 
     /// Decodes a row selected with `requestSelect`. `writtenAt` is the time of the row's latest write
-    /// (`updated_at`), the cursor for `requestsWritten(after:)`.
+    /// (`updated_at`); with `rowID` it is the row's position for `requestsWritten(after:)`.
     static func decodeRequest(_ row: PostgresRow) throws -> RequestRecord {
         let read = PostgresRowReader(row)
         return RequestRecord(
@@ -448,16 +448,34 @@ extension PostgresDatabase {
         return Histogram(start: start, end: end, counts: counts)
     }
 
-    /// Rows written or updated after `cursor` by other Macs, newest first. Rows carry their latest
-    /// write time in `writtenAt`; poll with a small overlap (e.g. `cursor - 2 s`) and dedupe by key,
-    /// because `updated_at` is the writing transaction's start time and a long transaction can commit
-    /// rows that are slightly older than rows already seen.
-    func requestsWritten(after cursor: Date, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] {
-        var sql = SQL("SELECT \(Self.requestSelect) FROM requests r WHERE r.updated_at > ")
-        sql.append(sql.bindInstant(cursor))
-        if let excluding { sql.append(" AND r.device_id <> \(sql.bind(excluding))") }
-        sql.append(" ORDER BY r.updated_at DESC, r.id DESC LIMIT \(sql.bind(max(0, limit)))")
+    /// Rows written or updated by other Macs strictly after `cursor` in `(updated_at, id)` order, oldest first.
+    /// Rows carry their position in `rowID` and `writtenAt`. `updated_at` is the writing transaction's start
+    /// time (`now()`), so a transaction that commits late adds rows just behind positions already read: poll
+    /// again from a few seconds behind the newest position and skip positions already seen.
+    func requestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] {
+        var sql = SQL()
+        Self.appendRequestsWritten(after: cursor, excluding: excluding, limit: limit, to: &sql)
         return try await rows(sql.query).map(Self.decodeRequest)
+    }
+
+    /// Appends the `requestsWritten(after:)` statement. The row comparison is the keyset; the plain
+    /// `updated_at` bound beside it is what the BRIN index on `updated_at` can serve (an index only matches a
+    /// row comparison when it is a btree over those columns), so a poll reads only the recent block ranges.
+    static func appendRequestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int, to sql: inout SQL) {
+        let updatedAt = sql.bindInstant(cursor.updatedAt)
+        sql.append("SELECT \(requestSelect) FROM requests r WHERE r.updated_at >= \(updatedAt)")
+        sql.append(" AND (r.updated_at, r.id) > (\(updatedAt), \(sql.bind(cursor.rowID))::int8)")
+        if let excluding { sql.append(" AND r.device_id <> \(sql.bind(excluding))") }
+        sql.append(" ORDER BY r.updated_at, r.id LIMIT \(sql.bind(max(0, limit)))")
+    }
+
+    /// The server's clock as a position before every row written from now on: a transaction that starts later
+    /// writes a later `updated_at`, and row IDs start at 1.
+    func requestWritePosition() async throws -> RequestWriteCursor {
+        guard let row = try await rows("SELECT now() AS now").first else {
+            throw DatabaseError.query("The server did not report its time.")
+        }
+        return RequestWriteCursor(updatedAt: try PostgresRowReader(row)("now", as: Date.self), rowID: 0)
     }
 
     /// Final policies seen since `since` (all time when nil), sorted by name.

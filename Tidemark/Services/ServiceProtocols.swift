@@ -124,9 +124,16 @@ protocol TidemarkDatabase: Sendable {
     @discardableResult func upsertRequests(_ rows: [RequestRecord]) async throws -> [RequestKey: Int64]
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram
-    /// Rows inserted or updated after `cursor` (`updated_at`) by devices other than `excluding`, newest first
-    /// (live view for other Macs). Poll with a small overlap and dedupe by key.
-    func requestsWritten(after cursor: Date, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord]
+    /// Rows inserted or updated by devices other than `excluding` strictly after `cursor` in the server's write
+    /// order `(updated_at, id)`, oldest first, at most `limit` (live view for other Macs). Page by passing the
+    /// last row's position (`RequestWriteCursor(_:)`) until a page comes back shorter than `limit`; a row
+    /// written again moves to the end of the order. `updated_at` is the writing transaction's start time, so a
+    /// transaction that commits late adds rows just behind positions already read: poll again from a few
+    /// seconds behind the newest position read and skip the positions already seen.
+    func requestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord]
+    /// The server's current position in that order (its own clock, before every row written from now on),
+    /// where polling `requestsWritten(after:)` starts. This Mac's clock never takes part.
+    func requestWritePosition() async throws -> RequestWriteCursor
     func distinctPolicies(since: Date?) async throws -> [String]
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64
     /// Fast estimate of the total row count (`pg_class.reltuples` refined by exact counts when small).
@@ -200,6 +207,31 @@ struct RequestUpsertResult: Sendable {
     var ids: [RequestKey: Int64]
     /// Rows that did not exist before (updates of known rows are not counted).
     var inserted: Int
+}
+
+/// Position in the order rows are written to `requests`: `(updated_at, id)`, both set by the server.
+/// `requestsWritten(after:)` returns the rows strictly after it.
+struct RequestWriteCursor: Hashable, Comparable, Sendable {
+    var updatedAt: Date
+    var rowID: Int64
+
+    /// Before every row.
+    static let start = RequestWriteCursor(updatedAt: .distantPast, rowID: 0)
+
+    init(updatedAt: Date, rowID: Int64) {
+        self.updatedAt = updatedAt
+        self.rowID = rowID
+    }
+
+    /// The position of a row read from the database; nil for a record that was never written.
+    init?(_ record: RequestRecord) {
+        guard let updatedAt = record.writtenAt, let rowID = record.rowID else { return nil }
+        self.init(updatedAt: updatedAt, rowID: rowID)
+    }
+
+    static func < (a: RequestWriteCursor, b: RequestWriteCursor) -> Bool {
+        a.updatedAt != b.updatedAt ? a.updatedAt < b.updatedAt : a.rowID < b.rowID
+    }
 }
 
 extension TidemarkDatabase {

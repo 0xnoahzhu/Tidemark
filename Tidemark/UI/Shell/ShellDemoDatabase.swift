@@ -109,9 +109,10 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func countRequests(inBundle bundlePath: String) async throws -> Int64 { try await base.countRequests(inBundle: bundlePath) }
     func backfill(appID: AppID, bundlePath: String) async throws -> Int64 { try await base.backfill(appID: appID, bundlePath: bundlePath) }
     func upsertRequests(_ rows: [RequestRecord]) async throws -> [RequestKey: Int64] { try await base.upsertRequests(rows) }
-    func requestsWritten(after cursor: Date, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] {
+    func requestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] {
         try await base.requestsWritten(after: cursor, excluding: excluding, limit: limit)
     }
+    func requestWritePosition() async throws -> RequestWriteCursor { try await base.requestWritePosition() }
     func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64 { try await base.deleteRequests(olderThan: olderThan, deviceID: deviceID) }
     func upsertProcessChain(deviceID: DeviceID, chain: [ProcessLink], appID: AppID?) async throws -> Int64? {
         try await base.upsertProcessChain(deviceID: deviceID, chain: chain, appID: appID)

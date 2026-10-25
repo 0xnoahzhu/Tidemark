@@ -246,6 +246,12 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var egressSamples: [EgressSample] = []
     var egressChangeList: [EgressChange] = []
     var ipInfoCache: [String: GeoInfo] = [:]
+    /// Rows `requestsWritten(after:)` pages through (other Macs' writes), each with its `rowID` and `writtenAt`.
+    var writtenRows: [RequestRecord] = []
+    /// The server clock `requestWritePosition()` reports.
+    var serverNow = Date(timeIntervalSince1970: 1_800_000_000)
+    /// Number of `requestsWritten(after:)` calls.
+    var writtenPages = 0
     private var nextID: Int64 = 1
 
     func setFailing(_ on: Bool) { failing = on }
@@ -260,6 +266,12 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func setMutes(_ patterns: [String]) { mutesList = patterns }
     func setOtherMacAlerts(_ alerts: [AlertItem]) { otherMacAlerts = alerts }
     func setKnown(_ value: [AppID: Set<String>]) { known = value }
+    /// Adds or replaces (by key) a row another Mac wrote.
+    func write(_ row: RequestRecord) {
+        writtenRows.removeAll { $0.key == row.key }
+        writtenRows.append(row)
+    }
+    func setServerNow(_ date: Date) { serverNow = date }
     /// Pretends a row was written before (e.g. by an earlier run).
     func preinsertRow(_ row: RequestRecord) {
         rowIDs[row.key] = newID()
@@ -366,7 +378,18 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     }
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage { RequestPage(rows: [], totalCount: 0, elapsed: .zero) }
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram { Histogram(start: .now, end: .now, counts: []) }
-    func requestsWritten(after cursor: Date, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] { [] }
+    func requestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] {
+        try check()
+        writtenPages += 1
+        let after = writtenRows.compactMap { row in RequestWriteCursor(row).map { ($0, row) } }
+            .filter { $0.0 > cursor && $0.1.deviceID != excluding }
+            .sorted { $0.0 < $1.0 }
+        return after.prefix(max(0, limit)).map(\.1)
+    }
+    func requestWritePosition() async throws -> RequestWriteCursor {
+        try check()
+        return RequestWriteCursor(updatedAt: serverNow, rowID: 0)
+    }
     func distinctPolicies(since: Date?) async throws -> [String] { [] }
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64 { Int64(rows.count) }
     func estimatedRequestCount() async throws -> Int64 { Int64(rows.count) }

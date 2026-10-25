@@ -139,6 +139,68 @@ struct CaptureLiveTests {
         }
     }
 
+    @Test func otherMacsRowsAreReadPageByPageInWriteOrder() async throws {
+        try await withTestDatabase { db in
+            let mac = device()
+            let mini = device()
+            try await db.upsertDevice(mac)
+            try await db.upsertDevice(mini)
+            func row(_ device: DeviceID, _ id: Int64) -> RequestRecord {
+                RequestRecord(
+                    key: RequestKey(deviceID: device, session: 1_000, surgeID: id), rowID: nil, startedAt: base.addingTimeInterval(-60),
+                    setupCompletedAt: nil, completedAt: nil, method: "HTTPS", host: "h\(id).example", port: 443, url: nil, remoteIP: nil,
+                    remoteAddress: nil, geo: nil, policyPath: ["DIRECT"], rule: nil, state: .active, inBytes: 0, outBytes: 0, pid: nil,
+                    processPath: nil, bundlePath: nil, chain: [], appID: nil, localAddress: nil, interface: nil, notes: [], isNew: false,
+                    writtenAt: nil, probeSessionID: nil
+                )
+            }
+            /// The other Mac's rows in the server's write order.
+            func written() async throws -> [RequestKey] {
+                try await db.rows("SELECT surge_id FROM requests WHERE device_id = \(mini.id) ORDER BY updated_at, id").map {
+                    RequestKey(deviceID: mini.id, session: 1_000, surgeID: try PostgresRowReader($0)("surge_id", as: Int64.self))
+                }
+            }
+
+            // The other Mac writes a burst of more than four pages in three transactions, beside this Mac's own rows.
+            for batch in 0..<3 {
+                try await db.upsertRequests((0..<35).map { row(mini.id, Int64(batch * 35 + $0)) } + [row(mac.id, Int64(batch))])
+            }
+            var rows = CaptureOtherMacRows()
+            rows.pageSize = 25
+            let poll = try await rows.poll(db, excluding: mac.id)
+            let burst = try await written()
+            #expect(!poll.capped)
+            #expect(poll.rows.map(\.key) == burst, "every row once, in write order, none of this Mac's")
+            let positions = poll.rows.compactMap(RequestWriteCursor.init)
+            #expect(positions.count == 105 && zip(positions, positions.dropFirst()).allSatisfy { $0 < $1 })
+
+            // Rows written again move to the end of the order and are read again; nothing else is.
+            try await Task.sleep(for: .milliseconds(20))
+            var finished = [row(mini.id, 7), row(mini.id, 70)]
+            for index in finished.indices { finished[index].state = .completed }
+            try await db.upsertRequests(finished)
+            let next = try await rows.poll(db, excluding: mac.id)
+            #expect(Set(next.rows.map(\.key)) == Set(finished.map(\.key)))
+            #expect(next.rows.allSatisfy { $0.state == .completed })
+            #expect(try await rows.poll(db, excluding: mac.id).rows.isEmpty)
+
+            // A poller that reads at most two pages per poll gets there over three polls, in the same order.
+            var slow = CaptureOtherMacRows()
+            slow.pageSize = 25
+            slow.maxPages = 2
+            var read: [RequestKey] = []
+            var capped: [Bool] = []
+            for _ in 0..<3 {
+                let poll = try await slow.poll(db, excluding: mac.id)
+                read += poll.rows.map(\.key)
+                capped.append(poll.capped)
+            }
+            let order = try await written()
+            #expect(capped == [true, true, false])
+            #expect(read == order)
+        }
+    }
+
     // MARK: Harness
 
     private func withTestDatabase(_ body: (CaptureLivePostgres) async throws -> Void) async throws {
