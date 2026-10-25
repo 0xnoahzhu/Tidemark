@@ -55,13 +55,13 @@ private struct NotificationsToolbar: ToolbarContent {
     var body: some ToolbarContent {
         @Bindable var nav = model.nav
         ToolbarItem(placement: .primaryAction) {
-            Picker(tr("Show", "Notifications"), selection: $nav.alertFilter) {
-                Text(tr("All", "Notifications")).tag(AlertFilter.all)
-                Text(tr("Unread", "Notifications")).tag(AlertFilter.unread)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            DesignSegmentedControl(tr("Show", "Notifications"), selection: $nav.alertFilter,
+                                   size: .regular(horizontalPadding: 11), segments: [
+                (.all, tr("All", "Notifications")),
+                (.unread, tr("Unread", "Notifications")),
+            ])
         }
+        .sharedBackgroundVisibility(.hidden)
         .visibilityPriority(.high)
 
         ToolbarSpacer(.fixed, placement: .primaryAction)

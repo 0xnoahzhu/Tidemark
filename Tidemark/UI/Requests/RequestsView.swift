@@ -43,14 +43,14 @@ private struct RequestsToolbar: ToolbarContent {
     var body: some ToolbarContent {
         @Bindable var nav = model.nav
         ToolbarItem(placement: .primaryAction) {
-            Picker(tr("Mode", "Requests"), selection: $nav.requestsLive) {
-                Text(tr("Live", "Requests")).tag(true)
-                Text(tr("History", "Requests")).tag(false)
-            }
-            .pickerStyle(.tabs)
-            .labelsHidden()
+            DesignSegmentedControl(tr("Mode", "Requests"), selection: $nav.requestsLive, segments: [
+                (true, tr("Live", "Requests")),
+                (false, tr("History", "Requests")),
+            ])
             .help(tr("Switch between the live stream and stored history", "Requests"))
         }
+        // The control draws its own track, as on the page, rather than sitting in a glass bubble.
+        .sharedBackgroundVisibility(.hidden)
         .visibilityPriority(.high)
 
         ToolbarSpacer(.fixed, placement: .primaryAction)

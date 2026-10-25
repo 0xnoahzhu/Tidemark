@@ -27,15 +27,14 @@ struct InventoryView: View {
             .navigationSubtitle(subtitle)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Picker(tr("Kind", "Inventory"), selection: $nav.inventoryKind) {
-                        Text(tr("All", "Inventory")).tag(HostKind?.none)
-                        Text(tr("Domains", "Inventory")).tag(HostKind?.some(.domain))
-                        Text(tr("IPs", "Inventory")).tag(HostKind?.some(.ip))
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
+                    DesignSegmentedControl(tr("Kind", "Inventory"), selection: $nav.inventoryKind,
+                                           size: .regular(horizontalPadding: 11), segments: [
+                        (nil, tr("All", "Inventory")),
+                        (.domain, tr("Domains", "Inventory")),
+                        (.ip, tr("IPs", "Inventory")),
+                    ])
                 }
+                .sharedBackgroundVisibility(.hidden)
                 ToolbarSpacer(.fixed, placement: .primaryAction)
                 ToolbarItem(placement: .primaryAction) {
                     Toggle(tr("Group by site", "Inventory"), isOn: $nav.inventoryGrouped)
