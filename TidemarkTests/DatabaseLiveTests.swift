@@ -73,19 +73,15 @@ struct DatabaseLiveTests {
                 .map { try $0.makeRandomAccess()[0].decode(String.self) }
             #expect(longRead == "5min")
 
-            // A statement over its time limit is reported as unreachable (retry later), not as bad data, and
-            // says that it timed out.
+            // A statement over its time limit is reported as timed out (retry later), not as bad data.
             do {
                 try await db.withTransaction(statementTimeout: .milliseconds(50)) { connection in
                     _ = try await connection.query("SELECT pg_sleep(1)", logger: PostgresDatabase.logger).collect()
                 }
                 Issue.record("pg_sleep outlived its statement timeout")
             } catch let error as DatabaseError {
-                guard case .unreachable(let reason) = error else {
-                    Issue.record("Expected .unreachable, got \(error)")
-                    return
-                }
-                #expect(reason.description == "Query timed out: the server cancelled it after 50 ms (statement timeout).")
+                #expect(error == .timedOut(.statement(.milliseconds(50))))
+                #expect(error.errorDescription == "PostgreSQL query timed out: The server cancelled it after 50 ms (statement timeout).")
             }
         }
     }
@@ -101,11 +97,11 @@ struct DatabaseLiveTests {
                 }
                 Issue.record("pg_sleep outlived the call limit")
             } catch let error as DatabaseError {
-                guard case .unreachable(let reason) = error else {
-                    Issue.record("Expected .unreachable, got \(error)")
+                guard case .timedOut(.noReply(_, let limit)) = error else {
+                    Issue.record("Expected .timedOut(.noReply), got \(error)")
                     return
                 }
-                #expect(reason.description.contains("No reply"), "\(reason)")
+                #expect(limit == .milliseconds(300))
             }
             #expect(start.duration(to: clock.now) < .seconds(2))
 

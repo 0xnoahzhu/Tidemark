@@ -25,9 +25,10 @@ import Synchronization
 /// Every pooled connection runs with `search_path = <schema>, public`, so all SQL is written without a
 /// schema prefix and the same code serves production (`public`) and throwaway test schemas.
 ///
-/// Errors follow `DatabaseError`: anything that may succeed later (connection problems, timeouts, the
-/// server running out of resources, shutting down or being read-only, lock and serialization conflicts)
-/// is `.unreachable`; only a statement or its data being rejected is `.query`. Cancelling the calling task
+/// Errors follow `DatabaseError`: anything that may succeed later (connection problems, the server running
+/// out of resources, shutting down or being read-only, lock and serialization conflicts) is `.unreachable`,
+/// a statement cancelled at its statement timeout or a call past its `CallLimit` is `.timedOut`; only a
+/// statement or its data being rejected is `.query`. Cancelling the calling task
 /// throws `CancellationError`. All methods are safe to call concurrently; each one leases its own
 /// connection from a pool.
 final class PostgresDatabase: TidemarkDatabase {
@@ -94,7 +95,7 @@ final class PostgresDatabase: TidemarkDatabase {
     static let maintenanceTimeout: Duration = .seconds(600)
 
     /// How long a call may hold its leased connection before Tidemark stops waiting for the server, closes
-    /// the connection (the pool replaces it) and fails with `.unreachable`. The statement timeouts make the
+    /// the connection (the pool replaces it) and fails with `.timedOut`. The statement timeouts make the
     /// server give up first; this only catches a server that can no longer answer, e.g. a TCP connection
     /// left half-open while the Mac slept, which would otherwise keep its pool slot forever.
     enum CallLimit: Sendable, Equatable {
@@ -322,7 +323,7 @@ final class PostgresDatabase: TidemarkDatabase {
     /// it twice).
     ///
     /// Once leased, `body` runs until it finishes, or until `limit` passes: the connection is then closed
-    /// (the pool replaces it) and the call fails with `.unreachable`. On the writer pool, cancelling the
+    /// (the pool replaces it) and the call fails with `.timedOut`. On the writer pool, cancelling the
     /// calling task closes the connection right away and throws `CancellationError`: the transaction rolls
     /// back instead of committing after the caller gave up (capture keeps or spools that work and writes
     /// it again). On the main pool a cancelled call's statement runs to completion first.
@@ -392,7 +393,7 @@ final class PostgresDatabase: TidemarkDatabase {
         } catch {
             switch watchdog.reason {
             case .expired:
-                throw DatabaseError.unreachable(.message("No reply from \(endpoint?.redacted ?? "the server") within \(DatabaseError.spoken(limit)); the connection was closed."))
+                throw DatabaseError.timedOut(.noReply(target: endpoint?.redacted, within: limit))
             case .cancelled:
                 throw CancellationError()
             case nil:
@@ -568,8 +569,8 @@ final class PostgresDatabase: TidemarkDatabase {
     /// `.query` is reserved for errors that retrying the same statement cannot fix (the server rejected
     /// the statement or its data, or a reply could not be decoded); everything else — including errors
     /// of unknown origin — is `.unreachable`, so callers keep the data and retry later. A statement the
-    /// server cancelled at its `statementTimeout` says so in the message (`timedOutMessage`): the server
-    /// answered, the query was just too slow.
+    /// server cancelled at its `statementTimeout` (SQLSTATE 57014) is `.timedOut`: the server answered, the
+    /// query was just too slow.
     static func map(_ error: any Error, endpoint: PostgresConnectionURL? = nil, statementTimeout: Duration? = nil) -> any Error {
         switch error {
         case let error as DatabaseError:
@@ -580,8 +581,9 @@ final class PostgresDatabase: TidemarkDatabase {
             switch error.code {
             case .server:
                 let state = error.serverInfo?[.sqlState] ?? ""
+                // 57014 is also an administrator's `pg_cancel_backend`, which stays `.unreachable` below.
                 if state == "57014", error.serverInfo?[.message]?.contains("statement timeout") == true {
-                    return DatabaseError.unreachable(.message(timedOutMessage(statementTimeout)))
+                    return DatabaseError.timedOut(.statement(statementTimeout))
                 }
                 let reason = describe(error, endpoint: endpoint)
                 return isTransient(sqlState: state) ? DatabaseError.unreachable(reason) : DatabaseError.query(reason.description)
@@ -606,12 +608,6 @@ final class PostgresDatabase: TidemarkDatabase {
             }
             return DatabaseError.unreachable(.message(String(describing: error)))
         }
-    }
-
-    /// The message of a statement the server cancelled at its statement timeout.
-    static func timedOutMessage(_ statementTimeout: Duration?) -> String {
-        guard let statementTimeout else { return "Query timed out: the server cancelled it at its statement timeout." }
-        return "Query timed out: the server cancelled it after \(DatabaseError.spoken(statementTimeout)) (statement timeout)."
     }
 
     /// Whether a server error says nothing about the statement or its data, so the same work can succeed
@@ -650,6 +646,7 @@ final class PostgresDatabase: TidemarkDatabase {
         case let error as DatabaseError:
             switch error {
             case .unreachable(let reason): return reason
+            case .timedOut(let reason): return .message(reason.description)
             case .query(let message): return .message(message)
             case .notConfigured, .invalidURL: return .message(error.errorDescription ?? "\(error)")
             }

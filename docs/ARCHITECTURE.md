@@ -121,8 +121,9 @@ session):
 * **Writes** go through `WriteBuffer`: flush every *N* rows or *T* seconds (default 200 rows / 1 s), as
   multi-row `INSERT … ON CONFLICT (device_id, surge_session, surge_id) DO UPDATE`. A request is written when
   first seen, again when it completes, and every ~10 s while it stays active.
-* **Errors** — `DatabaseError.unreachable` (connection lost, timeouts, server out of resources, read-only…)
-  keeps the data and takes the pipeline offline; `DatabaseError.query` means the rows themselves were
+* **Errors** — `DatabaseError.unreachable` (connection lost, server out of resources, read-only…) and
+  `DatabaseError.timedOut` (a statement timeout, a call past its limit) keep the data and take the pipeline
+  offline; `DatabaseError.query` means the rows themselves were
   refused, so the pipeline retries item by item, drops app/probe links that no longer exist, and quarantines
   rows that are still refused in `spool/rejected.jsonl`.
 * **Offline** — when PostgreSQL is unreachable rows are appended to a JSON-lines spool in

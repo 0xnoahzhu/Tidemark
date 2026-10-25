@@ -158,8 +158,11 @@ struct DatabaseUnitTests {
         #expect(DatabaseError.spoken(.milliseconds(50)) == "50 ms")
         #expect(DatabaseError.spoken(.seconds(30)) == "30 s")
         #expect(DatabaseError.spoken(.seconds(300)) == "5 min")
-        #expect(PostgresDatabase.timedOutMessage(.seconds(300)) == "Query timed out: the server cancelled it after 5 min (statement timeout).")
-        #expect(PostgresDatabase.timedOutMessage(nil).hasPrefix("Query timed out"))
+        #expect(DatabaseError.timedOut(.statement(.seconds(300))).errorDescription
+                == "PostgreSQL query timed out: The server cancelled it after 5 min (statement timeout).")
+        #expect(DatabaseError.timedOut(.statement(nil)).errorDescription == "PostgreSQL query timed out: The server cancelled it at its statement timeout.")
+        #expect(DatabaseError.timedOut(.noReply(target: "db.local:5432/t", within: .seconds(35))).errorDescription
+                == "PostgreSQL query timed out: No reply from db.local:5432/t within 35 s; the connection was closed.")
     }
 
     @Test func callLimitsLeaveTheServerTimeToAnswerFirst() {

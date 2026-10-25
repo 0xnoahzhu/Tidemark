@@ -161,6 +161,35 @@ struct CaptureResilienceTests {
         #expect(await pipeline.bufferedRows == 0)
     }
 
+    /// A statement the server cancelled at its timeout says nothing about the rows: they wait, never set aside.
+    @Test func aTimedOutWriteKeepsItsRows() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        await database.setTimingOutRequests(true)
+        let pipeline = makePipeline(database: database, directory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        for id in 1...3 {
+            await pipeline.ingest(CaptureFixtures.request(id: Int64(id), host: "h\(id).com", processPath: "/usr/bin/curl", completed: true), now: base)
+        }
+        await pipeline.tick(now: base.addingTimeInterval(2))
+
+        #expect(await pipeline.isOnline == false)
+        #expect(await database.requestWriteCalls == 1, "no row-by-row retry: the server, not the data, is the problem")
+        #expect(!FileManager.default.fileExists(atPath: temp.url.appending(path: "rejected.jsonl").path(percentEncoded: false)))
+        let update = await pipeline.drainUpdate()
+        #expect(update.bufferedRows == 3)
+        guard case .timedOut? = update.databaseError as? DatabaseError else {
+            Issue.record("expected the timeout, got \(String(describing: update.databaseError))")
+            return
+        }
+
+        await database.setTimingOutRequests(false)
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.tick(now: base.addingTimeInterval(3))
+        #expect(Set(await database.writes.map(\.key.surgeID)) == [1, 2, 3])
+        #expect(await pipeline.bufferedRows == 0)
+    }
+
     @Test func aStuckWriteFallsBackToTheSpool() async {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()

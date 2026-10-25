@@ -57,13 +57,13 @@ Tidemark opens a 6-connection pool for reads and a 2-connection writer pool (`Ti
 | Index builds of migrations | none | none in the background; 10 s while connecting; 3 s for a BRIN setting | 60 s |
 
 The capture writes and the session closing stay below capture's own 20 s bound per write, so the server
-cancels a statement capture already gave up on. A statement cancelled at its statement timeout fails with
-the message "Query timed out: the server cancelled it after …", so a slow query is not mistaken for a
-server that cannot be reached.
+cancels a statement capture already gave up on. A statement cancelled at its statement timeout fails as
+timed out ("PostgreSQL query timed out: the server cancelled it after …"), so a slow query is not mistaken
+for a server that cannot be reached; like an unreachable server, it never makes capture set rows aside.
 
 On top of these, Tidemark closes a connection whose call has gone unanswered for twice its statement
 timeout plus 5 s, 15 min for a migration and 6 h for index builds (a server that vanished without closing
-the TCP connection, e.g. while the Mac slept), and
+the TCP connection, e.g. while the Mac slept; the call fails as timed out), and
 a writer connection as soon as capture gives up on its call. Its transaction then rolls back instead of
 committing later (unless its `COMMIT` was already under way), and calls capture abandoned never hold on to
 the two writer connections.

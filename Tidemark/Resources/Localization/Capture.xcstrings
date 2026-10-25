@@ -136,6 +136,11 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还没有设置 PostgreSQL 连接。" } }
       }
     },
+    "No reply from %1$@ within %2$@; the connection was closed." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ 在 %2$@内没有回应，连接已关闭。" } }
+      }
+    },
     "No route to host. If the server is on your local network, allow Tidemark in System Settings › Privacy & Security › Local Network." : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有通往主机的路由。如果服务器在本地网络中，请在系统设置 › 隐私与安全性 › 本地网络中允许 Tidemark。" } }
@@ -159,6 +164,11 @@
     "PostgreSQL is unreachable: %@" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连不上 PostgreSQL：%@" } }
+      }
+    },
+    "PostgreSQL query timed out: %@" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "PostgreSQL 查询超时：%@" } }
       }
     },
     "PostgreSQL refused every write: %@" : {
@@ -219,6 +229,16 @@
     "the server" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器" } }
+      }
+    },
+    "The server cancelled it after %@ (statement timeout)." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器在 %@后取消了查询（statement timeout）。" } }
+      }
+    },
+    "The server cancelled it at its statement timeout." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "服务器在达到 statement timeout 时取消了查询。" } }
       }
     },
     "Timed out connecting to %@." : {

@@ -217,9 +217,12 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var refusedHosts: Set<String> = []
     /// Request writes hang until cancelled (a black-holed connection).
     var stallingRequests = false
+    /// Request writes fail at their statement timeout (`DatabaseError.timedOut`).
+    var timingOutRequests = false
     /// Probe saves hang until cancelled.
     var stallingProbeSaves = false
-    /// Closing rows of ended sessions fails (`DatabaseError.unreachable`) while everything else works.
+    /// Closing rows of ended sessions fails at its statement timeout (`DatabaseError.timedOut`) while everything
+    /// else works.
     var failingMaintenance = false
     /// `apps()` answers with the list as it was when called, this much later.
     var appsDelay: Duration = .zero
@@ -263,6 +266,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func setEnforcesForeignKeys(_ on: Bool) { enforcesForeignKeys = on }
     func setRefusedHosts(_ hosts: Set<String>) { refusedHosts = hosts }
     func setStallingRequests(_ on: Bool) { stallingRequests = on }
+    func setTimingOutRequests(_ on: Bool) { timingOutRequests = on }
     func setStallingProbeSaves(_ on: Bool) { stallingProbeSaves = on }
     func setFailingMaintenance(_ on: Bool) { failingMaintenance = on }
     func setAppsDelay(_ delay: Duration) { appsDelay = delay }
@@ -333,6 +337,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
             try await Task.sleep(for: .seconds(3600))
             throw CancellationError()
         }
+        if timingOutRequests { throw DatabaseError.timedOut(.statement(PostgresDatabase.SessionLimits.writer.statement)) }
         if refusingEverything { throw DatabaseError.query("could not extend file: No space left on device") }
         for row in rows {
             if refusedHosts.contains(row.host) { throw DatabaseError.query("value too long for \(row.host)") }
@@ -353,7 +358,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func closeActiveRequests(deviceID: DeviceID, before session: Int64, at date: Date) async throws -> Int64 {
         try check()
         closedSessions.append((deviceID, session, date))
-        if failingMaintenance { throw DatabaseError.unreachable("canceling statement due to statement timeout") }
+        if failingMaintenance { throw DatabaseError.timedOut(.statement(PostgresDatabase.sessionCloseTimeout)) }
         var closed: Int64 = 0
         for (key, row) in rows where key.deviceID == deviceID && key.session < session && row.state == .active {
             var done = row
@@ -368,7 +373,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
         try check()
         let keeping = Set(surgeIDs)
         vanishedCloses.append((deviceID, session, keeping, startedBefore, date))
-        if failingMaintenance { throw DatabaseError.unreachable("canceling statement due to statement timeout") }
+        if failingMaintenance { throw DatabaseError.timedOut(.statement(PostgresDatabase.sessionCloseTimeout)) }
         var closed: Int64 = 0
         for (key, row) in rows where key.deviceID == deviceID && key.session == session && row.state == .active
             && !keeping.contains(key.surgeID) && row.startedAt < startedBefore {

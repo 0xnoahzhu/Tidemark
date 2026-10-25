@@ -383,6 +383,7 @@ struct CaptureEngineTests {
             .unreachable(.cannotConnect(target: "db.local:5432/tidemark", reason: .connectTimedOut(target: "db.local:5432/tidemark"))),
             .unreachable(.noConnection(target: nil, within: .seconds(10))), .unreachable(.schemaTooNew(schema: 5, supported: 3)),
             .unreachable(.tlsNotAccepted(target: "db.local:5432/tidemark")), .unreachable(.serverClosedConnection(target: "db.local:5432/tidemark")),
+            .timedOut(.statement(.seconds(300))), .timedOut(.statement(nil)), .timedOut(.noReply(target: "db.local:5432/tidemark", within: .seconds(35))),
         ]
         for error in typed {
             #expect(CaptureEngine.message(for: error) == error.errorDescription)
@@ -399,9 +400,14 @@ struct CaptureEngineTests {
         #expect(CaptureEngine.message(for: DatabaseError.unreachable(.noConnection(target: "db.local:5432/tidemark", within: .seconds(10))))
                 == "连不上 PostgreSQL：10 秒内没有可用的 db.local:5432/tidemark 连接。")
         #expect(CaptureEngine.message(for: DatabaseError.unreachable(.localNetworkBlocked)).hasSuffix("本地网络中允许 Tidemark。"))
+        #expect(CaptureEngine.message(for: DatabaseError.timedOut(.statement(.seconds(300))))
+                == "PostgreSQL 查询超时：服务器在 5 分钟后取消了查询（statement timeout）。")
+        #expect(CaptureEngine.message(for: DatabaseError.timedOut(.noReply(target: "db.local:5432/tidemark", within: .seconds(35))))
+                == "PostgreSQL 查询超时：db.local:5432/tidemark 在 35 秒内没有回应，连接已关闭。")
         for error in typed {
-            #expect(!CaptureEngine.message(for: error).contains(error.errorDescription?.dropFirst("PostgreSQL is unreachable: ".count) ?? "-"),
-                    "\(error) is translated")
+            let english = error.errorDescription ?? ""
+            let reason = english[(english.range(of: ": ")?.upperBound ?? english.startIndex)...]
+            #expect(!CaptureEngine.message(for: error).contains(reason), "\(error) is translated")
         }
         #expect(CaptureEngine.message(for: DatabaseError.query("syntax error")) == "PostgreSQL 错误：syntax error")
         #expect(CaptureEngine.message(for: DatabaseError.invalidURL("postgresql://x")) == "PostgreSQL 连接地址无效：postgresql://x")

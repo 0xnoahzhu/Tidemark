@@ -278,9 +278,12 @@ struct HostSourceTouch: Hashable, Sendable {
 enum DatabaseError: Error, Sendable, Equatable, LocalizedError {
     case notConfigured
     case invalidURL(String)
-    /// The server cannot do the work right now (connection lost, timeout, shutting down, out of
+    /// The server cannot do the work right now (connection lost or refused, shutting down, out of
     /// connections or disk, read-only, serialization failure…). Retry later; keep the data.
     case unreachable(UnreachableReason)
+    /// The work took too long: the server cancelled a statement at its statement timeout, or stopped
+    /// answering within the call's limit. Like `.unreachable`: retry later, keep the data.
+    case timedOut(TimeoutReason)
     /// The statement itself was rejected (bad data, constraint or foreign-key violation). Retrying the same
     /// rows fails again.
     case query(String)
@@ -290,6 +293,7 @@ enum DatabaseError: Error, Sendable, Equatable, LocalizedError {
         case .notConfigured: "No PostgreSQL connection is configured."
         case .invalidURL(let url): "Invalid PostgreSQL URL: \(url)"
         case .unreachable(let reason): "PostgreSQL is unreachable: \(reason)"
+        case .timedOut(let reason): "PostgreSQL query timed out: \(reason)"
         case .query(let message): "PostgreSQL error: \(message)"
         }
     }
@@ -368,6 +372,23 @@ enum DatabaseError: Error, Sendable, Equatable, LocalizedError {
 
         /// The server as `host:port/database`, or "the server" when unknown.
         private static func name(_ target: String?) -> String { target ?? "the server" }
+    }
+
+    /// What took too long. `description` is the English text.
+    enum TimeoutReason: Sendable, Equatable, CustomStringConvertible {
+        /// The server cancelled the statement at its statement timeout (nil when the timeout is not known).
+        case statement(Duration?)
+        /// Nothing came back within the call's client-side limit, so Tidemark closed the connection.
+        case noReply(target: String?, within: Duration)
+
+        var description: String {
+            switch self {
+            case .statement(let timeout?): "The server cancelled it after \(DatabaseError.spoken(timeout)) (statement timeout)."
+            case .statement(nil): "The server cancelled it at its statement timeout."
+            case .noReply(let target, let limit):
+                "No reply from \(target ?? "the server") within \(DatabaseError.spoken(limit)); the connection was closed."
+            }
+        }
     }
 
     /// A duration for English messages: `50 ms`, `30 s`, `5 min`.

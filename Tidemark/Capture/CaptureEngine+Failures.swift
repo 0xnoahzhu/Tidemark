@@ -35,6 +35,16 @@ extension CaptureEngine {
         }
     }
 
+    /// What took too long (the part after "PostgreSQL query timed out:").
+    static func message(for reason: DatabaseError.TimeoutReason) -> String {
+        switch reason {
+        case .statement(let timeout?): trf("The server cancelled it after %@ (statement timeout).", "Capture", spoken(timeout))
+        case .statement(nil): tr("The server cancelled it at its statement timeout.", "Capture")
+        case .noReply(let target, let limit):
+            trf("No reply from %1$@ within %2$@; the connection was closed.", "Capture", serverName(target), spoken(limit))
+        }
+    }
+
     /// A duration in the UI language: `50 ms`, `30 s`, `5 min`.
     static func spoken(_ duration: Duration) -> String {
         let (seconds, attoseconds) = duration.components
