@@ -31,6 +31,26 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         let widths = AnalyzeColumnsLayout.widths(for: [.fixed(400), .flexible()], spacing: 10, total: 200)
         #expect(widths[1] == 0)
     }
+
+    @Test func capsFlexibleColumnsAtTheirMaximumAndGivesTheRestAway() {
+        let widths = AnalyzeColumnsLayout.widths(for: [.flexible(weight: 1), .flexible(weight: 1, max: 100), .flexible(weight: 2)],
+                                                 spacing: 0, total: 800)
+        #expect(widths[1] == 100)
+        #expect(abs(widths[0] - 700.0 / 3) < 0.001)
+        #expect(abs(widths[2] - 1400.0 / 3) < 0.001)
+    }
+
+    @Test func balancesMinimumsAgainstMaximums() {
+        // Process lacks 3 pt, Policy is 66 pt over its cap: capping Policy first lifts Process above its minimum.
+        let capFirst = AnalyzeColumnsLayout.widths(
+            for: [.flexible(weight: 1, min: 170), .flexible(weight: 1, max: 100), .flexible(weight: 1)], spacing: 0, total: 500)
+        #expect(abs(capFirst[0] - 200) < 0.001 && capFirst[1] == 100 && abs(capFirst[2] - 200) < 0.001)
+
+        // Process lacks 33 pt, Policy is only 16 pt over: pinning Process first leaves Policy within its cap.
+        let minimumFirst = AnalyzeColumnsLayout.widths(
+            for: [.flexible(weight: 1, min: 200), .flexible(weight: 1, max: 150), .flexible(weight: 1)], spacing: 0, total: 500)
+        #expect(minimumFirst[0] == 200 && abs(minimumFirst[1] - 150) < 0.001 && abs(minimumFirst[2] - 150) < 0.001)
+    }
 }
 
 @Suite @MainActor struct AnalyzeCSVTests {

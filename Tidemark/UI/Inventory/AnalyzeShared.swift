@@ -6,13 +6,14 @@ import UniformTypeIdentifiers
 // MARK: - Column layout
 
 /// Lays out the cells of a hand-built table row: fixed columns keep their width and flexible columns
-/// share the rest by weight, never shrinking below their minimum. Every row of a table uses the same
-/// column list, so cells line up without a `Grid`. Cells are centered vertically; a cell that should
-/// fill its column (right-aligned numbers, chips) uses `.frame(maxWidth: .infinity, alignment:)`.
+/// share the rest by weight, never shrinking below their minimum or growing past their maximum (what a
+/// capped column cannot take goes to the others). Every row of a table uses the same column list, so
+/// cells line up without a `Grid`. Cells are centered vertically; a cell that should fill its column
+/// (right-aligned numbers, chips) uses `.frame(maxWidth: .infinity, alignment:)`.
 struct AnalyzeColumnsLayout: Layout {
     enum Column: Hashable, Sendable {
         case fixed(CGFloat)
-        case flexible(weight: CGFloat = 1, min: CGFloat = 0)
+        case flexible(weight: CGFloat = 1, min: CGFloat = 0, max: CGFloat = .infinity)
     }
 
     var columns: [Column]
@@ -49,7 +50,7 @@ struct AnalyzeColumnsLayout: Layout {
         columns.reduce(spacing * CGFloat(max(0, columns.count - 1))) { total, column in
             switch column {
             case .fixed(let width): total + width
-            case .flexible(_, let minimum): total + max(minimum, 80)
+            case .flexible(_, let minimum, let maximum): total + max(minimum, min(80, maximum))
             }
         }
     }
@@ -71,15 +72,22 @@ struct AnalyzeColumnsLayout: Layout {
         available = max(0, available)
         while !pool.isEmpty {
             let totalWeight = pool.reduce(CGFloat(0)) { $0 + weight(columns[$1]) }
-            // Pin the first column whose share falls below its minimum, then share the rest again.
-            if let pinned = pool.first(where: { share(available, weight(columns[$0]), totalWeight) < minimum(columns[$0]) }) {
-                result[pinned] = minimum(columns[pinned])
-                available = max(0, available - result[pinned])
-                pool.removeAll { $0 == pinned }
-                continue
+            let shares = pool.map { share(available, weight(columns[$0]), totalWeight) }
+            let short = pool.indices.filter { shares[$0] < minimum(columns[pool[$0]]) }
+            let over = pool.indices.filter { shares[$0] > maximum(columns[pool[$0]]) }
+            if short.isEmpty && over.isEmpty {
+                for (index, share) in zip(pool, shares) { result[index] = share }
+                break
             }
-            for index in pool { result[index] = share(available, weight(columns[index]), totalWeight) }
-            break
+            // Pin the first column outside its bounds, then share the rest again. As in CSS flexbox, columns
+            // below their minimum go first when they lack more than the capped columns would give back.
+            let missing = short.reduce(CGFloat(0)) { $0 + minimum(columns[pool[$1]]) - shares[$1] }
+            let surplus = over.reduce(CGFloat(0)) { $0 + shares[$1] - maximum(columns[pool[$1]]) }
+            let toMinimum = missing >= surplus
+            let pinned = pool[toMinimum ? short[0] : over[0]]
+            result[pinned] = toMinimum ? minimum(columns[pinned]) : maximum(columns[pinned])
+            available = max(0, available - result[pinned])
+            pool.removeAll { $0 == pinned }
         }
         return result
     }
@@ -89,13 +97,18 @@ struct AnalyzeColumnsLayout: Layout {
     }
 
     private static func weight(_ column: Column) -> CGFloat {
-        if case .flexible(let weight, _) = column { return max(0, weight) }
+        if case .flexible(let weight, _, _) = column { return max(0, weight) }
         return 0
     }
 
     private static func minimum(_ column: Column) -> CGFloat {
-        if case .flexible(_, let minimum) = column { return minimum }
+        if case .flexible(_, let minimum, _) = column { return minimum }
         return 0
+    }
+
+    private static func maximum(_ column: Column) -> CGFloat {
+        if case .flexible(_, _, let maximum) = column { return maximum }
+        return .infinity
     }
 }
 
