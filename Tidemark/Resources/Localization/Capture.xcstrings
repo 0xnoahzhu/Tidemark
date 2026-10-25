@@ -191,6 +191,11 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surge 已停止推送" } }
       }
     },
+    "surge-cli %1$@ failed with exit status %2$lld." : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "surge-cli %1$@ 失败，退出状态 %2$lld。" } }
+      }
+    },
     "surge-cli %1$@ failed: %2$@" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "surge-cli %1$@ 失败：%2$@" } }

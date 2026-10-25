@@ -1045,7 +1045,12 @@ final class CaptureEngine {
         case let error as SurgeError:
             switch error {
             case .cliNotFound(let path): trf("surge-cli was not found at %@.", "Capture", path)
-            case .commandFailed(let command, let reason): trf("surge-cli %1$@ failed: %2$@", "Capture", command, reason)
+            case .commandFailed(let command, let reason):
+                if let status = SurgeError.exitStatus(inFailureMessage: reason) {
+                    trf("surge-cli %1$@ failed with exit status %2$lld.", "Capture", command, Int(status))
+                } else {
+                    trf("surge-cli %1$@ failed: %2$@", "Capture", command, reason)
+                }
             case .decoding(let command, let reason): trf("Could not read the output of surge-cli %1$@: %2$@", "Capture", command, reason)
             case .timedOut(let command): trf("surge-cli %@ timed out.", "Capture", command)
             }

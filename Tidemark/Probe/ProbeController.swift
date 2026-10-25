@@ -277,12 +277,18 @@ final class ProbeController: ProbeActions {
     }
 
     /// Why Surge's HTTP proxy listener could not be read, short and in the UI language. Surge's own message
-    /// stays as Surge wrote it; the full English description goes to the log.
+    /// stays as Surge wrote it, a surge-cli that printed none is named by its exit status; the full English
+    /// description goes to the log.
     static func listenerFailure(_ error: any Error) -> String {
         switch error {
         case is CaptureTimeoutError, SurgeError.timedOut: tr("Surge did not answer in time", table)
         case SurgeError.cliNotFound: tr("surge-cli was not found", table)
-        case SurgeError.commandFailed(_, let message): trf("surge-cli failed: %@", table, message)
+        case SurgeError.commandFailed(_, let message):
+            if let status = SurgeError.exitStatus(inFailureMessage: message) {
+                trf("surge-cli failed with exit status %lld", table, Int(status))
+            } else {
+                trf("surge-cli failed: %@", table, message)
+            }
         case SurgeError.decoding: tr("Surge's answer could not be read", table)
         default: tr("An unexpected error occurred", table)
         }

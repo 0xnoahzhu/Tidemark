@@ -373,12 +373,15 @@ struct ProbeControllerTests {
         #expect(ProbeController.listenerFailure(SurgeError.timedOut(command: "dump event")) == "Surge did not answer in time")
         #expect(ProbeController.listenerFailure(SurgeError.cliNotFound(path: "/x/surge-cli")) == "surge-cli was not found")
         #expect(ProbeController.listenerFailure(SurgeError.decoding(command: "dump event", message: "bad JSON")) == "Surge's answer could not be read")
+        #expect(ProbeController.listenerFailure(SurgeError.commandFailed(command: "dump event", message: "exit status 1"))
+                == "surge-cli failed with exit status 1")
         #expect(ProbeController.listenerFailure(URLError(.badServerResponse)) == "An unexpected error occurred")
 
         Localizer.shared.preference = .chinese
         defer { Localizer.shared.preference = .english }
         guard Localizer.shared.bundle != nil else { return }
         #expect(ProbeController.listenerFailure(SurgeError.commandFailed(command: "dump event", message: "Denied")) == "surge-cli 失败：Denied")
+        #expect(ProbeController.listenerFailure(SurgeError.commandFailed(command: "dump event", message: "exit status 1")) == "surge-cli 失败，退出状态 1")
         #expect(ProbeController.listenerFailure(SurgeError.timedOut(command: "dump event")) == "Surge 未及时响应")
         #expect(ProbeController.listenerFailure(SurgeError.cliNotFound(path: "/x/surge-cli")) == "找不到 surge-cli")
     }

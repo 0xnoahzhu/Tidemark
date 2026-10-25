@@ -220,6 +220,10 @@ struct SurgeOutputParserTests {
         #expect(throws: SurgeError.commandFailed(command: "status", message: "exit status 9")) {
             try SurgeOutputParser.payload(of: output, command: "status")
         }
+        // The UI words such a failure in its own language.
+        #expect(SurgeError.exitStatus(inFailureMessage: SurgeOutputParser.failureMessage(stderr: Data(), stdout: Data(), status: 9)) == 9)
+        #expect(SurgeError.exitStatus(inFailureMessage: "Denied") == nil)
+        #expect(SurgeError.exitStatus(inFailureMessage: "Unexpected exit status 2 from the controller") == nil)
     }
 
     @Test func passesThroughPayloadsWithNullErrorKeys() throws {

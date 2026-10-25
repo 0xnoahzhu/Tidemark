@@ -384,6 +384,8 @@ struct CaptureEngineTests {
         Localizer.shared.preference = .english
         #expect(CaptureEngine.message(for: DatabaseError.unreachable("connection refused")) == "PostgreSQL is unreachable: connection refused")
         #expect(CaptureEngine.message(for: SurgeError.commandFailed(command: "status", message: "denied")) == "surge-cli status failed: denied")
+        #expect(CaptureEngine.message(for: SurgeError.commandFailed(command: "status", message: "exit status 9"))
+                == "surge-cli status failed with exit status 9.")
         #expect(CaptureEngine.message(for: CaptureDisplayError(DatabaseError.notConfigured)) == "No PostgreSQL connection is configured.")
         // Typed reasons read in English exactly as the log has them.
         let typed: [DatabaseError] = [
@@ -422,6 +424,7 @@ struct CaptureEngineTests {
         #expect(CaptureEngine.message(for: DatabaseError.notConfigured) == "还没有设置 PostgreSQL 连接。")
         #expect(CaptureEngine.message(for: SurgeError.cliNotFound(path: "/opt/surge-cli")) == "在 /opt/surge-cli 找不到 surge-cli。")
         #expect(CaptureEngine.message(for: SurgeError.commandFailed(command: "status", message: "denied")) == "surge-cli status 失败：denied")
+        #expect(CaptureEngine.message(for: SurgeError.commandFailed(command: "status", message: "exit status 9")) == "surge-cli status 失败，退出状态 9。")
         #expect(CaptureEngine.message(for: SurgeError.decoding(command: "dump active", message: "bad JSON")) == "无法读取 surge-cli dump active 的输出：bad JSON")
         #expect(CaptureEngine.message(for: SurgeError.timedOut(command: "status")) == "surge-cli status 超时。")
     }

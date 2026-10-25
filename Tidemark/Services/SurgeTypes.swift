@@ -213,4 +213,11 @@ enum SurgeError: Error, Sendable, Equatable, LocalizedError {
         case .timedOut(let command): "surge-cli \(command) timed out."
         }
     }
+
+    /// The exit status in a `commandFailed` message when surge-cli printed no reason of its own
+    /// (`SurgeOutputParser.failureMessage` then reports `exit status N`, which the UI words in its own
+    /// language); nil for a message surge-cli wrote.
+    static func exitStatus(inFailureMessage message: String) -> Int32? {
+        message.wholeMatch(of: /exit status (-?\d+)/).flatMap { Int32($0.1) }
+    }
 }
