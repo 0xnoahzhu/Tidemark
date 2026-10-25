@@ -37,7 +37,7 @@ final class Preferences {
     var surgeRemoteTag = ""
 
     // MARK: Database
-    /// PostgreSQL URL without the password (the password is kept in the Keychain).
+    /// PostgreSQL URL as typed in Settings › Database, password included (Tidemark keeps nothing in the Keychain).
     var databaseURL: String { didSet { set(databaseURL, "db.url") } }
     var batchRows: Int { didSet { set(batchRows, "db.batchRows") } }
     var batchInterval: Double { didSet { set(batchInterval, "db.batchInterval") } }
@@ -104,16 +104,13 @@ final class Preferences {
         return SurgeEndpoint(cliPath: surgeCLIPath, remote: remote.isEmpty ? nil : remote, password: nil)
     }
 
-    /// Full connection URL including the Keychain password.
-    /// `TIDEMARK_DATABASE_URL` in the environment overrides it (development and testing).
-    var databaseURLWithPassword: String {
+    /// The URL capture connects to: `databaseURL`, unless `TIDEMARK_DATABASE_URL` in the environment overrides it
+    /// (development and testing).
+    var connectionURL: String {
         if let override = ProcessInfo.processInfo.environment["TIDEMARK_DATABASE_URL"], !override.isEmpty {
             return override
         }
-        guard let password = Keychain.read(account: Keychain.databaseAccount), !password.isEmpty,
-              var components = URLComponents(string: databaseURL) else { return databaseURL }
-        components.password = password
-        return components.string ?? databaseURL
+        return databaseURL
     }
 
     private func set(_ value: Any, _ key: String) { defaults.set(value, forKey: key) }

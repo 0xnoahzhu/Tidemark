@@ -1,5 +1,4 @@
 import AppKit
-import CryptoKit
 import Foundation
 import Observation
 import os
@@ -29,15 +28,15 @@ final class CaptureEngine {
     /// Builds a client when the surge-cli path, the remote controller or its password changes. When nil the
     /// engine keeps its client and only restarts the stream.
     var makeSurgeClient: ((SurgeEndpoint) -> any SurgeClient)?
-    /// Builds a database for a connection URL (password included). Used when the URL or the Keychain
-    /// password changes, and for testing new settings. When nil the engine reconnects its instance.
+    /// Builds a database for a connection URL (password included). Used when the URL changes, and for testing
+    /// new settings. When nil the engine reconnects its instance.
     var makeDatabase: ((String) -> any TidemarkDatabase)?
     /// Called on the main actor after the engine switched to a new database (services that read it follow).
     var databaseChanged: ((any TidemarkDatabase) -> Void)?
     /// Releases a database the engine no longer uses (closes its connection pool).
     var retireDatabase: (@Sendable (any TidemarkDatabase) async -> Void)?
-    /// The PostgreSQL URL (Keychain password included) the settings describe. Read only when `makeDatabase`
-    /// is set; tests replace it so they never touch the Keychain.
+    /// The PostgreSQL URL the settings describe (`Preferences.connectionURL`). Read only when `makeDatabase` is
+    /// set; tests replace it so the environment's `TIDEMARK_DATABASE_URL` never reaches them.
     var settingsDatabaseURL: @MainActor () -> String
 
     static let log = Logger(subsystem: "io.tidemark.Tidemark", category: "capture")
@@ -70,8 +69,8 @@ final class CaptureEngine {
     private var observedPreferences: PreferenceValues?
     /// Device the pipeline currently writes under.
     private var appliedRecordingDevice: DeviceID
-    /// SHA-256 of the connection URL (password included) the current database was built with; nil when unknown.
-    private(set) var databaseFingerprint: String?
+    /// The connection URL the current database was built with; nil when unknown.
+    private(set) var currentDatabaseURL: String?
     private var reconnectAttempt = 0
     /// Last time a write failed after the connection had been established.
     private var lastWriteFailureAt: Date?
@@ -125,7 +124,7 @@ final class CaptureEngine {
         self.probeRegistry = probeRegistry
         let preferences = model.preferences
         appliedRecordingDevice = CaptureDeviceInfo.recordingDeviceID(preferences)
-        settingsDatabaseURL = { preferences.databaseURLWithPassword }
+        settingsDatabaseURL = { preferences.connectionURL }
         pipeline = CapturePipeline(
             settings: Self.settings(preferences, surge: surge),
             database: database,
@@ -152,14 +151,9 @@ final class CaptureEngine {
         )
     }
 
-    /// Records which connection URL (password included) the current database was built with, so a later
-    /// change of the URL or of the Keychain password rebuilds it.
+    /// Records which connection URL the current database was built with, so a later change of the URL rebuilds it.
     func adoptDatabaseURL(_ url: String) {
-        databaseFingerprint = Self.fingerprint(url)
-    }
-
-    static func fingerprint(_ secret: String) -> String {
-        SHA256.hash(data: Data(secret.utf8)).map { String(format: "%02x", $0) }.joined()
+        currentDatabaseURL = url
     }
 
     /// Surge's `start-time` (seconds) as the session key (milliseconds).
@@ -262,14 +256,13 @@ final class CaptureEngine {
                 failures += 1
                 // Statements abandoned on dead sockets may still hold the pool's connections: start afresh.
                 if failures % self.rebuildAfterFailures == 0, self.makeDatabase != nil {
-                    let url = self.settingsDatabaseURL()
-                    await self.replaceDatabase(url: url, fingerprint: Self.fingerprint(url))
+                    await self.replaceDatabase(url: self.settingsDatabaseURL())
                 }
             }
         }
     }
 
-    /// Reconnects PostgreSQL; rebuilds the client first when the URL or the Keychain password changed.
+    /// Reconnects PostgreSQL; rebuilds the client first when the URL changed.
     /// Without `force` nothing happens unless something changed.
     func applyDatabaseSettings(force: Bool) {
         let replacement = changedDatabaseURL()
@@ -277,34 +270,33 @@ final class CaptureEngine {
         reconnectDatabase(replacingWith: replacement)
     }
 
-    /// The settings' URL when it (or its Keychain password) differs from the live connection's.
-    func changedDatabaseURL() -> (url: String, fingerprint: String)? {
+    /// The settings' URL when it differs from the live connection's.
+    func changedDatabaseURL() -> String? {
         guard makeDatabase != nil else { return nil }
         let url = settingsDatabaseURL()
-        let fingerprint = Self.fingerprint(url)
-        return fingerprint == databaseFingerprint ? nil : (url, fingerprint)
+        return url == currentDatabaseURL ? nil : url
     }
 
-    private func reconnectDatabase(replacingWith replacement: (url: String, fingerprint: String)?) {
+    private func reconnectDatabase(replacingWith replacement: String?) {
         databaseTask?.cancel()
         reconnectAttempt = 0
         databaseTask = Task { [weak self] in
             guard let self else { return }
             // Rows are spooled until the (new) connection is up.
             await self.pipeline.setDatabaseOnline(false)
-            if let replacement { await self.replaceDatabase(url: replacement.url, fingerprint: replacement.fingerprint) }
+            if let replacement { await self.replaceDatabase(url: replacement) }
             if !(await self.connectDatabase()) { self.scheduleDatabaseReconnect() }
         }
     }
 
     /// Switches to a new client for `url` and retires the old one (closing its pools) in the background.
-    private func replaceDatabase(url: String, fingerprint: String) async {
+    private func replaceDatabase(url: String) async {
         guard let make = makeDatabase else { return }
         let old = database
         let database = make(url)
         self.database = database
         model.database = database
-        databaseFingerprint = fingerprint
+        currentDatabaseURL = url
         resetOtherMacRows()
         databaseChanged?(database)
         await pipeline.setServices(surge: surge, database: database)

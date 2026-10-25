@@ -5,7 +5,7 @@ struct SettingsDatabasePane: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
 
-    /// The URL field's text: the saved URL with a mask where the Keychain password goes.
+    /// The URL field's text: the saved URL with its password masked.
     @State private var urlDraft = ""
     @State private var nameDraft = ""
     @State private var testing = false
@@ -28,7 +28,7 @@ struct SettingsDatabasePane: View {
 
     // MARK: Connection
 
-    /// One URL field, password included: what is typed there goes to the Keychain and comes back masked.
+    /// One URL field, password included: it is saved as typed and comes back with the password masked.
     private var connectionGroup: some View {
         SettingsGroup(title: tr("PostgreSQL connection URL", "Settings")) {
             TextField(text: $urlDraft, prompt: Text(verbatim: "postgres://user@127.0.0.1:5432/tidemark")) {
@@ -175,12 +175,8 @@ struct SettingsDatabasePane: View {
     // MARK: Actions
 
     private func load() {
-        urlDraft = SettingsDatabaseURL.masked(model.preferences.databaseURL, hasPassword: Self.hasStoredPassword)
+        urlDraft = SettingsDatabaseURL.masked(model.preferences.databaseURL)
         nameDraft = model.devices.thisDevice?.name ?? ""
-    }
-
-    private static var hasStoredPassword: Bool {
-        Keychain.read(account: Keychain.databaseAccount)?.isEmpty == false
     }
 
     private func loadSchema() async {
@@ -191,40 +187,23 @@ struct SettingsDatabasePane: View {
         schemaVersion = version
     }
 
-    /// Saves the URL field: the URL without its password to the preferences and the password to the Keychain
-    /// (the mask keeps the saved one, a URL without a password removes it). Returns `true` when either changed.
-    /// Text that is not a PostgreSQL URL is not saved: it throws, and the saved URL and password stay.
+    /// Saves the URL field as typed, password included, to the preferences; the mask (or what is left of it)
+    /// keeps the saved password. Returns `true` when the URL changed. Text that is not a PostgreSQL URL is not
+    /// saved: it throws, and the saved URL stays.
     private func commitConnection() throws(SettingsDatabaseURL.NotAURL) -> Bool {
-        guard let parts = SettingsDatabaseURL.split(urlDraft.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+        let saved = model.preferences.databaseURL
+        guard let url = SettingsDatabaseURL.unmasked(urlDraft.trimmingCharacters(in: .whitespacesAndNewlines), saved: saved) else {
             throw SettingsDatabaseURL.NotAURL()
         }
-        var changed = false
-        if parts.url != model.preferences.databaseURL {
-            model.preferences.databaseURL = parts.url
-            changed = true
-        }
-        let stored = Keychain.read(account: Keychain.databaseAccount)
-        switch parts.password {
-        case .kept:
-            break
-        case .typed(let password):
-            if password != stored {
-                Keychain.write(password, account: Keychain.databaseAccount)
-                changed = true
-            }
-        case .none:
-            if stored?.isEmpty == false {
-                Keychain.write(nil, account: Keychain.databaseAccount)
-                changed = true
-            }
-        }
-        urlDraft = SettingsDatabaseURL.masked(parts.url, hasPassword: Self.hasStoredPassword)
-        return changed
+        urlDraft = SettingsDatabaseURL.masked(url)
+        guard url != saved else { return false }
+        model.preferences.databaseURL = url
+        return true
     }
 
-    /// Saves a changed URL or password, reconnects so the engine rebuilds its database client from the saved
-    /// credentials, and only then tests: the test always runs against what was just saved. Text that is not a
-    /// PostgreSQL URL fails here, in the status line, and the field keeps it for correcting.
+    /// Saves a changed URL, reconnects so the engine rebuilds its database client from it, and only then tests:
+    /// the test always runs against what was just saved. Text that is not a PostgreSQL URL fails here, in the
+    /// status line, and the field keeps it for correcting.
     private func testConnection() {
         guard !testing else { return }
         do {
@@ -327,19 +306,10 @@ enum SettingsDatabaseFormat {
     }
 }
 
-/// The URL field's text and what it means for the URL kept in the preferences and the password kept in the
-/// Keychain. The field shows the saved password as a mask: `postgres://tide:••••••••@127.0.0.1:5432/tidemark`.
+/// The URL field's text and the URL kept in the preferences, password included. The field shows the saved
+/// password as a mask, `postgres://tide:••••••••@127.0.0.1:5432/tidemark`, in the user info and in a libpq
+/// `password` parameter alike; the mask left in place (or what is left of it) keeps the saved password.
 enum SettingsDatabaseURL {
-    /// What the field says about the Keychain password.
-    enum Password: Equatable {
-        /// The mask (or what is left of it): keep the saved password.
-        case kept
-        /// A password typed into the URL.
-        case typed(String)
-        /// A URL without a password: there is none.
-        case none
-    }
-
     /// Field text that is not a `postgres://` or `postgresql://` URL. It is neither saved nor shown back, since
     /// it may hold a password.
     struct NotAURL: LocalizedError {
@@ -354,43 +324,78 @@ enum SettingsDatabaseURL {
     /// ASCII stand-in for the mask while `URLComponents` builds the string (it would percent-encode the dots).
     private static let placeholder = "TIDEMARKPASSWORD"
 
-    /// The saved URL with the mask where the saved password goes.
-    static func masked(_ url: String, hasPassword: Bool) -> String {
-        guard hasPassword, var components = postgresComponents(url) else { return url }
-        components.password = placeholder
-        guard let string = components.string, let range = string.range(of: ":\(placeholder)@") else { return url }
-        return string.replacingCharacters(in: range, with: ":\(mask)@")
-    }
-
-    /// Splits the field's text into the URL to keep and what happens to the password. A password in the user
-    /// info or in a libpq `password` parameter goes to the Keychain, so the URL kept never holds one; a typed
-    /// password replaces the mask. Nil for text that is not a PostgreSQL URL, which must not be saved.
-    static func split(_ raw: String) -> (url: String, password: Password)? {
-        guard var components = postgresComponents(raw) else { return nil }
-        let userPassword = components.password.flatMap { $0.isEmpty ? nil : $0 }
-        components.password = nil
-        if components.user?.isEmpty == true { components.user = nil }
-        var queryPassword: String?
-        if let items = components.percentEncodedQueryItems, items.contains(where: isPassword) {
-            // Last one wins, as in `PostgresConnectionURL`; the other parameters keep their encoding.
-            queryPassword = components.queryItems?.last { isPassword($0) && $0.value?.isEmpty == false }?.value
-            let others = items.filter { !isPassword($0) }
-            components.percentEncodedQueryItems = others.isEmpty ? nil : others
+    /// The saved URL as the field shows it: every password in it (user info, `password` parameters) masked.
+    /// Text that is not a PostgreSQL URL comes back unchanged; Settings never saves such text.
+    static func masked(_ url: String) -> String {
+        guard var components = postgresComponents(url) else { return url }
+        var masked = false
+        if components.percentEncodedPassword?.isEmpty == false {
+            components.percentEncodedPassword = placeholder
+            masked = true
         }
-        guard let url = components.string else { return nil }
-        if let userPassword, !isMask(userPassword) { return (url, .typed(userPassword)) }
-        if let queryPassword { return (url, .typed(queryPassword)) }
-        return (url, userPassword == nil ? .none : .kept)
+        if let items = components.percentEncodedQueryItems, items.contains(where: { isPassword($0) && $0.value?.isEmpty == false }) {
+            components.percentEncodedQueryItems = items.map { item in
+                isPassword(item) && item.value?.isEmpty == false ? URLQueryItem(name: item.name, value: placeholder) : item
+            }
+            masked = true
+        }
+        guard masked, let string = components.string else { return url }
+        return string.replacingOccurrences(of: placeholder, with: mask)
     }
 
-    /// The components of a `postgres://` or `postgresql://` URL, the schemes `PostgresConnectionURL` accepts.
+    /// The URL to save for the field's text: the text as typed, except that a mask (or what is left of it) stands
+    /// for the saved URL's password, the one in the same place (user info or `password` parameter) when it has
+    /// one there. A mask with no saved password to stand for is dropped. Nil for text that is not a PostgreSQL
+    /// URL, which must not be saved.
+    static func unmasked(_ text: String, saved: String) -> String? {
+        guard var components = postgresComponents(text) else { return nil }
+        let savedComponents = postgresComponents(saved)
+        let savedUserPassword = savedComponents?.password.flatMap { $0.isEmpty ? nil : $0 }
+        let savedQueryPassword = savedComponents.flatMap(queryPassword)
+        var restored = false
+        if let password = components.password, isMask(password) {
+            components.password = savedUserPassword ?? savedQueryPassword
+            if components.password == nil, components.user?.isEmpty == true { components.user = nil }
+            restored = true
+        }
+        if let items = components.percentEncodedQueryItems, items.contains(where: isMaskedPassword) {
+            // The other parameters keep their encoding.
+            let password = (savedQueryPassword ?? savedUserPassword)?.addingPercentEncoding(withAllowedCharacters: queryValueAllowed)
+            let kept = items.compactMap { item in
+                isMaskedPassword(item) ? password.map { URLQueryItem(name: item.name, value: $0) } : item
+            }
+            components.percentEncodedQueryItems = kept.isEmpty ? nil : kept
+            restored = true
+        }
+        guard restored else { return text }
+        return components.string
+    }
+
+    /// Characters a query parameter's value keeps unencoded (`&`, `=` and `+` would change its meaning).
+    private static let queryValueAllowed = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=+"))
+
+    /// The components of a `postgres://` or `postgresql://` URL, the schemes `PostgresConnectionURL` accepts. The
+    /// mask's dots are percent-encoded first: `URLComponents` would otherwise encode the rest of their component
+    /// again, `%20` included.
     private static func postgresComponents(_ string: String) -> URLComponents? {
-        guard let components = URLComponents(string: string),
+        guard let components = URLComponents(string: string.replacingOccurrences(of: "•", with: "%E2%80%A2")),
               let scheme = components.scheme?.lowercased(), scheme == "postgres" || scheme == "postgresql" else { return nil }
         return components
     }
 
-    private static func isPassword(_ item: URLQueryItem) -> Bool { item.name.lowercased() == "password" }
+    /// The last non-empty `password` parameter, decoded: the one that counts, as in `PostgresConnectionURL`.
+    private static func queryPassword(_ components: URLComponents) -> String? {
+        components.queryItems?.last { isPassword($0) && $0.value?.isEmpty == false }?.value
+    }
 
-    private static func isMask(_ password: String) -> Bool { password.allSatisfy { $0 == "•" } }
+    /// A `password` parameter, whatever its case and encoding.
+    private static func isPassword(_ item: URLQueryItem) -> Bool {
+        (item.name.removingPercentEncoding ?? item.name).lowercased() == "password"
+    }
+
+    private static func isMaskedPassword(_ item: URLQueryItem) -> Bool {
+        isPassword(item) && (item.value?.removingPercentEncoding).map(isMask) == true
+    }
+
+    private static func isMask(_ password: String) -> Bool { !password.isEmpty && password.allSatisfy { $0 == "•" } }
 }

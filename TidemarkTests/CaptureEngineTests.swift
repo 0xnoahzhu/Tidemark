@@ -16,7 +16,7 @@ struct CaptureEngineTests {
         model.database = database
         let engine = CaptureEngine(model: model, surge: surge, database: database, processes: CaptureFakeProcesses(),
                                    classifier: CaptureFakeClassifier(), spool: CaptureSpool(directory: temp.url, limit: 1000))
-        // Never read the Keychain from tests.
+        // Never connect to the environment's TIDEMARK_DATABASE_URL from tests.
         engine.settingsDatabaseURL = { "postgresql://tide@db-a.invalid/tidemark" }
         let notifications = self.notifications
         engine.notifier.deliver = { notifications.value.append($0) }
@@ -229,11 +229,11 @@ struct CaptureEngineTests {
         #expect(built.value.isEmpty, "unchanged settings keep the client")
         #expect((model.database as? CaptureFakeDatabase) === original)
 
-        // A new Keychain password changes the full URL, not the stored one.
-        engine.settingsDatabaseURL = { "postgresql://tide@db-b.invalid/tidemark" }
+        // A new password in the URL rebuilds the client.
+        engine.settingsDatabaseURL = { "postgresql://tide:new@db-a.invalid/tidemark" }
         engine.reconnect()
         #expect(await eventually { (model.database as? CaptureFakeDatabase) === replacement })
-        #expect(built.value == ["postgresql://tide@db-b.invalid/tidemark"])
+        #expect(built.value == ["postgresql://tide:new@db-a.invalid/tidemark"])
         #expect(await eventually { (await engine.pipeline.database as? CaptureFakeDatabase) === replacement })
         #expect(await eventually { model.live.database.isHealthy })
         #expect(await CaptureWait.finishes { await engine.stopStream() })

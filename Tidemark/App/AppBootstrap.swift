@@ -12,13 +12,11 @@ enum AppBootstrap {
         Localizer.shared.preference = model.preferences.language
         applyAppearance(model.preferences.appearance)
         applyActivationPolicy(model.preferences.showIn)
-        // Settings offer no remote Surge: drop the controller password an earlier version kept for one.
-        Keychain.write(nil, account: Keychain.retiredSurgeRemoteAccount)
 
         let classifier = PublicSuffixClassifier()
         let processes = LibProcInspector()
         let surge = SurgeCLIClient(endpoint: model.preferences.surgeEndpoint)
-        let databaseURL = model.preferences.databaseURLWithPassword
+        let databaseURL = model.preferences.connectionURL
         let database = PostgresDatabase(url: databaseURL, siteClassifier: classifier)
         model.classifier = classifier
         model.processes = processes

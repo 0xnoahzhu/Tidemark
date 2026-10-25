@@ -11,8 +11,7 @@ extension CaptureEngine: CaptureActions {
     }
 
     /// Reconnects Surge and PostgreSQL with the current settings. A changed surge-cli path, remote controller
-    /// or remote password rebuilds the Surge client; a changed database URL or Keychain password rebuilds the
-    /// PostgreSQL client.
+    /// or remote password rebuilds the Surge client; a changed database URL rebuilds the PostgreSQL client.
     func reconnect() {
         scheduleSurgeSettings(restartStream: true)
         applyDatabaseSettings(force: true)
@@ -219,12 +218,12 @@ extension CaptureEngine: CaptureActions {
         }
     }
 
-    /// Tests the connection the current settings describe. When the URL or the Keychain password differs from
-    /// the live connection's, a throwaway client tests the new settings (the live one keeps recording).
+    /// Tests the connection the current settings describe. When the URL differs from the live connection's, a
+    /// throwaway client tests the new settings (the live one keeps recording).
     /// A failure is described in the UI language (`CaptureDisplayError`).
     func testDatabaseConnection() async -> Result<String, Error> {
         if let make = makeDatabase, let changed = changedDatabaseURL() {
-            let candidate = make(changed.url)
+            let candidate = make(changed)
             let result = await Self.test(candidate, connect: true)
             if let retire = retireDatabase { await retire(candidate) }
             return result

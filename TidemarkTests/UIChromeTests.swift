@@ -255,58 +255,87 @@ struct UIChromeTests {
 
     // MARK: Settings helpers
 
-    /// The URL field holds the password: typed into the URL it goes to the Keychain, the stored URL never has it,
-    /// and the field shows it as a mask, which keeps it.
-    @Test func databaseURLKeepsThePasswordOut() throws {
-        let typed = try #require(SettingsDatabaseURL.split("postgresql://tide:s%40cret@127.0.0.1:5432/tidemark"))
-        #expect(typed.url == "postgresql://tide@127.0.0.1:5432/tidemark")
-        #expect(typed.password == .typed("s@cret"))
-        #expect(SettingsDatabaseURL.split("postgres://tide:a%2541@h/db")?.password == .typed("a%41"), "decoded once")
-        #expect(SettingsDatabaseURL.split("POSTGRES://tide:pw@h/db")?.password == .typed("pw"), "schemes ignore case")
-
-        let plain = try #require(SettingsDatabaseURL.split("postgresql://localhost:5432/tidemark"))
-        #expect(plain.url == "postgresql://localhost:5432/tidemark")
-        #expect(plain.password == SettingsDatabaseURL.Password.none)
-
-        let masked = SettingsDatabaseURL.masked("postgres://tide@127.0.0.1:5432/tidemark", hasPassword: true)
-        #expect(masked == "postgres://tide:••••••••@127.0.0.1:5432/tidemark")
-        #expect(SettingsDatabaseURL.split(masked)?.url == "postgres://tide@127.0.0.1:5432/tidemark")
-        #expect(SettingsDatabaseURL.split(masked)?.password == .kept)
-        #expect(SettingsDatabaseURL.split("postgres://tide:•••••@127.0.0.1:5432/tidemark")?.password == .kept, "an edited mask")
-        #expect(SettingsDatabaseURL.masked("postgres://tide@127.0.0.1:5432/tidemark", hasPassword: false) == "postgres://tide@127.0.0.1:5432/tidemark")
-
-        // Without a user name the mask still round-trips to the stored URL.
-        let userless = SettingsDatabaseURL.masked("postgresql://localhost:5432/tidemark", hasPassword: true)
-        #expect(userless == "postgresql://:••••••••@localhost:5432/tidemark")
-        #expect(SettingsDatabaseURL.split(userless)?.url == "postgresql://localhost:5432/tidemark")
+    /// The URL field is saved as typed, password included, and the preference keeps it that way. Capture connects
+    /// to it unless `TIDEMARK_DATABASE_URL` overrides it.
+    @Test func databaseURLIsKeptWithItsPassword() {
+        let (defaults, suite) = Self.scratchDefaults()
+        defer { TestDefaults.remove(suite) }
+        let preferences = Preferences(defaults: defaults)
+        preferences.databaseURL = "postgres://tide:s%40cret@db.example:5455/tidemark"
+        #expect(defaults.string(forKey: "db.url") == "postgres://tide:s%40cret@db.example:5455/tidemark")
+        #expect(Preferences(defaults: defaults).databaseURL == "postgres://tide:s%40cret@db.example:5455/tidemark")
+        if ProcessInfo.processInfo.environment["TIDEMARK_DATABASE_URL"]?.isEmpty ?? true {
+            #expect(preferences.connectionURL == preferences.databaseURL)
+        }
     }
 
-    /// libpq's `password` parameter goes to the Keychain too, and the other parameters stay as typed.
-    @Test func databaseURLMovesAPasswordParameter() throws {
-        let query = try #require(SettingsDatabaseURL.split("postgres://tide@127.0.0.1:5432/tidemark?password=s%26cret&sslmode=require"))
-        #expect(query.url == "postgres://tide@127.0.0.1:5432/tidemark?sslmode=require")
-        #expect(query.password == .typed("s&cret"))
+    /// The field shows the saved password as a mask, and the mask left in place (or what is left of it) keeps it,
+    /// whatever else changed.
+    @Test func databaseURLMasksThePassword() throws {
+        let saved = "postgresql://tide:s%40cret@127.0.0.1:5432/tidemark"
+        let masked = SettingsDatabaseURL.masked(saved)
+        #expect(masked == "postgresql://tide:••••••••@127.0.0.1:5432/tidemark")
+        #expect(SettingsDatabaseURL.unmasked(masked, saved: saved) == saved)
+        #expect(SettingsDatabaseURL.unmasked("postgresql://tide:••••••••@10.1.2.52:5455/tidemark", saved: saved)
+                == "postgresql://tide:s%40cret@10.1.2.52:5455/tidemark")
+        #expect(SettingsDatabaseURL.unmasked("postgres://tide:•••@127.0.0.1:5432/tidemark", saved: saved)
+                == "postgres://tide:s%40cret@127.0.0.1:5432/tidemark", "an edited mask")
+        #expect(SettingsDatabaseURL.masked("POSTGRES://tide:pw@h/db") == "POSTGRES://tide:••••••••@h/db", "schemes ignore case")
 
-        let only = try #require(SettingsDatabaseURL.split("postgres://tide@h/db?PASSWORD=a&password=b"))
-        #expect(only.url == "postgres://tide@h/db")
-        #expect(only.password == .typed("b"), "the last one wins, as when connecting")
+        // A typed password, or none, is saved as typed.
+        #expect(SettingsDatabaseURL.unmasked("postgres://tide:new@h/db", saved: saved) == "postgres://tide:new@h/db")
+        #expect(SettingsDatabaseURL.unmasked("postgres://tide@h/db", saved: saved) == "postgres://tide@h/db")
+        #expect(SettingsDatabaseURL.masked("postgres://tide@h/db") == "postgres://tide@h/db")
+        // A mask with no saved password to stand for is dropped.
+        #expect(SettingsDatabaseURL.unmasked("postgres://tide:••••••••@h/db", saved: "postgres://tide@h/db") == "postgres://tide@h/db")
 
-        let encoded = try #require(SettingsDatabaseURL.split("postgres://h/d?sslrootcert=/a%20b/c+d.pem&password=x"))
-        #expect(encoded.url == "postgres://h/d?sslrootcert=/a%20b/c+d.pem")
+        // A password holding an "@" is masked whole and comes back the same.
+        let at = "postgres://tide:se@cret@h/db"
+        #expect(SettingsDatabaseURL.masked(at) == "postgres://tide:••••••••@h/db")
+        let restored = try #require(SettingsDatabaseURL.unmasked(SettingsDatabaseURL.masked(at), saved: at))
+        #expect(try PostgresConnectionURL(restored).password == "se@cret")
 
-        // A typed parameter replaces the saved password; a typed user-info password wins over it, as when connecting.
-        #expect(SettingsDatabaseURL.split("postgres://tide:••••••••@h/db?password=new")?.password == .typed("new"))
-        #expect(SettingsDatabaseURL.split("postgres://tide:mine@h/db?password=other")?.password == .typed("mine"))
-        #expect(SettingsDatabaseURL.split("postgres://tide:mine@h/db?password=other")?.url == "postgres://tide@h/db")
+        // Without a user name the mask still round-trips.
+        let userless = "postgresql://:pw@localhost:5432/tidemark"
+        #expect(SettingsDatabaseURL.masked(userless) == "postgresql://:••••••••@localhost:5432/tidemark")
+        #expect(SettingsDatabaseURL.unmasked(SettingsDatabaseURL.masked(userless), saved: userless) == userless)
+        #expect(SettingsDatabaseURL.unmasked("postgresql://:••••••••@localhost:5432/tidemark", saved: "postgresql://localhost:5432/tidemark")
+                == "postgresql://localhost:5432/tidemark")
     }
 
-    /// Text that is not a PostgreSQL URL is never saved: it may hold a password `split` cannot find.
+    /// libpq's `password` parameter is masked where it is too, and the other parameters keep their encoding.
+    @Test func databaseURLMasksAPasswordParameter() throws {
+        let saved = "postgres://tide@127.0.0.1:5432/tidemark?password=s%26cret&sslmode=require"
+        let masked = SettingsDatabaseURL.masked(saved)
+        #expect(masked == "postgres://tide@127.0.0.1:5432/tidemark?password=••••••••&sslmode=require")
+        #expect(SettingsDatabaseURL.unmasked(masked, saved: saved) == saved)
+        #expect(SettingsDatabaseURL.masked("postgres://h/db?PASSWORD=a&password=b") == "postgres://h/db?PASSWORD=••••••••&password=••••••••")
+
+        let encoded = "postgres://h/d?sslrootcert=/a%20b/c+d.pem&password=x"
+        #expect(SettingsDatabaseURL.masked(encoded) == "postgres://h/d?sslrootcert=/a%20b/c+d.pem&password=••••••••")
+        #expect(SettingsDatabaseURL.unmasked(SettingsDatabaseURL.masked(encoded), saved: encoded) == encoded)
+        let userInfo = "postgres://tide:s%40cret@h/d?sslrootcert=/a%20b/c+d.pem"
+        #expect(SettingsDatabaseURL.unmasked(SettingsDatabaseURL.masked(userInfo), saved: userInfo) == userInfo)
+
+        // Each mask stands for the saved password of its own place, or the other one, encoded for where it is.
+        let both = "postgres://me:mine@h/db?password=other"
+        #expect(SettingsDatabaseURL.masked(both) == "postgres://me:••••••••@h/db?password=••••••••")
+        #expect(SettingsDatabaseURL.unmasked(SettingsDatabaseURL.masked(both), saved: both) == both)
+        let moved = try #require(SettingsDatabaseURL.unmasked("postgres://tide@h/db?password=••••••••", saved: "postgres://tide:a&b=c@h/db"))
+        #expect(try PostgresConnectionURL(moved).password == "a&b=c")
+        let movedBack = try #require(SettingsDatabaseURL.unmasked("postgres://tide:••••••••@h/db", saved: "postgres://tide@h/db?password=x%2Fy%3Az"))
+        #expect(try PostgresConnectionURL(movedBack).password == "x/y:z")
+        #expect(SettingsDatabaseURL.unmasked("postgres://h/db?password=••••••••&sslmode=require", saved: "postgres://h/db")
+                == "postgres://h/db?sslmode=require")
+    }
+
+    /// Text that is not a PostgreSQL URL is never saved: it may hold a password the field cannot find.
     @Test func databaseURLRefusesOtherText() {
         for text in ["tide:secret@127.0.0.1:5432/tidemark", "127.0.0.1:5432/tidemark", "host=db password=secret dbname=tidemark",
                      "http://tide:secret@db/tidemark", "not a url", ""] {
-            #expect(SettingsDatabaseURL.split(text) == nil, "\(text)")
+            #expect(SettingsDatabaseURL.unmasked(text, saved: "postgres://tide:pw@h/db") == nil, "\(text)")
         }
-        #expect(SettingsDatabaseURL.masked("tide@127.0.0.1:5432/tidemark", hasPassword: true) == "tide@127.0.0.1:5432/tidemark")
+        #expect(SettingsDatabaseURL.masked("tide@127.0.0.1:5432/tidemark") == "tide@127.0.0.1:5432/tidemark")
     }
 
     @Test func databaseFormatting() {
