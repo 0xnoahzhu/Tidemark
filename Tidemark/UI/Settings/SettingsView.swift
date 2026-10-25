@@ -176,12 +176,15 @@ struct SettingsGroup<Content: View>: View {
 struct SettingsCard<Content: View>: View {
     @ViewBuilder var content: Content
 
+    /// One device pixel: a 0.5 pt line would round away to nothing (or to a full point) on a 1x display.
+    @Environment(\.displayScale) private var displayScale
+
     var body: some View {
         VStack(spacing: 0) {
             Group(subviews: content) { rows in
                 ForEach(rows.indices, id: \.self) { index in
                     if index > 0 {
-                        Rectangle().fill(Theme.line).frame(height: 0.5)
+                        Rectangle().fill(Theme.line).frame(height: 1 / displayScale)
                     }
                     rows[index]
                 }
