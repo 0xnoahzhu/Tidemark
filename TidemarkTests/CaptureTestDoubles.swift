@@ -425,7 +425,6 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func distinctPolicies(since: Date?) async throws -> [String] { [] }
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64 { Int64(rows.count) }
     func estimatedRequestCount() async throws -> Int64 { Int64(rows.count) }
-    func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64 { 0 }
 
     func upsertProcessChain(deviceID: DeviceID, chain: [ProcessLink], appID: AppID?) async throws -> Int64? {
         try check()

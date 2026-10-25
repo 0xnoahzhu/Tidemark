@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings › Database: the PostgreSQL connection, the Macs sharing it, write batching, retention and schema.
+/// Settings › Database: the PostgreSQL connection, the Macs sharing it, write batching and schema.
 struct SettingsDatabasePane: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
@@ -160,16 +160,6 @@ struct SettingsDatabasePane: View {
                 Text(trf("Buffer up to %@ rows on disk and replay them on reconnect", "Settings", Fmt.count(model.preferences.spoolLimit)))
             }
 
-            Picker(selection: retentionBinding) {
-                ForEach(retentionOptions, id: \.self) { days in
-                    Text(SettingsDatabaseFormat.retentionLabel(days)).tag(days)
-                }
-            } label: {
-                Text(tr("Keep requests", "Settings"))
-                Text(tr("Older requests are deleted in batches every hour.", "Settings"))
-            }
-            .pickerStyle(.menu)
-
             LabeledContent {
                 Text(schemaVersion.map { trf("schema v%lld", "Settings", $0) } ?? "—")
                     .font(.system(size: 11))
@@ -190,17 +180,6 @@ struct SettingsDatabasePane: View {
 
     private var batchBinding: Binding<Preferences.BatchPreset> {
         Binding(get: { model.preferences.batchPreset }, set: { model.preferences.batchPreset = $0 })
-    }
-
-    private var retentionOptions: [Int] {
-        let current = model.preferences.retentionDays
-        return SettingsDatabaseFormat.retentionPresets.contains(current)
-            ? SettingsDatabaseFormat.retentionPresets
-            : SettingsDatabaseFormat.retentionPresets + [current]
-    }
-
-    private var retentionBinding: Binding<Int> {
-        Binding(get: { model.preferences.retentionDays }, set: { model.preferences.retentionDays = $0 })
     }
 
     // MARK: Actions
@@ -315,22 +294,11 @@ private struct SettingsDeviceRow: View {
 /// Formatting for the Database pane.
 @MainActor
 enum SettingsDatabaseFormat {
-    /// Days to keep requests: 0 = forever.
-    static let retentionPresets = [0, 365, 90, 30, 7]
-
     /// Pane height that opens with every row visible, the three-line table list included: one Mac fits in
     /// 700 pt and each further Mac adds a row, up to a height that still fits a 13-inch display (the form
     /// scrolls beyond that).
     nonisolated static func paneHeight(macCount: Int) -> CGFloat {
         min(700 + 44 * CGFloat(max(macCount - 1, 0)), 800)
-    }
-
-    static func retentionLabel(_ days: Int) -> String {
-        switch days {
-        case 0: tr("Forever", "Settings")
-        case 365: tr("1 year", "Settings")
-        default: trn("%lld day", "%lld days", days, "Settings")
-        }
     }
 
     /// `200 · 1 s`

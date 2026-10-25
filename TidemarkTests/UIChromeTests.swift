@@ -245,15 +245,10 @@ struct UIChromeTests {
             #expect(SettingsDatabaseFormat.seconds(1) == "1")
             #expect(SettingsDatabaseFormat.seconds(0.5) == "0.5")
             #expect(SettingsDatabaseFormat.batchLabel(.init(rows: 200, interval: 1)) == "200 · 1 s")
-            #expect(SettingsDatabaseFormat.retentionLabel(0) == "Forever")
-            #expect(SettingsDatabaseFormat.retentionLabel(365) == "1 year")
-            #expect(SettingsDatabaseFormat.retentionLabel(1) == "1 day")
-            #expect(SettingsDatabaseFormat.retentionLabel(30) == "30 days")
             #expect(SettingsDatabaseFormat.milliseconds(.milliseconds(2)) == 2)
         }
         withLanguage(.chinese) {
             #expect(SettingsDatabaseFormat.batchLabel(.init(rows: 200, interval: 1)) == "200 · 1 秒")
-            #expect(SettingsDatabaseFormat.retentionLabel(90) == "90 天")
         }
     }
 

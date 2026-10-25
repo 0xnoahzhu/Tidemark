@@ -810,7 +810,6 @@ private struct RequestsStubDatabase: TidemarkDatabase {
     func distinctPolicies(since: Date?) async throws -> [String] { [] }
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64 { 0 }
     func estimatedRequestCount() async throws -> Int64 { 0 }
-    func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64 { 0 }
     func upsertProcessChain(deviceID: DeviceID, chain: [ProcessLink], appID: AppID?) async throws -> Int64? { nil }
     func processTree(appID: AppID, scope: DeviceScope) async throws -> [ProcessNode] { [] }
     func knownHosts() async throws -> [AppID: Set<String>] { [:] }

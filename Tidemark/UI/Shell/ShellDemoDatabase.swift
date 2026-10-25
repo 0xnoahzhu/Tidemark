@@ -113,7 +113,6 @@ struct ShellDemoDatabase: TidemarkDatabase {
         try await base.requestsWritten(after: cursor, excluding: excluding, limit: limit)
     }
     func requestWritePosition() async throws -> RequestWriteCursor { try await base.requestWritePosition() }
-    func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64 { try await base.deleteRequests(olderThan: olderThan, deviceID: deviceID) }
     func upsertProcessChain(deviceID: DeviceID, chain: [ProcessLink], appID: AppID?) async throws -> Int64? {
         try await base.upsertProcessChain(deviceID: deviceID, chain: chain, appID: appID)
     }

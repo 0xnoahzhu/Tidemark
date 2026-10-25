@@ -694,9 +694,6 @@ struct DatabaseLiveTests {
             #expect(Fixture.close(all.start, old.startedAt))
             let none = try await db.histogram(RequestQuery(range: .all, search: "nothing-matches"), buckets: 5)
             #expect(none.counts == [0, 0, 0, 0, 0])
-
-            #expect(try await db.deleteRequests(olderThan: Fixture.now.addingTimeInterval(-30 * 24 * 3600), deviceID: nil) == 1)
-            #expect(try await db.devices().first { $0.id == mac.id }?.rowCount == 20)
         }
     }
 
@@ -1072,10 +1069,6 @@ struct DatabaseLiveTests {
             #expect(try await db.unreadAlertCount(scope: .all) == 1)
             try await db.markAllAlertsRead(appID: nil, scope: .all)
             #expect(try await db.unreadAlertCount(scope: .all) == 0)
-
-            // Retention keeps alerts and clears their request link.
-            #expect(try await db.deleteRequests(olderThan: Fixture.now.addingTimeInterval(3600), deviceID: nil) == 1)
-            #expect(try await db.alerts(filter: .domain, appID: nil, scope: .all, limit: 10).first?.requestRowID == nil)
 
             try await db.deleteAlert(inserted[0].id)
             #expect(try await db.alerts(filter: .all, appID: nil, scope: .all, limit: 10).count == 1)

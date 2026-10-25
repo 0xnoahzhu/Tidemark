@@ -91,7 +91,7 @@ final class PostgresDatabase: TidemarkDatabase {
     /// Statement timeout of reads that scan a long stretch of the request log: History over long ranges,
     /// its histogram and totals, the policy list, an app's counters and process tree, the backfill preview.
     static let longReadTimeout: Duration = .seconds(300)
-    /// Statement timeout of maintenance on large tables (retention, backfill, deleting an app).
+    /// Statement timeout of maintenance on large tables (backfill, deleting an app).
     static let maintenanceTimeout: Duration = .seconds(600)
 
     /// How long a call may hold its leased connection before Tidemark stops waiting for the server, closes

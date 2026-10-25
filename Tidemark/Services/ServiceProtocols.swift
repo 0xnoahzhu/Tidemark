@@ -139,9 +139,6 @@ protocol TidemarkDatabase: Sendable {
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64
     /// Fast estimate of the total row count (`pg_class.reltuples` refined by exact counts when small).
     func estimatedRequestCount() async throws -> Int64
-    /// Deletes requests that started before `olderThan`, only `deviceID`'s rows when given (each Mac applies
-    /// its own retention setting to its own history), every Mac's rows when nil.
-    func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64
     /// Upserts like `upsertRequests` and also reports how many rows were inserted rather than updated.
     func upsertRequestsCountingInserts(_ rows: [RequestRecord]) async throws -> RequestUpsertResult
     /// Marks `deviceID`'s rows that are still `active` from Surge sessions before `session` completed: Surge

@@ -545,37 +545,6 @@ extension PostgresDatabase {
         return try await rows("SELECT count(*) AS n FROM requests").first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
     }
 
-    /// Deletes requests that started before `olderThan` (only `deviceID`'s when given) in batches of 10,000
-    /// (each its own transaction, so retention never holds long locks) and lowers each device's `row_count`.
-    /// Batches are spaced by `maintenancePause`, so a first run over a large backlog does not saturate the
-    /// server's disk and WAL while every Mac keeps writing.
-    func deleteRequests(olderThan: Date, deviceID: DeviceID?) async throws -> Int64 {
-        let batchSize = 10_000
-        var total: Int64 = 0
-        while true {
-            try Task.checkCancellation()
-            let deleted = try await withTransaction(statementTimeout: Self.maintenanceTimeout) { connection in
-                try await connection.query("""
-                    WITH doomed AS (
-                        SELECT id FROM requests
-                        WHERE started_at < \(olderThan) AND (\(deviceID)::uuid IS NULL OR device_id = \(deviceID)::uuid)
-                        ORDER BY started_at LIMIT \(batchSize)
-                    ), gone AS (
-                        DELETE FROM requests r USING doomed WHERE r.id = doomed.id RETURNING r.device_id
-                    ), counts AS (
-                        SELECT device_id, count(*) AS n FROM gone GROUP BY device_id
-                    ), adjusted AS (
-                        UPDATE devices d SET row_count = GREATEST(0, d.row_count - counts.n) FROM counts WHERE d.id = counts.device_id
-                    )
-                    SELECT COALESCE(sum(n), 0)::int8 AS n FROM counts
-                    """, logger: Self.logger).collect().first.map { try PostgresRowReader($0)("n", as: Int64.self) } ?? 0
-            }
-            total += deleted
-            if deleted < Int64(batchSize) { return total }
-            try await Task.sleep(for: Self.maintenancePause)
-        }
-    }
-
     /// Pause between two batches of maintenance work on the request log.
     static let maintenancePause: Duration = .milliseconds(250)
 }

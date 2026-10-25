@@ -41,8 +41,6 @@ final class Preferences {
     var batchInterval: Double { didSet { set(batchInterval, "db.batchInterval") } }
     /// Rows buffered on disk while the database is unreachable.
     var spoolLimit: Int { didSet { set(spoolLimit, "db.spoolLimit") } }
-    /// Days to keep requests; 0 keeps them forever.
-    var retentionDays: Int { didSet { set(retentionDays, "db.retentionDays") } }
 
     // MARK: General
     var showIn: ShowIn { didSet { set(showIn.rawValue, "general.showIn") } }
@@ -83,7 +81,6 @@ final class Preferences {
         batchRows = defaults.object(forKey: "db.batchRows") as? Int ?? 200
         batchInterval = defaults.object(forKey: "db.batchInterval") as? Double ?? 1
         spoolLimit = defaults.object(forKey: "db.spoolLimit") as? Int ?? 500_000
-        retentionDays = defaults.object(forKey: "db.retentionDays") as? Int ?? 0
 
         showIn = defaults.string(forKey: "general.showIn").flatMap(ShowIn.init(rawValue:)) ?? .menuBarAndDock
         appearance = defaults.string(forKey: "general.appearance").flatMap(Appearance.init(rawValue:)) ?? .system

@@ -50,7 +50,7 @@ Tidemark opens a 6-connection pool for reads and a 2-connection writer pool (`Ti
 |---|---|---|---|
 | Reads, settings (`Tidemark`) | 30 s | 10 s | 60 s |
 | Reads over a long history: History pages, totals and histogram, the policy list, an app's counters and process tree, the backfill preview | 5 min (`SET LOCAL` in its own transaction) | 10 s | 60 s |
-| Maintenance: retention, backfill, deleting an app | 10 min (`SET LOCAL`) | 10 s | 60 s |
+| Maintenance: backfill, deleting an app | 10 min (`SET LOCAL`) | 10 s | 60 s |
 | Capture writes (`Tidemark writer`) | 15 s | 5 s | 15 s |
 | Closing (or counting) requests of ended sessions or that ended while Tidemark was not running | 15 s (`SET LOCAL`) | 10 s | 60 s |
 | Migration transactions | 5 min | 3 s per statement (retried) | 60 s |
@@ -198,8 +198,7 @@ GROUP BY host ORDER BY requests DESC LIMIT 25;
 
 ## Maintenance
 
-* **Retention** — Settings › Database › Keep requests deletes older requests every hour, in batches
-  (default: forever).
+* **Retention** — requests are kept forever: Tidemark never deletes them.
 * **Size** — `requests` grows by roughly 2–3 KB per row including its indexes (about 1.3 KB of row data). Check it with
   `SELECT pg_size_pretty(pg_total_relation_size('requests'));`.
 * **Schema changes** — never edit the tables by hand while Tidemark runs; new versions of the app add

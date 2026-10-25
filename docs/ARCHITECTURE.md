@@ -28,7 +28,7 @@ domain or IP it has never used before.
 | `Surge/` | `SurgeCLIClient`: runs surge-cli, parses events, reconnects | Services |
 | `Process/` | `LibProcInspector` (libproc), `PublicSuffixClassifier` (bundled PSL) | Services |
 | `Database/` | `Schema` migrations, `PostgresDatabase` (PostgresNIO) | Services |
-| `Capture/` | `CaptureEngine` + `CapturePipeline`: attribution, first-contact detection, alerts, notifications, write buffer, disk spool, stats, retention | all protocols, State |
+| `Capture/` | `CaptureEngine` + `CapturePipeline`: attribution, first-contact detection, alerts, notifications, write buffer, disk spool, stats | all protocols, State |
 | `Probe/` | Per-session CONNECT proxy and the probe controller | Services, State |
 | `Egress/` | Egress monitor (per-policy external IP, latency, change log, IP lookup) | Services, State |
 | `Insight/` | `HostInsightService`: on-device explanations of hosts (FoundationModels), cached in memory and in `host_insights` | Services |
@@ -181,7 +181,7 @@ migration runner and every time limit.
   seconds when the server, the network or the pool closed it).
   [DATABASE.md › Connections](DATABASE.md#connections) lists the limits.
 * **Counts** — total rows use `pg_class.reltuples` plus rows written since; "today" is an indexed count.
-* **Retention** — optional; deletes requests older than *N* days in batches every hour.
+* **Retention** — none: requests are kept forever.
 * **Credentials** — the URL is stored without its password in `UserDefaults`; the password lives in the
   Keychain. `TIDEMARK_DATABASE_URL` (environment) overrides both for development.
 
@@ -189,8 +189,8 @@ migration runner and every time limit.
 
 Every row carries `device_id`. Each Mac records and alerts on its own requests. The sidebar's Mac menu
 scopes every page to one Mac or all. The live table merges this Mac's stream with rows other Macs wrote
-(polled by `updated_at` through `requestsWritten(after:)`, with a few seconds of overlap). Retention and
-"Mark All as Read" only touch the selected Mac's rows. Apps are shared by bundle path; each Mac reports in `app_installs` whether the
+(polled by `updated_at` through `requestsWritten(after:)`, with a few seconds of overlap). "Mark All as
+Read" only touches the selected Mac's rows. Apps are shared by bundle path; each Mac reports in `app_installs` whether the
 path exists locally ("Installed on MacBook Pro · Mac mini (Office) · Path not found").
 
 ## Site Probe

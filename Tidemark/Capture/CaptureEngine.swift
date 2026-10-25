@@ -9,8 +9,8 @@ import os
 ///
 /// The engine owns the connection lifecycles (Surge stream with reconnect, backfill, session tracking and a
 /// liveness watchdog; PostgreSQL with reconnect and spool replay), the periodic jobs (stats, devices,
-/// retention, shared state, polling other Macs) and the main-actor state. Request processing happens off
-/// the main actor in `CapturePipeline`; the engine drains its coalesced changes four times a second.
+/// shared state, polling other Macs) and the main-actor state. Requests are kept forever. Request processing
+/// happens off the main actor in `CapturePipeline`; the engine drains its coalesced changes four times a second.
 @MainActor
 final class CaptureEngine {
     let model: AppModel
@@ -653,7 +653,6 @@ final class CaptureEngine {
         every("inventory", .seconds(300), delay: .seconds(300)) { await $0.mergeInventory() }
         every("total", .seconds(60), delay: .seconds(60)) { await $0.refreshTotal() }
         every("installs", .seconds(300), delay: .seconds(300)) { await $0.updateInstalls(force: false) }
-        every("retention", .seconds(3600), delay: .seconds(120)) { await $0.applyRetention() }
     }
 
     private func every(_ name: String, _ interval: Duration, delay: Duration = .zero, _ body: @escaping @MainActor (CaptureEngine) async -> Void) {
@@ -954,16 +953,6 @@ final class CaptureEngine {
             } catch {
                 Self.log.error("Updating install state failed: \(error.localizedDescription, privacy: .public)")
             }
-        }
-    }
-
-    private func applyRetention() async {
-        let days = model.preferences.retentionDays
-        guard databaseReady, days > 0 else { return }
-        let cutoff = Date.now.addingTimeInterval(-Double(days) * 86_400)
-        if let deleted = try? await database.deleteRequests(olderThan: cutoff, deviceID: recordingDeviceID), deleted > 0 {
-            Self.log.info("Retention removed \(deleted) requests")
-            await refreshTotal()
         }
     }
 

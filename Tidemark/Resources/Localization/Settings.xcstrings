@@ -21,42 +21,12 @@
         }
       }
     },
-    "%lld day" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 天"
-          }
-        }
-      }
-    },
-    "%lld days" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 天"
-          }
-        }
-      }
-    },
     "%lld · %@ s" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld · %@ 秒"
-          }
-        }
-      }
-    },
-    "1 year" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1 年"
           }
         }
       }
@@ -231,16 +201,6 @@
         }
       }
     },
-    "Forever" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "永久"
-          }
-        }
-      }
-    },
     "Found · controller connected · streaming" : {
       "localizations" : {
         "zh-Hans" : {
@@ -277,16 +237,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "数据库连不上时"
-          }
-        }
-      }
-    },
-    "Keep requests" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请求保留时长"
           }
         }
       }
@@ -417,16 +367,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "离线 · %lld 小时前写入"
-          }
-        }
-      }
-    },
-    "Older requests are deleted in batches every hour." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更早的请求每小时分批删除。"
           }
         }
       }
