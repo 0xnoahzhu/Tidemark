@@ -23,7 +23,7 @@ domain or IP it has never used before.
 | `Model/` | Value types shared by every layer (`RequestRecord`, `MonitoredApp`, `AlertItem`, …) | Foundation |
 | `Services/` | Protocols (`SurgeClient`, `ProcessInspecting`, `SiteClassifying`, `TidemarkDatabase`, `CaptureActions`, `ProbeActions`, `EgressActions`, `HostInsightProviding`), Surge wire types, inert placeholders | Model |
 | `State/` | `@MainActor @Observable` state objects and `AppModel`, the root injected into SwiftUI | Model, Services |
-| `Support/` | Formatters, Keychain, request timing builder, `AppNaming` (an app's name everywhere: Finder's display name of its bundle), `DeviceIdentity` (this Mac's device ID) | Model |
+| `Support/` | Formatters, request timing builder, `AppNaming` (an app's name everywhere: Finder's display name of its bundle), `DeviceIdentity` (this Mac's device ID) | Model |
 | `Localization/` | `Localizer`, `tr()` / `trf()` / `trn()` | — |
 | `Surge/` | `SurgeCLIClient`: runs surge-cli, parses events, reconnects | Services |
 | `Process/` | `LibProcInspector` (libproc), `PublicSuffixClassifier` (bundled PSL) | Services |
@@ -44,8 +44,7 @@ services on `AppModel` (`model.database`, `model.capture`, `model.probeActions`,
 
 All Surge access goes through `surge-cli --raw` (JSON output). The executable lives at
 `/Applications/Surge.app/Contents/Applications/surge-cli` (also linked from `/usr/local/bin/surge-cli`).
-Tidemark reads this Mac's Surge: Settings offer no remote Surge, and the remote controller password earlier
-versions kept in the Keychain is deleted at launch. The client still supports one, adding `--remote host:port`
+Tidemark reads this Mac's Surge: Settings offer no remote Surge. The client still supports one, adding `--remote host:port`
 and sending a password on stdin with `--password-stdin` (never in argv). A stream that
 ends or fails is always restarted, with backoff.
 
@@ -120,19 +119,22 @@ session):
    * scope `host` otherwise — "Cursor contacted raw.githubusercontent.com".
 2. If the destination IP is known and new for the app → insert it; scope `ip` ("Docker connected to
    104.16.98.215", or "connected straight to" when there was no hostname).
-3. Insert an alert unless the host/IP matches a mute pattern (`host`, `IP`, `*.example.com`). Muted hosts
-   are still recorded. Entries stay marked NEW for 24 hours.
+3. Insert an alert when the app's alert settings ask for one (any new host or only new sites, new IPs).
+   Nothing is muted: there are no mute patterns, so Apple's own hosts (`*.apple.com`, `*.icloud.com`,
+   `*.mzstatic.com`) alert like any other. Entries stay marked NEW for 24 hours.
 4. Post a macOS notification (UserNotifications), always: there are no notification settings. It reads like
    the design's banner: "Tidemark", then "Raycast reached a new site" and "notion.com · first host
-   api.notion.com · via node". Bursts are grouped: one notification per app and Mac per 30 s. Alerts
-   written by *other* Macs are polled and posted on this Mac too, led by that Mac's name, unless their host
-   is muted or their app is archived (pausing an app's monitoring here only stops this Mac's alerts).
+   api.notion.com · via node", and its one action, "View", opens the app's Domains & IPs. Bursts are grouped:
+   one notification per app and Mac per 30 s. Alerts written by *other* Macs are polled and posted on this Mac
+   too, led by that Mac's name, unless their app is archived (pausing an app's monitoring here only stops this
+   Mac's alerts).
 
 ## Database
 
 `Database/Schema.swift` holds versioned migrations (`schema_migrations`). Main tables: `devices`, `apps`,
-`app_installs`, `processes`, `requests`, `app_hosts`, `host_sources`, `ip_info`, `alerts`, `mutes`,
-`probe_sessions`, `probe_hosts`, `egress_checks`, `egress_changes`. Connecting reads `schema_migrations`
+`app_installs`, `processes`, `requests`, `app_hosts`, `host_sources`, `ip_info`, `alerts`,
+`probe_sessions`, `probe_hosts`, `egress_checks`, `egress_changes` (`mutes` is still created, but nothing reads or
+writes it any more). Connecting reads `schema_migrations`
 without a lock; only a build with migrations to apply takes the migration lock, and index changes (such as
 schema v3's `requests_active_idx`) are built `CONCURRENTLY` outside it, in the background on large tables, so
 no Mac waits for another Mac's upgrade. [DATABASE.md](DATABASE.md) describes the schema versions, the
@@ -174,8 +176,9 @@ migration runner and every time limit.
   earlier ones). A Surge restart or a switch of the recording device still closes the old session's requests.
 * **Offline** — when PostgreSQL is unreachable rows are appended to a JSON-lines spool in
   `~/Library/Application Support/Tidemark/spool/` (up to 500,000 rows) and replayed on reconnect.
-  `shared-state.json` keeps the last known apps, mutes and inventory index so attribution and first-contact
-  detection keep working when Tidemark starts without a database, and `auxiliary.json` keeps unwritten
+  `shared-state.json` keeps the last known apps and inventory index so attribution and first-contact
+  detection keep working when Tidemark starts without a database (the mute patterns earlier versions saved
+  there are ignored), and `auxiliary.json` keeps unwritten
   inventory and alert work across a quit. Everything on disk is this Mac's own, so it is replayed under this
   Mac's current device ID, whatever ID it was saved under: an earlier ID may have been merged away meanwhile (see
   [Multi-Mac](#multi-mac)), and a row of a device that no longer exists would be refused. A replayed row whose key
@@ -200,11 +203,15 @@ migration runner and every time limit.
   [DATABASE.md › Connections](DATABASE.md#connections) lists the limits.
 * **Counts** — total rows use `pg_class.reltuples` plus rows written since; "today" is an indexed count.
 * **Retention** — none: requests are kept forever.
-* **Credentials** — Settings › Database has one URL field: a password typed into it (in the user info or as
-  libpq's `password` parameter) goes to the Keychain and the field shows it masked
-  (`postgres://tide:••••••••@127.0.0.1:5432/tidemark`). The URL is stored without its password in
-  `UserDefaults`; text that is not a `postgres://` or `postgresql://` URL is not stored at all, since it could
-  hold a password. `TIDEMARK_DATABASE_URL` (environment) overrides both for development.
+* **Credentials** — Settings › Database has one URL field, saved as typed, password included (in the user info
+  or as libpq's `password` parameter), in `UserDefaults` (`db.url`). Tidemark keeps nothing in the Keychain:
+  ad-hoc signed builds made every new build ask for access to it. The field shows the password masked
+  (`postgres://tide:••••••••@127.0.0.1:5432/tidemark`), and the mask left in place (or what is left of it) keeps
+  the saved password. Text that is not a `postgres://` or `postgresql://` URL is not stored at all, since it
+  could hold a password the mask cannot find. Logs and error messages name the server as `host:port/database`
+  (`PostgresConnectionURL.redacted`), and an invalid URL only with its password removed
+  (`PostgresConnectionURL.redact`). `TIDEMARK_DATABASE_URL` (environment) overrides the saved URL for
+  development.
 
 ## Multi-Mac
 

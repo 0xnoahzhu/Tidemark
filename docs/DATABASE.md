@@ -77,6 +77,8 @@ fails its call as unreachable within about two seconds unless the call finished 
 for such a statement until its limit. The rollback and session cleanup are skipped on a closed connection
 (its transaction, settings and locks ended with it).
 
+Each Mac keeps its connection URL, password included, in its preferences (`db.url` in `io.tidemark.Tidemark`),
+not in the Keychain; Settings › Database shows the password masked.
 URLs without `sslmode` use `prefer` for remote hosts (TLS when the server offers it) and `disable` for
 loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`) are supported.
 
@@ -92,7 +94,7 @@ loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`)
 | `app_hosts` | (app, domain or IP) | a monitored app's inventory; `first_seen` within 24 h means NEW |
 | `host_sources` | (domain or IP, Mac, source process or probe) | the global Domains & IPs page |
 | `alerts` | first contact of a monitored app with a new site, host or IP | `read_at` is null while unread |
-| `mutes` | muted host pattern (`host`, `IP` or `*.example.com`) | muted hosts are still recorded, they just never alert |
+| `mutes` | host pattern earlier versions muted (`host`, `IP` or `*.example.com`) | unused: Tidemark has no mutes and neither reads nor writes it, so every host alerts. Schema v1 creates it with `*.apple.com`, `*.icloud.com` and `*.mzstatic.com`; it stays, since migrations are never edited |
 | `ip_info` | IP address | GeoIP / ASN cache from Surge's databases |
 | `host_insights` | (host, language) | on-device explanations of hosts |
 | `probe_sessions`, `probe_hosts` | site probe, and each host it reached | `first_ms` / `last_ms` are relative to the probe start |

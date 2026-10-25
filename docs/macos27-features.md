@@ -621,7 +621,7 @@ Status: Typechecked. Runtime behaviour is unverified (section 8).
 
 **Why**
 - **Grouping.** `threadIdentifier` set to the app ID groups alerts per monitored app in Notification Center. This complements the existing "one notification per app per 30 s" burst grouping.
-- **Actions.** "Show Requests" and "Mute Host" let the user act on an alert without opening the window.
+- **Actions.** "Show Requests" opens the alert's requests. Tidemark has no mutes, so there is no "Mute Host" action.
 - **Ranking.** `relevanceScore` ranks a new site above a new host above a new IP in the notification summary.
 - **Entities.** `appEntityIdentifiers` tells Siri, Shortcuts and Apple Intelligence which `MonitoredAppEntity` the alert is about (4.11).
 
@@ -640,9 +640,7 @@ func alertContent(_ alert: AlertItem, app: MonitoredApp) -> UNMutableNotificatio
 
 let open = UNNotificationAction(identifier: "open", title: tr("Show Requests", "Notifications"),
                                 options: [.foreground], icon: UNNotificationActionIcon(systemImageName: "list.bullet"))
-let mute = UNNotificationAction(identifier: "muteHost", title: tr("Mute Host", "Notifications"),
-                                options: [], icon: UNNotificationActionIcon(systemImageName: "bell.slash"))
-center.setNotificationCategories([UNNotificationCategory(identifier: "newHost", actions: [open, mute],
+center.setNotificationCategories([UNNotificationCategory(identifier: "newHost", actions: [open],
                                                          intentIdentifiers: [], options: [])])
 ```
 
@@ -1001,8 +999,8 @@ final class StatusItemController: NSObject, @MainActor NSStatusItemExpandedInter
 - Typing `api2.cursor.sh` in Spotlight opens Domains & IPs.
 - "Search Tidemark for…" filters Requests.
 - Siri understands the selected Table row as a host.
-- "Mute these hosts" can take hundreds of IDs without loading the rows.
-- A "Today's new hosts" snippet has inline Mute and Open buttons.
+- An intent such as "Open these hosts" can take hundreds of IDs without loading the rows.
+- A "Today's new hosts" snippet has an inline Open button.
 
 **Trigger.** Adopt once `HostEntity` exists. Index only inventory hosts, never individual requests.
 
@@ -1058,7 +1056,7 @@ extension Array where Element: Identifiable {
 | Option | APIs (min macOS) | Use in Tidemark |
 |---|---|---|
 | Trackpad zoom and pointer brush in the waterfall | `GestureInputKinds`, `MagnifyGesture(…inputKinds: .indirectTouch)`, `DragGesture(…inputKinds: .pointer)` (27) | Only if `chartXSelection(range:)` is not enough. |
-| Swipe actions in the Notifications list | `swipeActions(edge:allowsFullSwipe:content:onPresentationChanged:)`, `swipeActionsContainer()` (27) | "Mute host" / "Mark read" on a row; pause live insertion while a row's actions are open. |
+| Swipe actions in the Notifications list | `swipeActions(edge:allowsFullSwipe:content:onPresentationChanged:)`, `swipeActionsContainer()` (27) | "Mark read" on a row; pause live insertion while a row's actions are open. |
 | Composable filters and rules | `Predicate(all:)`, `Predicate(any:)` (27) | When notification rules become user-defined and must be stored (`Predicate` is Codable). The Requests filter compiles to SQL today. |
 | Progress for long jobs | `ProgressManager`, `Subprogress` (27, Observable, Sendable) | Backfill, inventory rebuild, first migration of a shared database, large exports. |
 | Concentric corners | `ConcentricRectangle`, `containerShape` (26); `GeometryProxy.concentricCornerRadii` (27) | `Card` and `TimingBar` corners concentric with the inspector and window. |
