@@ -248,17 +248,27 @@ struct RequestsTableLayoutTests {
         let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         let widest = ("255.255.255.255" as NSString).size(withAttributes: [.font: font]).width
         #expect(widest + 6 <= RequestsTable.remoteIPWidth)
-        #expect(RequestsTable.remoteIPWidth <= 124, "the column stays narrow; Host gets the rest")
+        #expect(RequestsTable.remoteIPWidth <= 124, "the column stays narrow; App · Process and Host get the rest")
     }
 
-    /// At its minimum the Policy column still shows the group and part of the final policy (`AI › …steria2`).
+    /// A rebuilt table leaves Policy at its minimum, which still shows the group and enough of the final policy
+    /// to tell nodes with the same protocol apart (`AI › …kNerd-Hysteria2`, not `AI › …Hysteria2`).
     @Test func policyColumnKeepsTheGroupAndTheEndOfThePolicy() {
         let font = NSFont.systemFont(ofSize: 11, weight: .medium)
         let group = ("AI › " as NSString).size(withAttributes: [.font: font]).width
-        let leafEnd = ("…steria2" as NSString).size(withAttributes: [.font: font]).width
+        let leafEnd = ("…kNerd-Hysteria2" as NSString).size(withAttributes: [.font: font]).width
         // 6 pt chip padding on each side.
         #expect(group + leafEnd + 12 <= RequestsTable.policyMinWidth)
         #expect(RequestsTable.policyMinWidth >= 84, "at least the design's column")
+    }
+
+    /// At its minimum the App · Process column still shows the tile, an app name like `Brave Browser` and the
+    /// start of the process.
+    @Test func appColumnKeepsTheAppName() {
+        let name = ("Brave Browser" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium)]).width
+        let process = (" › …" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width
+        // 16 pt tile and 6 pt spacing.
+        #expect(22 + name + process <= RequestsTable.appMinWidth)
     }
 
     /// "Open <App>" from a request (inspector and row menu) shows the app's Domains & IPs, as in the design.

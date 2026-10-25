@@ -22,16 +22,23 @@ struct RequestsTable: View {
 
     /// Fits the widest IPv4 address (`255.255.255.255`, about 102 pt in 11 pt SF Mono) with the cell's inset.
     static let remoteIPWidth: CGFloat = 108
-    /// The Policy column never gets narrower than the group plus the end of the final policy
-    /// (`AI › …Hysteria2`).
-    static let policyMinWidth: CGFloat = 96
+    /// The App · Process column never gets narrower than the tile and an app name like `Brave Browser` with
+    /// the start of its process (`Brave Browser › …`).
+    static let appMinWidth: CGFloat = 130
+    /// The Policy column never gets narrower than the group plus enough of the final policy to tell nodes
+    /// apart (`AI › …kNerd-Hysteria2`).
+    static let policyMinWidth: CGFloat = 140
 
     var body: some View {
-        // The table scrolls horizontally below the sum of the ideal widths, but how it shares width out after
-        // that depends on how the table was built and resized: a rebuilt table can leave a resizable column at
-        // its minimum while others keep the slack. So every column whose content has a known width is fixed to
-        // it (Time, Remote IP, Size), Policy's minimum still shows the final policy, App · Process stops growing
-        // where its names end, and whatever is left goes to Host, as in the design's grid.
+        // How a table shares width out depends on how it was built. A table that grows with its window widens
+        // every resizable column up to its maximum, but one built while its column is still changing size
+        // (opening the page, switching between Live and History, the inspector opening) keeps every column
+        // that has a maximum at its minimum and gives the slack to the columns without one, in equal shares on
+        // top of their ideal widths. So Time, Remote IP and Size are fixed to their text, Policy has a readable
+        // minimum and stops growing where long policies end, and App · Process and Host have no maximum, so
+        // whatever is left is always shared between the app names and the hosts, Host keeping the wider share.
+        // The minimums add up to about the content column of the smallest window; below that the table
+        // scrolls horizontally.
         Table(rows, selection: $selection) {
             TableColumn(Self.header(tr("Time", "Requests"))) { record in
                 RequestsTimeCell(date: record.startedAt, style: timeStyle)
@@ -47,12 +54,12 @@ struct RequestsTable: View {
             TableColumn(Self.header(tr("App · Process", "Requests"))) { record in
                 RequestsAppCell(model: model, record: record)
             }
-            .width(min: 110, ideal: 150, max: 300)
+            .width(min: Self.appMinWidth, ideal: 180)
 
             TableColumn(Self.header(tr("Host", "Requests"))) { record in
                 RequestsHostCell(record: record)
             }
-            .width(min: 140, ideal: 190)
+            .width(min: 140, ideal: 220)
 
             TableColumn(Self.header(tr("Remote IP", "Requests"))) { record in
                 RequestsRemoteIPCell(remoteIP: record.remoteIP)
@@ -63,7 +70,7 @@ struct RequestsTable: View {
                 // The shared chip: a truncated policy keeps its group and the end of the final policy.
                 PolicyChip(policyPath: record.policyPath, maxWidth: .infinity)
             }
-            .width(min: Self.policyMinWidth, ideal: 150, max: 200)
+            .width(min: Self.policyMinWidth, ideal: 170, max: 200)
 
             TableColumn(Self.header(tr("Size", "Requests"))) { record in
                 RequestsSizeCell(record: record)
