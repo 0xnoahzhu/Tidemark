@@ -4,6 +4,10 @@ import SwiftUI
 struct TidemarkApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
+    init() {
+        TableRowHeightDefaults.register()
+    }
+
     var body: some Scene {
         let model = delegate.model
 
