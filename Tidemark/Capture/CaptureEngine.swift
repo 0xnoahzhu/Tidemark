@@ -215,6 +215,8 @@ final class CaptureEngine {
         started = false
         for job in jobs.values { job.cancel() }
         jobs.removeAll()
+        // A notification's host explanation that outlived its deadline would otherwise hold the model.
+        notificationInsight?.cancel()
         streamTask?.cancel()
         databaseTask?.cancel()
         if let token = scopeObservation.take() { token.cancel() }

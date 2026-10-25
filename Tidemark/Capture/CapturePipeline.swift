@@ -131,9 +131,10 @@ actor CapturePipeline {
     let finalFlushBudget: Duration = .seconds(3)
     /// The local snapshot of the shared state is rewritten at most this often.
     let snapshotInterval: TimeInterval = 600
-    /// Longest wait for one maintenance statement (closing rows of ended sessions). Longer than the server's
-    /// own 10-minute limit for these statements, so a new attempt never overlaps one still running there.
-    let maintenanceBudget: Duration = .seconds(660)
+    /// Longest wait for one maintenance statement (closing rows of ended sessions), pool wait included. Longer
+    /// than the server's own limit for these statements (`PostgresDatabase.sessionCloseTimeout`, 15 s), so a
+    /// new attempt never overlaps one still running there.
+    let maintenanceBudget: Duration = .seconds(60)
     /// A failed maintenance statement is tried again after this long, or after the next reconnect.
     let maintenanceRetryInterval: TimeInterval = 600
     /// A remote Surge's `dump active` closes only rows that started this long before the newest start it or the
