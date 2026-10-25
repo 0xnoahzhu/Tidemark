@@ -9,7 +9,7 @@ import Testing
 /// Every test migrates a fresh `tm_test_<8 hex>` schema and drops it afterwards, also on failure.
 /// Nothing outside that schema is written, except that the first migration on a database installs
 /// the `pg_trgm` extension into `public` when it is missing (production needs it there too).
-@Suite(.serialized, .enabled(if: liveDatabaseURL != nil, "Set TIDEMARK_TEST_DATABASE_URL to run"))
+@Suite(.serialized, .enabled(if: liveDatabaseURL != nil, "Set TIDEMARK_TEST_DATABASE_URL to run"), .timeLimit(.minutes(1)))
 struct DatabaseLiveTests {
     static var databaseURL: String? { liveDatabaseURL }
 
@@ -102,17 +102,13 @@ struct DatabaseLiveTests {
             // A server that stops answering: the call gives up after its client-side limit.
             let clock = ContinuousClock()
             let start = clock.now
-            do {
-                _ = try await db.withConnection(limit: .client(.milliseconds(300))) { connection in
+            let expired = try await DatabaseWait.result {
+                try await db.withConnection(limit: .client(.milliseconds(300))) { connection in
                     try await connection.query("SELECT pg_sleep(3)", logger: PostgresDatabase.logger).collect()
                 }
-                Issue.record("pg_sleep outlived the call limit")
-            } catch let error as DatabaseError {
-                guard case .timedOut(.noReply(_, let limit)) = error else {
-                    Issue.record("Expected .timedOut(.noReply), got \(error)")
-                    return
-                }
-                #expect(limit == .milliseconds(300))
+            }
+            #expect(throws: DatabaseError.timedOut(.noReply(target: db.endpoint?.redacted, within: .milliseconds(300)))) {
+                try expired.get()
             }
             #expect(start.duration(to: clock.now) < .seconds(2))
 
@@ -126,17 +122,95 @@ struct DatabaseLiveTests {
             try await Task.sleep(for: .milliseconds(300))
             let cancelledAt = clock.now
             write.cancel()
-            do {
-                try await write.value
-                Issue.record("A cancelled writer transaction committed")
-            } catch {
-                #expect(error is CancellationError, "\(error)")
+            switch try await DatabaseWait.result({ try await write.value }) {
+            case .success: Issue.record("A cancelled writer transaction committed")
+            case .failure(let error): #expect(error is CancellationError, "\(error)")
             }
             #expect(cancelledAt.duration(to: clock.now) < .seconds(1))
-            for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await db.ping() }
+            for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await DatabaseWait.result { try await db.ping() }.get() }
             #expect(!(try await db.mutes()).contains("abandoned.example"))
             try await Task.sleep(for: .seconds(3))
             #expect(!(try await db.mutes()).contains("abandoned.example"))
+        }
+    }
+
+    @Test func aConnectionClosedUnderItsCallIsNotLeasedAgain() async throws {
+        try await withTestDatabase { db in
+            // A call cancelled or past its limit fails as soon as its connection is closed under it, a moment before
+            // NIO tears the channel down. Leased again meanwhile, the connection would never answer the next call.
+            for _ in 0..<40 {
+                let write = Task {
+                    try await db.withTransaction(on: .writer) { connection in
+                        _ = try await connection.query("SELECT pg_sleep(0.5)", logger: PostgresDatabase.logger).collect()
+                    }
+                }
+                try await Task.sleep(for: .milliseconds(30))
+                write.cancel()
+                _ = try await DatabaseWait.result { try await write.value }
+                _ = try await DatabaseWait.result { try await db.ping() }.get()
+
+                _ = try await DatabaseWait.result {
+                    try await db.withConnection(on: .writer, limit: .client(.milliseconds(30))) { connection in
+                        try await connection.query("SELECT pg_sleep(0.5)", logger: PostgresDatabase.logger).collect()
+                    }
+                }
+                _ = try await DatabaseWait.result { try await db.ping() }.get()
+            }
+        }
+    }
+
+    @Test func callsReturnWhenTheirConnectionClosesBetweenStatements() async throws {
+        try await withTestDatabase { db in
+            // PostgresNIO never answers a statement written to a connection that was torn down, so a call whose
+            // connection closed while it worked between two statements must not wait for its next one.
+            let clock = ContinuousClock()
+
+            // Cancelled (capture gave up on it): the transaction's COMMIT goes to the closed connection.
+            let write = Task {
+                try await db.withTransaction(on: .writer) { connection in
+                    _ = try await connection.query("INSERT INTO mutes (pattern) VALUES ('abandoned.example')", logger: PostgresDatabase.logger).collect()
+                    await busy(milliseconds: 300)
+                }
+            }
+            try await Task.sleep(for: .milliseconds(100))
+            var start = clock.now
+            write.cancel()
+            switch try await DatabaseWait.result({ try await write.value }) {
+            case .success: Issue.record("A cancelled writer transaction committed")
+            case .failure(let error): #expect(error is CancellationError, "\(error)")
+            }
+            #expect(start.duration(to: clock.now) < .seconds(5))
+            #expect(!(try await db.mutes()).contains("abandoned.example"))
+
+            // Past its limit: the next statement goes to the closed connection.
+            start = clock.now
+            let expired = try await DatabaseWait.result {
+                try await db.withConnection(limit: .client(.milliseconds(200))) { connection in
+                    _ = try await connection.query("SELECT 1", logger: PostgresDatabase.logger).collect()
+                    try await Task.sleep(for: .milliseconds(400))
+                    return try await connection.query("SELECT 2", logger: PostgresDatabase.logger).collect().count
+                }
+            }
+            #expect(throws: DatabaseError.timedOut(.noReply(target: db.endpoint?.redacted, within: .milliseconds(200)))) {
+                try expired.get()
+            }
+            #expect(start.duration(to: clock.now) < .seconds(5))
+
+            // Closed by the server or the network instead: the same once Tidemark notices.
+            start = clock.now
+            let lost = try await DatabaseWait.result {
+                try await db.withConnection { connection in
+                    try await connection.close()
+                    try await Task.sleep(for: .milliseconds(200))
+                    return try await connection.query("SELECT 1", logger: PostgresDatabase.logger).collect().count
+                }
+            }
+            #expect(throws: DatabaseError.unreachable(.connectionClosed(target: db.endpoint?.redacted))) { try lost.get() }
+            #expect(start.duration(to: clock.now) < .seconds(5))
+
+            // No pool kept a closed connection.
+            for _ in 0..<(2 * PostgresDatabase.writerPoolSize) { _ = try await DatabaseWait.result { try await db.ping() }.get() }
+            for _ in 0..<(2 * PostgresDatabase.mainPoolSize) { _ = try await DatabaseWait.result { try await db.mutes() }.get() }
         }
     }
 
@@ -1667,6 +1741,32 @@ private let liveDatabaseURL: String? = {
 
 /// PostgresNIO declares a `PostgresDatabase` protocol too; this file imports both modules.
 private typealias PostgresDatabase = Tidemark.PostgresDatabase
+
+/// Work that goes on when its task is cancelled, like decoding rows between two statements.
+private func busy(milliseconds: Int) async {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(milliseconds)) { continuation.resume() }
+    }
+}
+
+/// Waits with a deadline: a call that never returns fails its test at once instead of hanging the whole run (Swift
+/// Testing has no time limit by default, and awaiting a call ignores cancellation).
+private enum DatabaseWait {
+    struct StillRunning: Error, CustomStringConvertible {
+        let timeout: Duration
+        var description: String { "Still running after \(timeout)." }
+    }
+
+    /// What `work` returned or threw. Throws `StillRunning` when it has not finished within `timeout`; it is then
+    /// left to finish in the background.
+    static func result<T: Sendable>(within timeout: Duration = .seconds(10), _ work: @escaping @Sendable () async throws -> T) async throws -> Result<T, any Error> {
+        let result = await CaptureTimeout.value(within: timeout) { () async -> Result<T, any Error>? in
+            do { return .success(try await work()) } catch { return .failure(error) }
+        }
+        guard let result else { throw StillRunning(timeout: timeout) }
+        return result
+    }
+}
 
 /// Test data builders. Times are whole milliseconds so they survive PostgreSQL's microsecond precision.
 private enum Fixture {
