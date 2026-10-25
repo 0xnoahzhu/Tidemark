@@ -531,16 +531,6 @@
         }
       }
     },
-    "Reconnect automatically" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自动重连"
-          }
-        }
-      }
-    },
     "Reconnecting with the new settings" : {
       "localizations" : {
         "zh-Hans" : {

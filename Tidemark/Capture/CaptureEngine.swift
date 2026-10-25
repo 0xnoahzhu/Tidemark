@@ -491,7 +491,6 @@ final class CaptureEngine {
                 streamConnectedAt = nil
                 model.live.surge = .failed(error)
             }
-            guard model.preferences.surgeReconnect else { return }
             attempt += 1
             try? await Task.sleep(for: .seconds(Self.backoff(attempt)))
         }

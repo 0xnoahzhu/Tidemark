@@ -3,7 +3,7 @@ import SwiftUI
 import System
 import UniformTypeIdentifiers
 
-/// Settings › Surge: the surge-cli executable, the event subscription, reconnecting and a remote Surge.
+/// Settings › Surge: the surge-cli executable, the event subscription and a remote Surge.
 struct SettingsSurgePane: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
@@ -46,7 +46,6 @@ struct SettingsSurgePane: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color(oklch: 0.2, 0.01, 250), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 SettingsNote(text: tr("Each event arrives as one line of JSON. Tidemark reads the process, its parent, host, remote IP, policy and rule, then writes the row. If the stream drops, it reconnects and carries on.", "Settings"))
-                Toggle(tr("Reconnect automatically", "Settings"), isOn: reconnectBinding)
             } header: {
                 Text(tr("Subscription", "Settings"))
             }
@@ -132,10 +131,6 @@ struct SettingsSurgePane: View {
     }
 
     // MARK: Actions
-
-    private var reconnectBinding: Binding<Bool> {
-        Binding(get: { model.preferences.surgeReconnect }, set: { model.preferences.surgeReconnect = $0 })
-    }
 
     private var hasChanges: Bool {
         remoteDraft.trimmingCharacters(in: .whitespaces) != model.preferences.surgeRemote
