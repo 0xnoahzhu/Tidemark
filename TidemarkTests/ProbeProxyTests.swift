@@ -258,8 +258,10 @@ struct ProbeRegistryTests {
 
 @MainActor
 struct ProbeControllerTests {
+    let scratch = TestDefaults()
+
     func makeModel(surge: any SurgeClient, database: CaptureFakeDatabase = CaptureFakeDatabase()) -> AppModel {
-        let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: "tidemark-tests-\(UUID().uuidString)")!))
+        let model = AppModel(preferences: Preferences(defaults: scratch.make()))
         model.surge = surge
         model.database = database
         return model
@@ -316,7 +318,7 @@ struct ProbeControllerTests {
     }
 
     @Test func rejectsAnInvalidURL() async {
-        let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: "tidemark-tests-\(UUID().uuidString)")!))
+        let model = AppModel(preferences: Preferences(defaults: scratch.make()))
         let controller = ProbeController(model: model, registry: ProbeRegistry())
         await #expect(throws: URLError.self) { try await controller.startProbe(url: "   ", mode: .desktop, tail: true) }
         #expect(model.probe.running == nil)

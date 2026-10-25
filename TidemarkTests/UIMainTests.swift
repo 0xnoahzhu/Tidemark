@@ -151,7 +151,7 @@ struct RequestsPresentationTests {
         let saved = Localizer.shared.preference
         defer {
             Localizer.shared.preference = saved
-            UserDefaults.standard.removePersistentDomain(forName: suite)
+            TestDefaults.remove(suite)
         }
 
         Localizer.shared.preference = .english
@@ -288,7 +288,7 @@ struct RequestsTableRowHeightTests {
         #expect(UserDefaults.standard.object(forKey: TableRowHeightDefaults.canEstimateRowHeightsKey) as? Bool == false)
 
         let suite = "tidemark-tests-\(UUID().uuidString)"
-        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+        defer { TestDefaults.remove(suite) }
         let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: suite)!))
         func liveTable(_ rows: [RequestRecord]) -> RequestsTable {
             RequestsTable(model: model, rows: rows, selection: .constant(nil), timeStyle: .clock, now: .now)

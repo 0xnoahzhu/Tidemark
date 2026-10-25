@@ -386,7 +386,9 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
     /// The probe controller clears `running` before it saves a stopped session; until `stop()` returns, a new
     /// probe must not start, or the old `stop()` would tear the new page down.
     @Test func refusesToStartWhileTheLastProbeIsStillStopping() async throws {
-        let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: "tidemark-tests-\(UUID().uuidString)")!))
+        let scratch = TestDefaults()
+        defer { scratch.removeAll() }
+        let model = AppModel(preferences: Preferences(defaults: scratch.make()))
         let actions = SlowStopProbeActions(model: model)
         model.probeActions = actions
         model.probe.running = ProbeSession(id: UUID(), deviceID: model.preferences.thisDeviceID, url: "https://example.com", host: "example.com",

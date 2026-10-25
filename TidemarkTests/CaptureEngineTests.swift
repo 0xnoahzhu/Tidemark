@@ -6,10 +6,10 @@ import Testing
 @MainActor
 struct CaptureEngineTests {
     let temp = CaptureTempDirectory()
+    let scratch = TestDefaults()
 
     func makeEngine(database: CaptureFakeDatabase = CaptureFakeDatabase(), surge: CaptureFakeSurge = CaptureFakeSurge()) -> (CaptureEngine, AppModel) {
-        let defaults = UserDefaults(suiteName: "tidemark-tests-\(UUID().uuidString)")!
-        let preferences = Preferences(defaults: defaults)
+        let preferences = Preferences(defaults: scratch.make())
         preferences.systemNotifications = false
         preferences.surgeReconnect = false
         let model = AppModel(preferences: preferences)

@@ -221,7 +221,7 @@ struct UIChromeTests {
     /// File › New Site Probe starts from an empty URL bar with no saved session selected, unless a probe runs.
     @Test func newSiteProbeCommandResetsThePage() {
         let (defaults, suite) = Self.scratchDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { TestDefaults.remove(suite) }
         let model = AppModel(preferences: Preferences(defaults: defaults))
         let web = ProbeWebSession()
         model.probe.selectedID = UUID()
@@ -233,7 +233,7 @@ struct UIChromeTests {
         #expect(model.nav.page == .probe)
     }
 
-    /// A private defaults suite; remove it with `removePersistentDomain(forName:)` when done.
+    /// A private defaults suite; remove it with `TestDefaults.remove(_:)` when done.
     static func scratchDefaults() -> (UserDefaults, String) {
         let name = "tidemark-tests-\(UUID().uuidString)"
         return (UserDefaults(suiteName: name)!, name)

@@ -72,7 +72,7 @@ struct IntentsTodayFiguresTests {
     @Test func countsTheRecordingDevice() async {
         let suite = "tidemark-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { TestDefaults.remove(suite) }
         let preferences = Preferences(defaults: defaults)
         preferences.surgeRemote = "10.0.0.2:6171"
         let model = AppModel(preferences: preferences)

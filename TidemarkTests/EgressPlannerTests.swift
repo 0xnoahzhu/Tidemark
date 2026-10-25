@@ -237,9 +237,10 @@ struct EgressPlannerTests {
 
 @MainActor
 struct EgressMonitorTests {
+    let scratch = TestDefaults()
+
     func makeModel(surge: any SurgeClient, database: CaptureFakeDatabase = CaptureFakeDatabase(), ipInfo: Preferences.IPInfoService = .off) -> AppModel {
-        let defaults = UserDefaults(suiteName: "tidemark-tests-\(UUID().uuidString)")!
-        let model = AppModel(preferences: Preferences(defaults: defaults))
+        let model = AppModel(preferences: Preferences(defaults: scratch.make()))
         model.preferences.ipInfoService = ipInfo
         model.surge = surge
         model.database = database
@@ -467,7 +468,7 @@ struct EgressMonitorTests {
     /// user picks it in Settings.
     @Test func aFreshInstallSendsNothingToTheIPInfoService() async {
         let surge = autoTestSurge()
-        let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: "tidemark-tests-\(UUID().uuidString)")!))
+        let model = AppModel(preferences: Preferences(defaults: scratch.make()))
         model.surge = surge
         model.database = CaptureFakeDatabase()
         #expect(model.preferences.ipInfoService == .off)
