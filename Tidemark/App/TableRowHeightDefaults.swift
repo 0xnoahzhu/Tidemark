@@ -10,11 +10,13 @@ import Foundation
 /// turn it into an assert. Without estimates the tables keep automatic row heights and AppKit measures rows as
 /// they come into view, at the same cost for tables of Tidemark's size.
 enum TableRowHeightDefaults {
-    /// AppKit's per-app switch, read once, when the first table is configured.
+    /// AppKit's per-app switch, read once, when the first table is configured. It is private and undocumented:
+    /// after each macOS update, `RequestsTableRowHeightTests` checks that it still keeps the warning away.
     static let canEstimateRowHeightsKey = "NSTableViewCanEstimateRowHeights"
 
-    /// Registers the switch; it must run before SwiftUI builds the first window.
-    static func register(in defaults: UserDefaults = .standard) {
-        defaults.register(defaults: [canEstimateRowHeightsKey: false])
+    /// Registers the switch; it must run before SwiftUI builds the first window. AppKit only reads the standard
+    /// defaults, so no other suite would do.
+    static func register() {
+        UserDefaults.standard.register(defaults: [canEstimateRowHeightsKey: false])
     }
 }
