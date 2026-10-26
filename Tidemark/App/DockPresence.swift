@@ -33,6 +33,15 @@ final class DockPresence {
         shared = nil
     }
 
+    /// Call right before Tidemark activates to show one of its windows (the menu bar panel's Open Window, Settings…
+    /// and alerts, a notification's View, the App Intents, the menu commands). Out of the Dock and behind other apps,
+    /// Tidemark joins the Dock first, so the activation that follows is a regular app's and brings its menus into the
+    /// menu bar, and the new window never gives up the focus to win them back (`reclaimMenuBar()`). If no window
+    /// opens after all, Tidemark leaves the Dock again the usual way, `leaveDelay` later.
+    static func willShowWindow() {
+        shared?.willShowWindow()
+    }
+
     /// What the policy decision needs to know about one window.
     struct WindowTraits: Equatable, Sendable {
         var isVisible: Bool
@@ -200,11 +209,24 @@ final class DockPresence {
         }
     }
 
+    private func willShowWindow() {
+        pendingLeave?.cancel()
+        pendingLeave = nil
+        // Already frontmost (the system brought Tidemark forward for a foreground App Intent, say), it turns regular
+        // too late for the menu bar either way, and wins it back once the window is up, as when opened from Finder.
+        if !isInDock, !NSRunningApplication.current.isActive { enter() }
+        // Decides again once the window is up, and leaves after the delay if none came.
+        scheduleUpdate()
+    }
+
     private func enter() {
         NSApp.setActivationPolicy(.regular)
         isInDock = true
-        // A window that opened behind other apps leaves the focus where it is.
-        if NSApp.isActive, !NSRunningApplication.current.ownsMenuBar { reclaimMenuBar() }
+        // A window that opened behind other apps leaves the focus where it is, and so does the switch made before
+        // Tidemark activates. `NSApp.isActive` is no guide to whether Tidemark is in front: it also reads true while
+        // the menu bar panel, a non-activating panel, is key.
+        let current = NSRunningApplication.current
+        if current.isActive, !current.ownsMenuBar { reclaimMenuBar() }
         // The Dock tile is new: give the switch a turn to bring it up before writing its icon and badge.
         Task { [weak self] in
             guard let self, isInDock else { return }
@@ -212,9 +234,10 @@ final class DockPresence {
         }
     }
 
-    /// An app that turns regular while it is active leaves the menu bar to the app before it, and activating an
-    /// app that is already active does nothing. Lends the activation to the Dock, which has no windows or menus
-    /// to show, and takes it back as soon as Tidemark resigns.
+    /// An app that turns regular while it is already frontmost (the system brought Tidemark forward as an agent:
+    /// opened again from Finder, Spotlight or the Dock, or for a foreground App Intent) leaves the menu bar to the
+    /// app before it, and activating an app that is already active does nothing. Lends the activation to the Dock,
+    /// which has no windows or menus to show, and takes it back as soon as Tidemark resigns.
     private func reclaimMenuBar() {
         guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: Self.dockBundleIdentifier).first else { return }
         NSApp.yieldActivation(to: dock)

@@ -155,6 +155,7 @@ struct MenuBarPanel: View {
             }
             Button(tr("Settings…", "MenuBar")) {
                 onDismiss()
+                DockPresence.willShowWindow()
                 NSApp.activate()
                 openSettings()
             }
@@ -175,6 +176,7 @@ struct MenuBarPanel: View {
 
     private func showMainWindow() {
         onDismiss()
+        DockPresence.willShowWindow()
         NSApp.activate()
         openWindow(id: WindowID.main)
     }

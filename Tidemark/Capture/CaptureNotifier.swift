@@ -161,6 +161,7 @@ final class CaptureNotifier: NSObject {
     /// Brings the main window forward. The engine cannot call `openWindow`, so it orders the existing
     /// window with identifier `main` front.
     static func showMainWindow() {
+        DockPresence.willShowWindow()
         NSApp.activate()
         let window = NSApp.windows.first { window in
             guard let id = window.identifier?.rawValue else { return false }

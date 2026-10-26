@@ -322,14 +322,19 @@ unhides, with nothing to show, and leaves the Dock. Whether Tidemark is in the D
 `NSApp.activationPolicy()`, which can read `.accessory` for a moment right after the app unhides. It follows each
 window's `isVisible` (a window that opens behind other apps posts no occlusion change) and the window and app
 notifications, with no polling. The main window opens at launch, so the Dock icon appears with it.
-Leaving the Dock while active, Tidemark first hands the focus back to the app that was in front before it. Turning
-regular while already active (Tidemark opened again from Finder while it runs in the menu bar, say) leaves the previous
-app's menus in the menu bar, and activating an active app does nothing, so Tidemark lends the activation to the Dock
-and takes it back as it resigns; a window that opens behind other apps takes no focus. While Tidemark is in the Dock,
-`DockIconUpdater` shows the light or dark `BrandIcon` for the system's appearance (the Dock follows System Settings,
-not Settings › Appearance) and the number of unread alerts as the badge, written afresh to each new Dock tile. Every
-way into a window activates Tidemark first: the menu bar panel's Open Window, Settings… and alerts, a notification's
-View, the App Intents (`TidemarkIntents.showMainWindow`) and the menu commands.
+Leaving the Dock while active, Tidemark first hands the focus back to the app that was in front before it. Every way
+into a window activates Tidemark first: the menu bar panel's Open Window, Settings… and alerts, a notification's View,
+the App Intents (`TidemarkIntents.showMainWindow`) and the menu commands. Each calls `DockPresence.willShowWindow()`
+before it activates, which turns Tidemark regular first, so it activates as a regular app and brings its menus into
+the menu bar with it; if no window opens after all, it leaves the Dock again 250 ms later. Turning regular while
+already frontmost (the system brought Tidemark forward as an agent: opened again from Finder, Spotlight or the Dock,
+or for a foreground App Intent) leaves the previous app's menus in the menu bar, and activating an active app does
+nothing, so Tidemark then lends the activation to the Dock and takes it back as it resigns, which takes the focus
+from the new window for a moment. Whether Tidemark is in front is `NSRunningApplication.current.isActive`:
+`NSApp.isActive` also reads true while the menu bar panel, a non-activating panel, is key. A window that opens behind
+other apps takes no focus. While Tidemark is in the Dock, `DockIconUpdater` shows the light or dark `BrandIcon` for
+the system's appearance (the Dock follows System Settings, not Settings › Appearance) and the number of unread alerts
+as the badge, written afresh to each new Dock tile.
 
 The window follows the "Three-pane · Native" direction of the design: a Liquid Glass sidebar (Mac menu,
 Capture, Analyze, Monitored Apps, Archived, Surge/PostgreSQL status footer), a content column per page,

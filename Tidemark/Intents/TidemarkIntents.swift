@@ -38,6 +38,7 @@ enum TidemarkIntents {
 
     /// Activates Tidemark and shows the main window.
     static func showMainWindow() {
+        DockPresence.willShowWindow()
         NSApp.activate()
         if let mainWindowOpener {
             mainWindowOpener()

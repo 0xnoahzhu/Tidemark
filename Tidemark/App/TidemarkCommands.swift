@@ -57,6 +57,7 @@ private struct CommandsWindowButton: View {
     var body: some View {
         Button(title) {
             action()
+            DockPresence.willShowWindow()
             NSApp.activate()
             openWindow(id: WindowID.main)
         }
