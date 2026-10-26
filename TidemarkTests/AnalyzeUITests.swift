@@ -535,7 +535,8 @@ private final class SlowStopProbeActions: ProbeActions {
     }
 }
 
-/// The Domains & IPs columns' widths as the window is resized, compared with the native table's in the same steps.
+/// The Domains & IPs columns' widths as the window is resized and the header's dividers dragged, compared with the
+/// native table's in the same steps.
 @Suite @MainActor struct InventoryColumnWidthsTests {
     typealias Layout = InventoryColumnsLayout
 
@@ -575,6 +576,50 @@ private final class SlowStopProbeActions: ProbeActions {
         widths.resize(to: space(1004, 6))
         #expect(close(widths.widths, [270, 58, 480, 112, 112, 70]))
         #expect(widths.tableWidth == 1219)
+    }
+
+    @Test func resizesADraggedColumnAsTheNativeHeaderDoes() {
+        var widths = InventoryColumnWidths(columns: Layout.entryColumns, space: space(1004, 6))
+        // While the columns fill the list, the ones after the dragged one make up the difference, from the last back.
+        widths = widths.dragging(column: 0, by: 60)
+        #expect(close(widths.widths, [231.5, 58, 321.5, 108, 108, 60]))
+        widths = widths.dragging(column: 0, by: -40)
+        #expect(close(widths.widths, [191.5, 58, 321.5, 112, 120, 84]))
+        widths = widths.dragging(column: 0, by: -200)
+        #expect(close(widths.widths, [150, 58, 355, 120, 120, 84]))
+        // What they cannot make up widens the table, which then scrolls sideways.
+        widths = widths.dragging(column: 2, by: 100)
+        #expect(close(widths.widths, [150, 58, 455, 108, 108, 60]))
+        #expect(widths.overflows && widths.tableWidth == 1056)
+        // Columns wider than the list, or leaving room, change alone.
+        widths = widths.dragging(column: 2, by: -150)
+        #expect(close(widths.widths, [150, 58, 305, 108, 108, 60]))
+        #expect(widths.leavesRoom && widths.tableWidth == 1004)
+        widths = widths.dragging(column: 3, by: 30)
+        #expect(close(widths.widths, [150, 58, 305, 120, 108, 60]))
+        widths = widths.dragging(column: 3, by: -30)
+        widths = widths.dragging(column: 1, by: 20)
+        #expect(close(widths.widths, [150, 58, 305, 108, 108, 60]))
+        // Columns leaving room keep their widths as the window widens, and fit it once it is narrower than them.
+        widths.resize(to: space(1256, 6))
+        #expect(close(widths.widths, [150, 58, 305, 108, 108, 60]))
+        widths.resize(to: space(856, 6))
+        #expect(close(widths.widths, [150, 58, 255, 108, 108, 60]))
+        widths.resize(to: space(756, 6))
+        widths.resize(to: space(1004, 6))
+        #expect(close(widths.widths, [207.5, 58, 297.5, 120, 120, 84]))
+
+        var grouped = InventoryColumnWidths(columns: Layout.groupColumns, space: space(1004, 3))
+        grouped = grouped.dragging(column: 0, by: -200)
+        #expect(close(grouped.widths, [568, 180, 90]))
+        grouped = grouped.dragging(column: 0, by: 100)
+        grouped = grouped.dragging(column: 1, by: -80)
+        grouped = grouped.dragging(column: 0, by: -600)
+        #expect(close(grouped.widths, [260, 110, 90]))
+        for width: CGFloat in [1256, 856, 756, 1004] {
+            grouped.resize(to: space(width, 3))
+            #expect(close(grouped.widths, [260, 110, 90]))
+        }
     }
 }
 

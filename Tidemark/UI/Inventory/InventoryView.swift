@@ -127,8 +127,8 @@ enum InventoryPresentation {
 
 /// The Domains & IPs table: a pinned header and lazily built rows in one scroll view, laid out like the native
 /// table it replaced: the inset style's header, row padding and alternating rounded rows, continued below the last
-/// row; columns sized and resized as the native table sizes them, scrolling sideways when they do not fit. Flat and
-/// grouped rows share the scroll view, so grouping only swaps the rows.
+/// row; columns sized and resized as the native table sizes them, whose header dividers can be dragged, scrolling
+/// sideways when they do not fit. Flat and grouped rows share the scroll view, so grouping only swaps the rows.
 private struct InventoryList: View {
     let model: AppModel
     var entries: [InventoryEntry]
@@ -138,7 +138,7 @@ private struct InventoryList: View {
     @State private var position = ScrollPosition(edge: .top)
     @State private var scrolled = InventoryScrollGeometry()
     /// The columns' widths once they differ from those a new table gives them at the list's width (after the window
-    /// was resized, or in a window too narrow for every column); nil until then.
+    /// was resized or a divider dragged, or in a window too narrow for every column); nil until then.
     @State private var widths: InventoryColumnWidths?
 
     private var columns: [InventoryColumnsLayout.Column] {
@@ -150,6 +150,7 @@ private struct InventoryList: View {
         let tableWidth = widths?.tableWidth ?? 0
         // The native table rounds and insets its rows only while its columns fit the list.
         let inset = !(widths?.overflows ?? false)
+        let leavesRoom = widths?.leavesRoom ?? false
         ScrollView([.vertical, .horizontal]) {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
                 if let groups {
@@ -160,11 +161,11 @@ private struct InventoryList: View {
                         }
                         InventoryEmptyRows(first: groups.count, inset: inset)
                     } header: {
-                        InventoryHeaderRow(columns: InventoryColumnsLayout.groupColumns, widths: explicit, titles: [
+                        InventoryHeaderRow(columns: InventoryColumnsLayout.groupColumns, widths: explicit, leavesRoom: leavesRoom, titles: [
                             (tr("Site or network", "Inventory"), .leading),
                             (tr("Seen by", "Inventory"), .leading),
                             (tr("Requests", "Inventory"), .trailing),
-                        ])
+                        ], resize: resize)
                     }
                 } else {
                     Section {
@@ -174,14 +175,14 @@ private struct InventoryList: View {
                         }
                         InventoryEmptyRows(first: entries.count, inset: inset)
                     } header: {
-                        InventoryHeaderRow(columns: InventoryColumnsLayout.entryColumns, widths: explicit, titles: [
+                        InventoryHeaderRow(columns: InventoryColumnsLayout.entryColumns, widths: explicit, leavesRoom: leavesRoom, titles: [
                             (tr("Name", "Inventory"), .leading),
                             (tr("Type", "Inventory"), .leading),
                             (tr("Seen by · process path", "Inventory"), .leading),
                             (tr("First seen", "Inventory"), .leading),
                             (tr("Last seen", "Inventory"), .leading),
                             (tr("Requests", "Inventory"), .trailing),
-                        ])
+                        ], resize: resize)
                     }
                 }
             }
@@ -236,6 +237,21 @@ private struct InventoryList: View {
         if next != widths { widths = next }
     }
 
+    /// Follows a drag of the divider after `column` by `offset` (nil when it ends) from the widths it started with.
+    private func resize(column: Int, offset: CGFloat?) {
+        guard let offset else {
+            scrolled.dragStart = nil
+            return
+        }
+        guard let visible = scrolled.visibleWidth else { return }
+        let start = scrolled.dragStart
+            ?? widths
+            ?? InventoryColumnWidths(columns: columns, space: InventoryTableMetrics.columnSpace(visible, columns: columns.count))
+        scrolled.dragStart = start
+        let dragged = start.dragging(column: column, by: offset)
+        if dragged != widths { widths = dragged }
+    }
+
     private func scroll(_ key: KeyEquivalent) -> KeyPress.Result {
         switch key {
         case .home:
@@ -256,12 +272,13 @@ private struct InventoryList: View {
     }
 }
 
-/// The list's last scroll geometry and width, for the page keys and the column widths; a reference, so scrolling
-/// does not update the view.
+/// The list's last scroll geometry and width, for the page keys and the column widths, and the widths a divider
+/// drag started from; a reference, so scrolling does not update the view.
 @MainActor
 private final class InventoryScrollGeometry {
     var geometry: ScrollGeometry?
     var visibleWidth: CGFloat?
+    var dragStart: InventoryColumnWidths?
 }
 
 /// The native inset table's measurements and colors, which the list reproduces.
@@ -299,11 +316,17 @@ private enum InventoryTableMetrics {
     }
 }
 
-/// Column titles with the native header's separators and bottom line.
+/// Column titles with the native header's separators and bottom line; dragging a separator (or the last column's
+/// edge) resizes the column before it, as in the native header.
 private struct InventoryHeaderRow: View {
     var columns: [InventoryColumnsLayout.Column]
     var widths: [CGFloat]?
+    /// Whether the columns are narrower than the list.
+    var leavesRoom: Bool
     var titles: [(title: String, alignment: Alignment)]
+    /// Called as the divider after a column is dragged, with the offset from where the drag began, and with nil
+    /// when it ends.
+    var resize: (_ column: Int, _ offset: CGFloat?) -> Void
 
     var body: some View {
         InventoryColumnsLayout(columns: columns, widths: widths) {
@@ -318,12 +341,17 @@ private struct InventoryHeaderRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: column.alignment)
                 .overlay(alignment: .trailing) {
-                    // Between the columns, not after the last one.
-                    if index < titles.count - 1 {
+                    // Between the columns, and after the last one only when the columns leave room after it.
+                    if index < titles.count - 1 || leavesRoom {
                         Rectangle()
                             .fill(InventoryTableMetrics.headerSeparator)
                             .frame(width: 1, height: 15)
                             .offset(x: InventoryTableMetrics.columnSpacing / 2 + 0.5)
+                    }
+                }
+                .overlay(alignment: .trailing) {
+                    if columns[index].isResizable {
+                        divider(after: index)
                     }
                 }
             }
@@ -340,6 +368,22 @@ private struct InventoryHeaderRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+    }
+
+    /// The area around the divider after `column` that resizes it.
+    private func divider(after column: Int) -> some View {
+        Color.clear
+            .frame(width: 8, height: InventoryTableMetrics.headerHeight)
+            .contentShape(Rectangle())
+            // Centered on the separator, in the gap between the columns.
+            .offset(x: InventoryTableMetrics.columnSpacing / 2 + 4)
+            .pointerStyle(.columnResize)
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                    .onChanged { resize(column, $0.translation.width) }
+                    .onEnded { _ in resize(column, nil) }
+            )
+            .accessibilityHidden(true)
     }
 }
 
@@ -538,7 +582,8 @@ struct InventoryColumnsLayout: Layout {
 /// A new table caps the columns that have a maximum at their minimum and shares the rest between the others, each
 /// taking its ideal width plus an equal part of what is left (or less an equal part of what is missing, down to its
 /// minimum); too narrow for every minimum, it keeps the ideal widths and scrolls sideways. As the list is resized,
-/// columns that filled it share the difference equally, within their limits.
+/// columns that filled it share the difference equally, within their limits. Dragging a divider resizes the column
+/// before it, and when the columns filled the list, the ones after it make up the difference from the last one back.
 struct InventoryColumnWidths: Equatable {
     typealias Column = InventoryColumnsLayout.Column
 
@@ -559,6 +604,9 @@ struct InventoryColumnWidths: Equatable {
 
     /// Whether the columns are wider than the list, which then scrolls sideways.
     var overflows: Bool { total > space + 0.5 }
+
+    /// Whether the columns are narrower than the list, leaving room after the last one.
+    var leavesRoom: Bool { total < space - 0.5 }
 
     /// The table's width: the list's, or the columns' when they are wider.
     var tableWidth: CGFloat {
@@ -611,6 +659,22 @@ struct InventoryColumnWidths: Equatable {
             }
             pool = open
         }
+    }
+
+    /// These widths after the divider after `column` was dragged by `offset`.
+    func dragging(column: Int, by offset: CGFloat) -> Self {
+        var result = self
+        let filled = abs(total - space) < 0.5
+        let width = columns[column].clamped(widths[column] + offset)
+        var remaining = widths[column] - width
+        result.widths[column] = width
+        guard filled else { return result }
+        for index in columns.indices.reversed() where index > column && abs(remaining) > 0.01 {
+            let next = columns[index].clamped(result.widths[index] + remaining)
+            remaining -= next - result.widths[index]
+            result.widths[index] = next
+        }
+        return result
     }
 }
 
