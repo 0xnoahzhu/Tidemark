@@ -131,6 +131,20 @@ enum InventoryPresentation {
     }
 }
 
+/// What a row of Domains & IPs or of an app's Domains & IPs tab opens in History (pure, so it can be tested): the
+/// stored requests to one exact host, over all time, as the row counts them. A site or a network offers each of its
+/// hosts rather than a filter History does not have.
+enum InventoryRequests {
+    /// The rows count every request a host has had.
+    static let range: HistoryRange = .all
+
+    /// The domain or IP an entry's requests are stored under.
+    static func hosts(of entry: InventoryEntry) -> [String] { [RequestsHostFilter.normalized(entry.value)] }
+
+    /// A site's domains or a network's IPs, in the row's order.
+    static func hosts(of group: InventoryGroup) -> [String] { group.names.map(RequestsHostFilter.normalized) }
+}
+
 // MARK: - List
 
 /// The Domains & IPs table: a pinned header and lazily built rows in one scroll view, laid out like the native
@@ -494,7 +508,7 @@ private struct InventoryEmptyRows: View {
     }
 }
 
-/// A domain or IP of the flat list.
+/// A domain or IP of the flat list; its count and its context menu open its requests in History.
 private struct InventoryEntryRow: View {
     let model: AppModel
     var entry: InventoryEntry
@@ -503,6 +517,7 @@ private struct InventoryEntryRow: View {
     var insetStripe: Bool
 
     var body: some View {
+        let hosts = InventoryRequests.hosts(of: entry)
         InventoryColumnsLayout(columns: InventoryColumnsLayout.entryColumns, widths: widths) {
             Text(entry.value)
                 .font(entry.kind == .ip ? Theme.mono(12, weight: .medium) : .design(12, .medium))
@@ -513,8 +528,7 @@ private struct InventoryEntryRow: View {
             InventorySourcesList(model: model, sources: entry.sources)
             Text(AnalyzeFormat.seen(entry.firstSeen)).foregroundStyle(Theme.ink2)
             Text(AnalyzeFormat.seen(entry.lastSeen, timeOnlyToday: true)).foregroundStyle(Theme.ink2)
-            Text(Fmt.count(entry.requestCount))
-                .font(Theme.mono(11))
+            AnalyzeRequestsCount(count: entry.requestCount, font: Theme.mono(11), hosts: hosts, open: openRequests)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12))
@@ -522,12 +536,19 @@ private struct InventoryEntryRow: View {
         .frame(minHeight: InventoryTableMetrics.rowHeight)
         .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
         .background { if striped { InventoryRowStripe(inset: insetStripe) } }
+        .contentShape(.rect)
+        .contextMenu { AnalyzeRequestsMenu(hosts: hosts, open: openRequests) }
         // One element per row that names each column, as VoiceOver reads a table's row; the name's tooltip (an
         // IP's network) is its help.
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isStaticText)
         .accessibilityLabel(accessibilityText)
         .accessibilityHint(entry.geo?.display ?? "")
+        .analyzeRequestsActions(hosts: hosts, open: openRequests)
+    }
+
+    private func openRequests(_ host: String) {
+        model.nav.openRequests(forHost: host, range: InventoryRequests.range)
     }
 
     private var accessibilityText: String {
@@ -539,7 +560,7 @@ private struct InventoryEntryRow: View {
     }
 }
 
-/// A site or network of the grouped list.
+/// A site or network of the grouped list; its count and its context menu offer the requests of each of its hosts.
 private struct InventoryGroupRow: View {
     let model: AppModel
     var group: InventoryGroup
@@ -548,6 +569,7 @@ private struct InventoryGroupRow: View {
     var insetStripe: Bool
 
     var body: some View {
+        let hosts = InventoryRequests.hosts(of: group)
         InventoryColumnsLayout(columns: InventoryColumnsLayout.groupColumns, widths: widths) {
             VStack(alignment: .leading, spacing: 2.px) {
                 HStack(alignment: .firstTextBaseline, spacing: 8.px) {
@@ -572,8 +594,7 @@ private struct InventoryGroupRow: View {
                         .help(InventorySourcesList.displayTitle(source))
                 }
             }
-            Text(Fmt.count(group.requests))
-                .font(Theme.mono(11))
+            AnalyzeRequestsCount(count: group.requests, font: Theme.mono(11), hosts: hosts, open: openRequests)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12))
@@ -581,9 +602,16 @@ private struct InventoryGroupRow: View {
         .frame(minHeight: InventoryTableMetrics.groupRowHeight)
         .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
         .background { if striped { InventoryRowStripe(inset: insetStripe) } }
+        .contentShape(.rect)
+        .contextMenu { AnalyzeRequestsMenu(hosts: hosts, open: openRequests) }
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isStaticText)
         .accessibilityLabel(accessibilityText)
+        .analyzeRequestsActions(hosts: hosts, open: openRequests)
+    }
+
+    private func openRequests(_ host: String) {
+        model.nav.openRequests(forHost: host, range: InventoryRequests.range)
     }
 
     private var accessibilityText: String {

@@ -267,10 +267,15 @@ private struct RequestsHistoryOverlay: View {
             if search.isEmpty {
                 let title = host.map { trf("No requests to %@ in this range", "Requests", $0) } ?? tr("No requests in this range", "Requests")
                 // How a request ended is stored since schema v4: older requests tell it only in their notes, which the
-                // query does not read, though the inspector does.
-                let message = endedWithError
-                    ? tr("“Ended with an error” finds only requests recorded since Tidemark began storing how requests end. Try a longer time range or fewer filters.", "Requests")
-                    : tr("Try a longer time range or fewer filters.", "Requests")
+                // query does not read, though the inspector does. An IP's count on Domains & IPs also takes in the
+                // requests to domains that resolved to it, which are stored under those domains.
+                let message = if endedWithError {
+                    tr("“Ended with an error” finds only requests recorded since Tidemark began storing how requests end. Try a longer time range or fewer filters.", "Requests")
+                } else if let host, HostName.isIPAddress(host) {
+                    tr("History finds the requests made to this IP address itself. Requests to domains that resolved to it are listed under those domains.", "Requests")
+                } else {
+                    tr("Try a longer time range or fewer filters.", "Requests")
+                }
                 EmptyState(systemImage: "clock", title: title, message: message)
             } else {
                 EmptyState(systemImage: "magnifyingglass", title: trf("No requests match “%@”", "Requests", search), message: tr("The filter looks at host, remote IP, process and app.", "Requests"))

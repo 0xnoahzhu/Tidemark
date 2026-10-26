@@ -151,6 +151,99 @@ struct AnalyzePill: View {
     }
 }
 
+// MARK: - Requests
+
+/// A row's Requests count that opens those requests in History, on Domains & IPs and an app's Domains & IPs tab. It
+/// reads as the count until the pointer is over its cell, then takes the accent and an underline like a link; the whole
+/// cell takes the click, so a one-digit count is no narrower a target. One host opens at once; a site's or a network's
+/// hosts pop up a menu of them. A button or a menu, so Full Keyboard Access reaches it.
+struct AnalyzeRequestsCount: View {
+    var count: Int64
+    var font: Font
+    /// The exact hosts it opens, as requests store them.
+    var hosts: [String]
+    var open: (String) -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Group {
+            if hosts.count == 1, let host = hosts.first {
+                Button { open(host) } label: { label }
+                    .help(trf("Show every stored request to %@ in History", "Inventory", host))
+            } else {
+                Menu {
+                    AnalyzeRequestsHostItems(hosts: hosts, open: open)
+                } label: {
+                    label
+                }
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
+                .help(tr("Choose a host to show its stored requests in History", "Inventory"))
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(hosts.isEmpty)
+        .onHover { hovering = $0 }
+        .pointerStyle(.link)
+    }
+
+    private var label: some View {
+        Text(Fmt.count(count))
+            .font(font)
+            .underline(hovering)
+            .foregroundStyle(hovering ? Theme.accentInk : Theme.ink)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.vertical, 3.px)
+            .contentShape(.rect)
+    }
+}
+
+/// "Show Requests" in a row's context menu: the host's requests, or for a site or a network a submenu of its hosts.
+struct AnalyzeRequestsMenu: View {
+    var hosts: [String]
+    var open: (String) -> Void
+
+    var body: some View {
+        if hosts.count == 1, let host = hosts.first {
+            Button(tr("Show Requests", "Inventory")) { open(host) }
+        } else if !hosts.isEmpty {
+            Menu(tr("Show Requests", "Inventory")) {
+                AnalyzeRequestsHostItems(hosts: hosts, open: open)
+            }
+        }
+    }
+}
+
+/// One menu item per host, named as it is.
+private struct AnalyzeRequestsHostItems: View {
+    var hosts: [String]
+    var open: (String) -> Void
+
+    var body: some View {
+        ForEach(hosts, id: \.self) { host in
+            Button(host) { open(host) }
+        }
+    }
+}
+
+extension View {
+    /// The requests of a row that VoiceOver reads as one element: "Show Requests", or one action per host of a site or
+    /// a network.
+    func analyzeRequestsActions(hosts: [String], open: @escaping (String) -> Void) -> some View {
+        accessibilityActions {
+            if hosts.count == 1, let host = hosts.first {
+                Button(tr("Show Requests", "Inventory")) { open(host) }
+            } else {
+                ForEach(hosts, id: \.self) { host in
+                    Button(trf("Show Requests to %@", "Inventory", host)) { open(host) }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Formatting
 
 /// Localized date labels and emphasized sentences used by the Analyze pages.

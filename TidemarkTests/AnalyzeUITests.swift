@@ -522,6 +522,76 @@ private final class SlowStopProbeActions: ProbeActions {
     }
 }
 
+/// What a row of Domains & IPs, or of an app's Domains & IPs tab, opens in History: the stored requests to its exact
+/// host over all time, as the row counts them, and on an app's tab only that app's.
+@Suite @MainActor struct InventoryRequestsTests {
+    private func entry(_ value: String, kind: HostKind = .domain) -> InventoryEntry {
+        InventoryEntry(kind: kind, value: value, sources: [], firstSeen: .now, lastSeen: .now, requestCount: 1, geo: nil)
+    }
+
+    @Test func aRowOpensItsExactHost() {
+        #expect(InventoryRequests.hosts(of: entry("API2.Cursor.sh")) == ["api2.cursor.sh"])
+        #expect(InventoryRequests.hosts(of: entry("104.18.19.125", kind: .ip)) == ["104.18.19.125"])
+        #expect(InventoryRequests.hosts(of: entry("[2001:DB8::1]", kind: .ip)) == ["2001:db8::1"])
+        // A site or a network offers each of its hosts, in the row's order.
+        let site = InventoryGroup.make([entry("api.github.com"), entry("github.com"), entry("api.notion.com")], site: naiveSite,
+                                       unknownNetwork: "Unknown network")
+        #expect(site.map { InventoryRequests.hosts(of: $0) } == [["api.github.com", "github.com"], ["api.notion.com"]])
+    }
+
+    @Test func opensHistoryAllTimeAndOnAnAppsPageForTheApp() {
+        let nav = Navigation()
+        nav.open(.inventory)
+        nav.history.range = .lastHour
+        nav.history.appID = UIMainFixtures.cursor.id
+        nav.openRequests(forHost: "api2.cursor.sh", range: InventoryRequests.range)
+        #expect(nav.page == .requests && !nav.requestsLive)
+        #expect(nav.history.host == "api2.cursor.sh")
+        #expect(nav.history.range == .all)
+        #expect(nav.history.appID == nil)
+
+        nav.open(.app(UIMainFixtures.cursor.id), tab: .inventory)
+        nav.history.range = .last7Days
+        nav.openRequests(forHost: "104.18.19.125", app: UIMainFixtures.cursor.id, range: InventoryRequests.range)
+        #expect(nav.page == .requests)
+        #expect(nav.history.host == "104.18.19.125" && nav.history.appID == UIMainFixtures.cursor.id && nav.history.range == .all)
+
+        // Without a range, as from the inspector, the time range stays.
+        nav.history.range = .last24Hours
+        nav.openRequests(forHost: "api.github.com")
+        #expect(nav.history.range == .last24Hours && nav.history.appID == nil)
+    }
+
+    /// The demo lists a host with as many requests as History then finds for it, everywhere and for one app.
+    @Test func theDemoCountsWhatHistoryFinds() async throws {
+        let cursor = UIMainFixtures.cursor.id
+        let rows = [
+            UIMainFixtures.record(id: 1, host: "api2.cursor.sh", appID: cursor),
+            UIMainFixtures.record(id: 2, host: "api2.cursor.sh"),
+            UIMainFixtures.record(id: 3, host: "api2.cursor.sh", device: UIMainFixtures.otherMac, appID: cursor),
+            UIMainFixtures.record(id: 4, host: "104.18.19.125", ip: "104.18.19.125", appID: cursor),
+        ]
+        let database = ShellDemoDatabase(rows: rows)
+        let entries = try await database.inventory(kind: nil, search: "", scope: .all)
+        let domain = try #require(entries.first { $0.kind == .domain })
+        #expect(domain.value == "api2.cursor.sh" && domain.requestCount == 3)
+        let all = try await database.queryRequests(RequestQuery(range: InventoryRequests.range, host: InventoryRequests.hosts(of: domain)[0]))
+        #expect(all.totalCount == domain.requestCount)
+        // An IP counts the requests to its domains too; History finds those under the domains.
+        let ip = try #require(entries.first { $0.kind == .ip })
+        #expect(ip.value == "104.18.19.125" && ip.requestCount == 4)
+        #expect(try await database.queryRequests(RequestQuery(range: .all, host: ip.value)).totalCount == 1)
+
+        let appHosts = try await database.appHosts(cursor, scope: .all)
+        let appDomain = try #require(appHosts.first { $0.kind == .domain })
+        #expect(appDomain.requestCount == 2)
+        #expect(try await database.queryRequests(RequestQuery(range: .all, appID: cursor, host: appDomain.value)).totalCount == 2)
+        #expect(appHosts.first { $0.kind == .ip }?.hosts == ["api2.cursor.sh"])
+        // One Mac lists only what that Mac saw.
+        #expect(try await database.inventory(kind: .domain, search: "", scope: .device(UIMainFixtures.otherMac)).map(\.requestCount) == [1])
+    }
+}
+
 /// The Domains & IPs list gives its columns the widths the native table gave them.
 @Suite @MainActor struct InventoryColumnsLayoutTests {
     typealias Layout = InventoryColumnsLayout

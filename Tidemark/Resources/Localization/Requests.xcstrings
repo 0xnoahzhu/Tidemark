@@ -716,6 +716,17 @@
         }
       }
     },
+    "History finds the requests made to this IP address itself. Requests to domains that resolved to it are listed under those domains." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "历史只查找直接发往这个 IP 地址的请求。发往解析到它的域名的请求，列在那些域名之下。"
+          }
+        }
+      }
+    },
     "Host" : {
       "extractionState" : "manual",
       "localizations" : {

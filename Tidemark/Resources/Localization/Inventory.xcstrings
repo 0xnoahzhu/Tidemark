@@ -81,6 +81,17 @@
         }
       }
     },
+    "Choose a host to show its stored requests in History" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择一个主机，在历史中显示它的已存请求"
+          }
+        }
+      }
+    },
     "Domain" : {
       "localizations" : {
         "zh-Hans" : {
@@ -308,6 +319,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "来源 · 进程路径"
+          }
+        }
+      }
+    },
+    "Show Requests" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示请求"
+          }
+        }
+      }
+    },
+    "Show Requests to %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示发往 %@ 的请求"
+          }
+        }
+      }
+    },
+    "Show every stored request to %@ in History" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在历史中显示发往 %@ 的全部已存请求"
           }
         }
       }
