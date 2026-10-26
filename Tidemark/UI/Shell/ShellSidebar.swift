@@ -47,10 +47,7 @@ struct ShellSidebar: View {
         SidebarRow(page: .requests) {
             SidebarGlyph(symbol: "line.3.horizontal", tint: Theme.tileRequests, scale: 0.5)
             SidebarRowTitle(tr("Requests", "Sidebar"))
-            Text(Fmt.rate(model.live.recording ? model.live.rate : 0))
-                .font(Theme.mono(11))
-                .foregroundStyle(Theme.inkGlass)
-                .contentTransition(.numericText())
+            SidebarRequestsRate(live: model.live)
         }
         SidebarRow(page: .notifications) {
             SidebarGlyph(symbol: "circle.fill", tint: Theme.tileNotifications, scale: 0.36)
@@ -88,6 +85,19 @@ struct ShellSidebar: View {
                 }
             }
         }
+    }
+}
+
+/// The Requests row's rate. It changes up to once a second while requests come in, so it is read here, in a view of
+/// its own: a new rate then updates this text alone rather than the whole sidebar.
+private struct SidebarRequestsRate: View {
+    var live: LiveState
+
+    var body: some View {
+        Text(Fmt.rate(live.recording ? live.rate : 0))
+            .font(Theme.mono(11))
+            .foregroundStyle(Theme.inkGlass)
+            .contentTransition(.numericText())
     }
 }
 
