@@ -252,8 +252,9 @@ actor CapturePipeline {
     var pendingDNSAnswers: [DNSAnswer] = []
     /// Hosts whose lookup by Tidemark ended lately → when: their `dns` events may arrive after the lookup's reply.
     var finishedLookups: [String: Date] = [:]
-    /// The latest answer of each domain's `dns` events: when Surge resolved it to these addresses.
-    var latestDNSAnswers: [String: (addresses: Set<String>, at: Date)] = [:]
+    /// The latest answer of each domain's `dns` events: when Surge resolved it to these addresses, and whether
+    /// Tidemark's own lookup made it resolve.
+    var latestDNSAnswers: [String: (addresses: Set<String>, at: Date, byTidemark: Bool)] = [:]
 
     // Proxy errors
     /// Proxy nodes (final policies) that carried requests → when one last did.

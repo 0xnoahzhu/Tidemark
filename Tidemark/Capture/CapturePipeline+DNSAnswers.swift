@@ -16,7 +16,7 @@ extension CapturePipeline {
         let interface = event.interface?.trimmingCharacters(in: .whitespaces)
         let answer = DNSAnswer(deviceID: settings.deviceID, domain: domain, resolvedAt: now, server: server?.isEmpty == false ? server : nil,
                                interface: interface?.isEmpty == false ? interface : nil, addresses: event.addresses, byTidemark: ownLookup)
-        latestDNSAnswers[domain] = (Set(answer.addresses), now)
+        latestDNSAnswers[domain] = (Set(answer.addresses), now, ownLookup)
         // A flood of events with no read completing them: the oldest are written as they are.
         if pendingDNSAnswers.count >= 5_000 { buffer.add(dnsAnswer: pendingDNSAnswers.removeFirst()) }
         pendingDNSAnswers.append(answer)

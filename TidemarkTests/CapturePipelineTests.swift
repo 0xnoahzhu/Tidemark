@@ -277,6 +277,107 @@ struct CapturePipelineTests {
         #expect(updated.remoteIPResolvedAt == Date(timeIntervalSince1970: 1_792_871_000.25))
     }
 
+    @Test func looksUpAHostWhoseCachedAnswerHasNoExpiry() async {
+        let temp = CaptureTempDirectory()
+        let surge = CaptureFakeSurge()
+        surge.update {
+            // No `expiresTime` Tidemark can read (another Surge version, say): not an answer that holds forever.
+            $0.dnsCache = [SurgeDNSRecord(domain: "api.github.com", addresses: ["140.82.112.5"])]
+            $0.dns["api.github.com"] = ["140.82.112.6"]
+        }
+        let pipeline = makePipeline(database: CaptureFakeDatabase(), surge: surge, spoolDirectory: temp.url)
+        await pipeline.refreshDNSCache(now: base)
+        await pipeline.ingest(CaptureFixtures.request(id: 1, host: "api.github.com", processPath: "/usr/bin/git", remoteAddress: "203.0.113.10 (Proxy)"),
+                              now: base)
+        var record: RequestRecord?
+        #expect(await eventually {
+            record = await pipeline.drainUpdate().records.last { $0.remoteIP != nil } ?? record
+            return record != nil
+        })
+        #expect(record?.remoteIP == "140.82.112.6" && record?.remoteIPSource == .tidemarkLookup)
+        #expect(surge.snapshot.dnsLookups == ["api.github.com"])
+    }
+
+    @Test func aLookedUpAnswerLastsAsLongAsSurgesCacheHoldsIt() async throws {
+        let temp = CaptureTempDirectory()
+        let surge = CaptureFakeSurge()
+        // Surge's `dns lookup` reports `expires-in` 0, so Tidemark's own entry gets a minute.
+        surge.update { $0.dns["api.anthropic.com"] = ["160.79.104.10"] }
+        let pipeline = makePipeline(database: CaptureFakeDatabase(), surge: surge, spoolDirectory: temp.url)
+        func request(_ id: Int64) -> SurgeRequest {
+            CaptureFixtures.request(id: id, host: "api.anthropic.com", processPath: "/usr/local/bin/claude", remoteAddress: "203.0.113.10 (Proxy)")
+        }
+        var latest: [Int64: RequestRecord] = [:]
+        func drain() async {
+            for record in await pipeline.drainUpdate().records { latest[record.key.surgeID] = record }
+        }
+
+        await pipeline.ingest(request(1), now: base)
+        #expect(await eventually {
+            await drain()
+            return latest[1]?.remoteIP != nil
+        })
+        #expect(latest[1]?.remoteIPSource == .tidemarkLookup)
+        let lookedUpAt = try #require(latest[1]?.remoteIPResolvedAt)
+
+        // Surge's cache holds the lookup's answer for five minutes. The host is requested every 30 s, well past
+        // Tidemark's own minute, with a `dump dns` read between requests.
+        surge.update { $0.dnsCache = [SurgeDNSRecord(domain: "api.anthropic.com", addresses: ["160.79.104.10"], expires: base.addingTimeInterval(300))] }
+        for step in 1...9 {
+            await pipeline.refreshDNSCache(now: base.addingTimeInterval(Double(step) * 30 - 15))
+            await pipeline.ingest(request(Int64(step + 1)), now: base.addingTimeInterval(Double(step) * 30))
+        }
+        await drain()
+        #expect(surge.snapshot.dnsLookups == ["api.anthropic.com"], "one lookup per TTL of the answer, not one a minute")
+        #expect((2...10).allSatisfy { latest[$0]?.remoteIPSource == .tidemarkLookup && latest[$0]?.remoteIPResolvedAt == lookedUpAt },
+                "still the answer of Tidemark's lookup")
+
+        // Once Surge's answer expires, the host is looked up again.
+        await pipeline.refreshDNSCache(now: base.addingTimeInterval(305))
+        await pipeline.ingest(request(20), now: base.addingTimeInterval(310))
+        #expect(await eventually { surge.snapshot.dnsLookups == ["api.anthropic.com", "api.anthropic.com"] })
+    }
+
+    @Test func anAnswerTidemarksLookupCausedStaysTidemarksUntilSurgeResolvesItAgain() async throws {
+        let temp = CaptureTempDirectory()
+        let surge = CaptureFakeSurge()
+        surge.update { $0.dns["api.anthropic.com"] = ["160.79.104.10"] }
+        let pipeline = makePipeline(database: CaptureFakeDatabase(), surge: surge, spoolDirectory: temp.url)
+        func request(_ id: Int64) -> SurgeRequest {
+            CaptureFixtures.request(id: id, host: "api.anthropic.com", processPath: "/usr/local/bin/claude", remoteAddress: "203.0.113.10 (Proxy)")
+        }
+        var latest: [Int64: RequestRecord] = [:]
+        func drain() async {
+            for record in await pipeline.drainUpdate().records { latest[record.key.surgeID] = record }
+        }
+        await pipeline.ingest(request(1), now: base)
+        #expect(await eventually {
+            await drain()
+            return latest[1]?.remoteIP != nil
+        })
+        // Surge's `dns` event of that lookup.
+        let event = SurgeDNSEvent(domain: "api.anthropic.com", server: "https://cloudflare-dns.com/dns-query", interface: "", data: ["160.79.104.10"])
+        let eventAt = Date.now
+        await pipeline.recordDNSAnswer(event, now: eventAt)
+
+        // No read while Tidemark's own minute lasted (`dump dns` failed meanwhile): the answer Surge still caches is
+        // the lookup's, and says so.
+        surge.update { $0.dnsCache = [SurgeDNSRecord(domain: "api.anthropic.com", addresses: ["160.79.104.10"], expires: base.addingTimeInterval(300))] }
+        await pipeline.refreshDNSCache(now: base.addingTimeInterval(120))
+        await pipeline.ingest(request(2), now: base.addingTimeInterval(130))
+        await drain()
+        #expect(latest[2]?.remoteIPSource == .tidemarkLookup && latest[2]?.remoteIPResolvedAt == eventAt)
+
+        // Surge resolves the host again for a request of its own: the same addresses are Surge's from then on.
+        await pipeline.recordDNSAnswer(event, now: base.addingTimeInterval(200))
+        surge.update { $0.dnsCache = [SurgeDNSRecord(domain: "api.anthropic.com", addresses: ["160.79.104.10"], expires: base.addingTimeInterval(600))] }
+        await pipeline.refreshDNSCache(now: base.addingTimeInterval(230))
+        await pipeline.ingest(request(3), now: base.addingTimeInterval(240))
+        await drain()
+        #expect(latest[3]?.remoteIPSource == .surgeCache && latest[3]?.remoteIPResolvedAt == base.addingTimeInterval(200))
+        #expect(surge.snapshot.dnsLookups == ["api.anthropic.com"])
+    }
+
     @Test func keepsSurgesDetailsAcrossEventsAndWritesThem() async throws {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()

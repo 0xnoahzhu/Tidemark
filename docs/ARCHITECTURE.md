@@ -80,9 +80,11 @@ delete it in Keychain Access. A stream that ends or fails is always restarted, w
   In rule mode notes also name the matched rule; in global-proxy mode the rule is `Global · <policy>`.
 * **Remote IP** — `remoteAddress` is the real destination for DIRECT, but `"<proxy-ip> (Proxy)"` for proxied
   connections. In rule mode the notes name the address Surge resolved to match IP rules (`[Rule] DNS completed, IPv4
-  address for matching: …`). Other hostnames are resolved through Surge (`dns lookup <host>`, cached by TTL, plus a
-  `dump dns` cache read every 30 s whose answers count only until Surge's own `expiresTime`: Surge keeps expired
-  answers listed for hours). A proxy resolves the host again on its side, out of sight, so every request records
+  address for matching: …`). Other hostnames are resolved through Surge: a `dump dns` cache read every 30 s, whose
+  answers count only until Surge's own `expiresTime` (Surge keeps expired answers listed for hours, and an answer
+  without one is not used), and `dns lookup <host>` for the rest. A lookup reports no TTL (`expires-in` 0), so its
+  answer counts for a minute, or for as long as Surge's cache holds the same addresses, and keeps its label meanwhile.
+  A proxy resolves the host again on its side, out of sight, so every request records
   where its address came from and when (`remote_ip_source`: `literal`, `surge`, `rule-dns`, `tidemark-lookup`,
   `surge-cache`). IP-literal hosts (`149.154.175.60:443`) are *direct* IPs ("by IP, no hostname").
 * **GeoIP** — `geoip <ip>` → `{country, asn, organization}`; cached in `ip_info`.

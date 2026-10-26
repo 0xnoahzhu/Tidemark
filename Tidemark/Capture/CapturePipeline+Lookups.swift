@@ -8,23 +8,29 @@ import Foundation
 extension CapturePipeline {
     /// Reads Surge's DNS cache (`dump dns`), completes the DNS answers waiting since their `dns` events and fills
     /// waiting requests. An answer counts until Surge's `expiresTime` (Surge keeps expired answers listed for hours); a
-    /// static mapping of its profile never expires. An answer of Tidemark's own lookup keeps its label while Surge
-    /// reports the same addresses. A cached answer was resolved when its `dns` event arrived, or else (Surge resolved
-    /// it before Tidemark listened) no later than the read that first showed it, until Surge resolves it again (a
-    /// new expiry).
+    /// static mapping of its profile never expires. The answer to Tidemark's own lookup keeps its label and lasts as
+    /// long as Surge's cache holds the same addresses (the lookup itself reports no TTL, `expires-in` 0), so a host in
+    /// steady use is looked up once per TTL of its answer, not every minute. A cached answer was resolved when its `dns`
+    /// event arrived (and is Tidemark's when its lookup caused that), or else (Surge resolved it before Tidemark
+    /// listened) no later than the read that first showed it, until Surge resolves it again (a new expiry).
     func refreshDNSCache(now: Date = .now) async {
         guard let records = try? await surge.dnsCache() else { return }
         completeDNSAnswers(records, now: now)
         for record in records {
-            let expires = record.expires ?? .distantFuture
-            guard expires > now else { continue }
-            if let current = dnsCache[record.domain], current.expires > now, Set(current.ips) == Set(record.addresses),
-               current.source != .surgeCache || abs(current.expires.timeIntervalSince(expires)) < 1 {
-                continue
+            guard let expires = record.isLocal ? .distantFuture : record.expires, expires > now else { continue }
+            let addresses = Set(record.addresses)
+            let answer = record.isLocal ? nil : latestDNSAnswers[record.domain].flatMap { $0.addresses == addresses ? $0 : nil }
+            if let current = dnsCache[record.domain], current.expires > now, Set(current.ips) == addresses {
+                let resolvedAgain = answer.map { !$0.byTidemark && $0.at > (current.resolvedAt ?? .distantPast) } ?? false
+                if current.source == .tidemarkLookup, !resolvedAgain {
+                    dnsCache[record.domain]?.expires = max(current.expires, expires)
+                    continue
+                }
+                if current.source == .surgeCache, abs(current.expires.timeIntervalSince(expires)) < 1 { continue }
             }
-            let answered = latestDNSAnswers[record.domain].flatMap { $0.addresses == Set(record.addresses) ? $0.at : nil }
-            dnsCache[record.domain] = ResolvedHost(ips: record.addresses, expires: expires, source: .surgeCache,
-                                                  resolvedAt: record.isLocal ? nil : answered ?? now)
+            dnsCache[record.domain] = ResolvedHost(ips: record.addresses, expires: expires,
+                                                  source: answer?.byTidemark == true ? .tidemarkLookup : .surgeCache,
+                                                  resolvedAt: record.isLocal ? nil : answer?.at ?? now)
         }
         dnsCache = dnsCache.filter { $0.value.expires > now }
         for host in Array(waitingForHost.keys) {

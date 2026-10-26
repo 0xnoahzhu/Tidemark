@@ -176,7 +176,8 @@ struct SurgeDNSRecord: Sendable, Hashable {
     var logs: [String] = []
     /// Seconds the lookup took (`timeCost`).
     var timeCost: Double? = nil
-    /// When the answer expires (`expiresTime`); nil for a static mapping, which never does.
+    /// When the answer expires (`expiresTime`); nil for a static mapping, which never does, and for a cached answer
+    /// Surge gave no usable expiry, which Tidemark never uses (it looks the host up instead).
     var expires: Date? = nil
     /// A static mapping of the profile, not a lookup.
     var isLocal = false
