@@ -4,19 +4,31 @@ import Foundation
 /// In-memory request store behind the History view in demo mode, previews and tests.
 ///
 /// Request queries, histograms, policy lists and the domains and IPs of Domains & IPs and the app pages are answered
-/// from `rows`; everything else behaves like `OfflineDatabase`.
+/// from `rows`, site probes and egress history from `sources`; everything else behaves like `OfflineDatabase`.
 struct ShellDemoDatabase: TidemarkDatabase {
+    /// The records besides requests that the demo's requests are joined to (`relatedRecords(of:)`).
+    struct Sources {
+        var alerts: [AlertItem] = []
+        var probes: [ProbeSession] = []
+        /// Each Mac's egress checks, oldest first, every policy flagged current while it was.
+        var egressChecks: [DeviceID: [EgressSample]] = [:]
+        /// Each Mac's egress changes, newest first.
+        var egressChanges: [DeviceID: [EgressChange]] = [:]
+    }
+
     var rows: [RequestRecord]
     /// Names for the search filter's app match (the real database joins `apps`).
     var appNames: [AppID: String] = [:]
+    var sources = Sources()
     private let base = OfflineDatabase()
 
-    init(rows: [RequestRecord], appNames: [AppID: String] = [:]) {
+    init(rows: [RequestRecord], appNames: [AppID: String] = [:], sources: Sources = Sources()) {
         // Newest first by `(started_at, id)`, the order the real database pages in.
         self.rows = rows.sorted { a, b in
             a.startedAt != b.startedAt ? a.startedAt > b.startedAt : (a.rowID ?? 0) > (b.rowID ?? 0)
         }
         self.appNames = appNames
+        self.sources = sources
     }
 
     /// Rows matching every filter of `query` except its paging (`offset`, `limit`).
@@ -130,8 +142,12 @@ struct ShellDemoDatabase: TidemarkDatabase {
         .prefix(2000))
     }
 
-    /// Who a request counts for: its process, named as the real database names it.
+    /// Who a request counts for: its process, or the site probe it belonged to, named as the real database names it.
     private func inventorySource(of row: RequestRecord) -> InventorySource {
+        if let id = row.probeSessionID {
+            let site = sources.probes.first { $0.id == id }?.host ?? row.host
+            return InventorySource(title: "Probe · \(site)", path: "Site probe · \(site)", appID: nil, probeSessionID: id, bundlePath: nil)
+        }
         let path = row.processPath ?? row.bundlePath ?? ""
         return InventorySource(title: path.isEmpty ? "" : (row.chain.last?.name ?? row.processName), path: path, appID: row.appID,
                                probeSessionID: nil, bundlePath: row.bundlePath)
@@ -191,12 +207,34 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func markAlertsRead(_ ids: [Int64]) async throws { try await base.markAlertsRead(ids) }
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws { try await base.markAllAlertsRead(appID: appID, scope: scope) }
     func saveProbeSession(_ session: ProbeSession) async throws { try await base.saveProbeSession(session) }
-    func probeSessions(limit: Int) async throws -> [ProbeSession] { try await base.probeSessions(limit: limit) }
     func saveEgressSamples(_ samples: [EgressSample], deviceID: DeviceID) async throws {
         try await base.saveEgressSamples(samples, deviceID: deviceID)
     }
-    func latestEgress(deviceID: DeviceID) async throws -> [EgressSample] { try await base.latestEgress(deviceID: deviceID) }
     func insertEgressChange(_ change: EgressChange, deviceID: DeviceID) async throws { try await base.insertEgressChange(change, deviceID: deviceID) }
-    func egressChanges(deviceID: DeviceID, limit: Int) async throws -> [EgressChange] { try await base.egressChanges(deviceID: deviceID, limit: limit) }
+
+    // Site probes and egress history, from `sources`.
+    func probeSessions(limit: Int) async throws -> [ProbeSession] {
+        Array(sources.probes.sorted { $0.startedAt > $1.startedAt }.prefix(limit))
+    }
+
+    func latestEgress(deviceID: DeviceID) async throws -> [EgressSample] { latestEgressSamples(deviceID: deviceID) }
+
+    /// The latest check of each policy, only the newest current one still flagged current.
+    func latestEgressSamples(deviceID: DeviceID) -> [EgressSample] {
+        let checks = sources.egressChecks[deviceID] ?? []
+        let current = checks.last(where: \.isCurrent)
+        var latest: [String: EgressSample] = [:]
+        for check in checks { latest[check.id] = check }
+        return latest.values.map { check in
+            var check = check
+            check.isCurrent = check == current
+            return check
+        }
+        .sorted { $0.policyDisplay < $1.policyDisplay }
+    }
+
+    func egressChanges(deviceID: DeviceID, limit: Int) async throws -> [EgressChange] {
+        Array((sources.egressChanges[deviceID] ?? []).prefix(limit))
+    }
 }
 #endif
