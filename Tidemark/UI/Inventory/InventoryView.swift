@@ -244,7 +244,7 @@ private struct InventoryHeaderRow: View {
                 Group {
                     if column.alignment == .trailing {
                         // Whole, as the native header draws a right-aligned title in a narrow column.
-                        Text(column.title).fixedSize().padding(.trailing, 6)
+                        Text(column.title).fixedSize().padding(.trailing, 2)
                     } else {
                         Text(column.title).lineLimit(1).padding(.leading, 2)
                     }
