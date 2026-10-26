@@ -349,6 +349,20 @@ struct UIChromeTests {
                 == "postgres://h/db?sslmode=require")
     }
 
+    /// libpq's `sslpassword`, the client key's passphrase, is masked too, and its mask stands only for the saved one.
+    @Test func databaseURLMasksTheSSLPassword() {
+        let saved = "postgres://tide:pw@h/db?sslpassword=k%26p&sslmode=require"
+        #expect(SettingsDatabaseURL.masked(saved) == "postgres://tide:••••••••@h/db?sslpassword=••••••••&sslmode=require")
+        #expect(SettingsDatabaseURL.unmasked("postgres://tide:••••••••@h2/db?sslpassword=••••••••&sslmode=require", saved: saved)
+                == "postgres://tide:pw@h2/db?sslpassword=k%26p&sslmode=require")
+        #expect(SettingsDatabaseURL.unmasked("postgres://tide:••••••••@h/db?SSLPASSWORD=•••", saved: "postgres://tide:pw@h/db")
+                == "postgres://tide:pw@h/db", "never the password")
+        #expect(SettingsDatabaseURL.unmasked("postgres://tide:••••••••@h/db?sslpassword=new", saved: saved)
+                == "postgres://tide:pw@h/db?sslpassword=new", "a typed passphrase keeps the saved password")
+        #expect(SettingsDatabaseURL.unmasked("postgres://tide:new@h/db?sslpassword=••••••••", saved: saved)
+                == "postgres://tide:new@h/db?sslpassword=k%26p", "a typed password keeps the saved passphrase")
+    }
+
     /// Text that is not a PostgreSQL URL is never saved: it may hold a password the field cannot find.
     @Test func databaseURLRefusesOtherText() {
         for text in ["tide:secret@127.0.0.1:5432/tidemark", "127.0.0.1:5432/tidemark", "host=db password=secret dbname=tidemark",

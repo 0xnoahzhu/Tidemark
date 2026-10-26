@@ -66,7 +66,7 @@ struct DatabaseUnitTests {
 
     @Test func rejectsInvalidURLsWithoutLeakingPasswords() {
         for url in ["mysql://u:secret@h/d", "postgres://u:secret@h/d?sslmode=bogus", "postgres://u:secret@h:99999/d", "not a url",
-                    "postgres://h/d?password=secret&sslmode=bogus"] {
+                    "postgres://h/d?password=secret&sslmode=bogus", "postgres://h/d?sslmode=bogus&SSLPassword=secret"] {
             #expect(throws: DatabaseError.self) { try PostgresConnectionURL(url) }
             do {
                 _ = try PostgresConnectionURL(url)
@@ -84,6 +84,7 @@ struct DatabaseUnitTests {
         #expect(PostgresConnectionURL.redact("tide:secret@db/tidemark") == "…@db/tidemark")
         #expect(PostgresConnectionURL.redact("postgres://tide:secret@h/d?sslmode=bogus") == "postgres://tide:•••@h/d?sslmode=bogus")
         #expect(PostgresConnectionURL.redact("postgres://h/d?password=secret&sslmode=bogus") == "postgres://h/d?password=•••&sslmode=bogus")
+        #expect(PostgresConnectionURL.redact("postgres://h/d?sslmode=bad&sslpassword=secret") == "postgres://h/d?sslmode=bad&sslpassword=•••")
     }
 
     @Test func classifiesServerErrorsByWhetherARetryCanSucceed() {

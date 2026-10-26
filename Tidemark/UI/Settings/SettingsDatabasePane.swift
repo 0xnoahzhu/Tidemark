@@ -306,9 +306,10 @@ enum SettingsDatabaseFormat {
     }
 }
 
-/// The URL field's text and the URL kept in the preferences, password included. The field shows the saved
-/// password as a mask, `postgres://tide:••••••••@127.0.0.1:5432/tidemark`, in the user info and in a libpq
-/// `password` parameter alike; the mask left in place (or what is left of it) keeps the saved password.
+/// The URL field's text and the URL kept in the preferences, password included. The field shows each secret of
+/// the saved URL as a mask, `postgres://tide:••••••••@127.0.0.1:5432/tidemark`: the password, in the user info and
+/// in a libpq `password` parameter alike, and libpq's `sslpassword` (the client key's passphrase). A mask left in
+/// place (or what is left of it) keeps the saved secret of its kind.
 enum SettingsDatabaseURL {
     /// Field text that is not a `postgres://` or `postgresql://` URL. It is neither saved nor shown back, since
     /// it may hold a password.
@@ -322,23 +323,32 @@ enum SettingsDatabaseURL {
 
     static let mask = "••••••••"
 
-    /// The saved URL as the field shows it: every password in it (user info, `password` parameters) masked, and
-    /// nothing else changed. Text that is not a PostgreSQL URL comes back unchanged; Settings never saves such text.
+    /// The secrets a URL may hold.
+    private enum Secret {
+        /// The PostgreSQL password, in the user info or a `password` parameter.
+        case password
+        /// libpq's `sslpassword` parameter, the passphrase of the client key.
+        case sslPassword
+    }
+
+    /// The saved URL as the field shows it: every secret in it (user info password, `password` and `sslpassword`
+    /// parameters) masked, and nothing else changed. Text that is not a PostgreSQL URL comes back unchanged;
+    /// Settings never saves such text.
     static func masked(_ url: String) -> String {
         guard let components = postgresComponents(url), let string = components.string else { return url }
-        var passwords = components.rangeOfQuery.map { query in
+        var secrets = components.rangeOfQuery.map { query in
             string[query].split(separator: "&").compactMap { item -> Range<String.Index>? in
-                guard let equals = item.firstIndex(of: "="), isPassword(named: item[..<equals]) else { return nil }
+                guard let equals = item.firstIndex(of: "="), secret(named: item[..<equals]) != nil else { return nil }
                 let value = item.index(after: equals)..<item.endIndex
                 return value.isEmpty ? nil : value
             }
         } ?? []
-        if let password = components.rangeOfPassword, !password.isEmpty { passwords.append(password) }
-        guard !passwords.isEmpty else { return url }
+        if let password = components.rangeOfPassword, !password.isEmpty { secrets.append(password) }
+        guard !secrets.isEmpty else { return url }
         // Only those ranges change: the same text anywhere else in the URL stays as it is.
         var shown = ""
         var rest = string.startIndex
-        for range in passwords.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+        for range in secrets.sorted(by: { $0.lowerBound < $1.lowerBound }) {
             shown += string[rest..<range.lowerBound]
             shown += mask
             rest = range.upperBound
@@ -347,36 +357,44 @@ enum SettingsDatabaseURL {
     }
 
     /// The URL to save for the field's text: the text as typed, except that a mask (or what is left of it) stands
-    /// for the saved URL's password, the one in the same place (user info or `password` parameter) when it has
-    /// one there, encoded as it was saved. A mask is dropped when there is no saved password to stand for, or when
-    /// the text holds a newly typed password (user info or `password` parameter): that one is to be used. The field
-    /// left as `masked` showed it gives back the saved URL exactly. Nil for text that is not a PostgreSQL URL, which
-    /// must not be saved.
+    /// for the saved secret of its kind, encoded as it was saved. For the password, that is the saved one in the
+    /// same place (user info or `password` parameter) when there is one there, or else the other. A mask is dropped
+    /// when there is no saved secret of its kind to stand for, or when the text holds a newly typed one (for the
+    /// password, in either place): that one is to be used. The field left as `masked` showed it gives back the
+    /// saved URL exactly. Nil for text that is not a PostgreSQL URL, which must not be saved.
     static func unmasked(_ text: String, saved: String) -> String? {
         guard var components = postgresComponents(text) else { return nil }
         guard text != masked(saved) else { return saved }
-        let typed = components.password.map(isTyped) == true
-            || components.percentEncodedQueryItems?.contains { isPassword($0) && isTyped(value(of: $0)) } == true
-        let savedComponents = typed ? nil : postgresComponents(saved)
-        // Percent-encoded; the last non-empty `password` parameter is the one that counts, as in `PostgresConnectionURL`.
-        let savedUserPassword = savedComponents?.percentEncodedPassword.flatMap { $0.isEmpty ? nil : $0 }
-        let savedQueryPassword = savedComponents?.percentEncodedQueryItems?.last { isPassword($0) && $0.value?.isEmpty == false }?.value
+        let items = components.percentEncodedQueryItems ?? []
+        var typed = Set(items.filter { isTyped(value(of: $0)) }.compactMap(secret(of:)))
+        if components.password.map(isTyped) == true { typed.insert(.password) }
+
+        // The saved secrets a mask may stand for, percent-encoded; the last non-empty parameter is the one that
+        // counts, as in `PostgresConnectionURL`.
+        let savedComponents = postgresComponents(saved)
+        var savedParameters: [Secret: String] = [:]
+        for item in savedComponents?.percentEncodedQueryItems ?? [] {
+            if let kind = secret(of: item), !typed.contains(kind), let value = item.value, !value.isEmpty { savedParameters[kind] = value }
+        }
+        let savedUserPassword = typed.contains(.password) ? nil : savedComponents?.percentEncodedPassword.flatMap { $0.isEmpty ? nil : $0 }
+
         var restored = false
         if let password = components.password, isMask(password) {
             if let savedUserPassword {
                 components.percentEncodedPassword = savedUserPassword
             } else {
-                components.password = savedQueryPassword?.removingPercentEncoding
+                components.password = savedParameters[.password]?.removingPercentEncoding
             }
             if components.password == nil, components.user?.isEmpty == true { components.user = nil }
             restored = true
         }
-        if let items = components.percentEncodedQueryItems, items.contains(where: isMaskedPassword) {
+        if items.contains(where: { secret(of: $0) != nil && isMask(value(of: $0)) }) {
             // The other parameters keep their encoding.
-            let password = savedQueryPassword
-                ?? savedUserPassword?.removingPercentEncoding?.addingPercentEncoding(withAllowedCharacters: queryValueAllowed)
-            let kept = items.compactMap { item in
-                isMaskedPassword(item) ? password.map { URLQueryItem(name: item.name, value: $0) } : item
+            let kept = items.compactMap { item -> URLQueryItem? in
+                guard let kind = secret(of: item), isMask(value(of: item)) else { return item }
+                let replacement = savedParameters[kind] ?? (kind == .password ? savedUserPassword : nil)?
+                    .removingPercentEncoding?.addingPercentEncoding(withAllowedCharacters: queryValueAllowed)
+                return replacement.map { URLQueryItem(name: item.name, value: $0) }
             }
             components.percentEncodedQueryItems = kept.isEmpty ? nil : kept
             restored = true
@@ -397,21 +415,23 @@ enum SettingsDatabaseURL {
         return components
     }
 
-    /// A `password` parameter, whatever its case and encoding.
-    private static func isPassword(_ item: URLQueryItem) -> Bool { isPassword(named: item.name) }
+    /// The secret a query parameter holds, if any, whatever the case and encoding of its name.
+    private static func secret(of item: URLQueryItem) -> Secret? { secret(named: item.name) }
 
-    private static func isPassword(named name: some StringProtocol) -> Bool {
-        (name.removingPercentEncoding ?? String(name)).lowercased() == "password"
+    private static func secret(named name: some StringProtocol) -> Secret? {
+        switch (name.removingPercentEncoding ?? String(name)).lowercased() {
+        case "password": .password
+        case "sslpassword": .sslPassword
+        default: nil
+        }
     }
-
-    private static func isMaskedPassword(_ item: URLQueryItem) -> Bool { isPassword(item) && isMask(value(of: item)) }
 
     /// A query parameter's value, decoded.
     private static func value(of item: URLQueryItem) -> String { item.value.map { $0.removingPercentEncoding ?? $0 } ?? "" }
 
     /// A mask, or what is left of one.
-    private static func isMask(_ password: String) -> Bool { !password.isEmpty && password.allSatisfy { $0 == "•" } }
+    private static func isMask(_ secret: String) -> Bool { !secret.isEmpty && secret.allSatisfy { $0 == "•" } }
 
-    /// A password typed into the field: neither empty nor (what is left of) a mask.
-    private static func isTyped(_ password: String) -> Bool { !password.isEmpty && !isMask(password) }
+    /// A secret typed into the field: neither empty nor (what is left of) a mask.
+    private static func isTyped(_ secret: String) -> Bool { !secret.isEmpty && !isMask(secret) }
 }

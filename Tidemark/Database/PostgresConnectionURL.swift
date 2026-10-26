@@ -125,8 +125,8 @@ struct PostgresConnectionURL: Hashable, Sendable {
         return HostName.isIPv4(lower) && lower.hasPrefix("127.")
     }
 
-    /// Removes the password (in the user info or a `password` query parameter) from a URL string so it
-    /// can be shown or logged.
+    /// Removes the secrets (the password, in the user info or a `password` query parameter, and libpq's
+    /// `sslpassword`) from a URL string so it can be shown or logged.
     static func redact(_ string: String) -> String {
         guard var components = URLComponents(string: string), let scheme = components.scheme?.lowercased(),
               scheme == "postgres" || scheme == "postgresql" else {
@@ -138,8 +138,9 @@ struct PostgresConnectionURL: Hashable, Sendable {
             return (scheme ?? "") + "…" + String(string[at.lowerBound...])
         }
         if components.password != nil { components.password = "•••" }
-        if let items = components.queryItems, items.contains(where: { $0.name.lowercased() == "password" }) {
-            components.queryItems = items.map { $0.name.lowercased() == "password" ? URLQueryItem(name: $0.name, value: "•••") : $0 }
+        let isSecret = { (item: URLQueryItem) in ["password", "sslpassword"].contains(item.name.lowercased()) }
+        if let items = components.queryItems, items.contains(where: isSecret) {
+            components.queryItems = items.map { isSecret($0) ? URLQueryItem(name: $0.name, value: "•••") : $0 }
         }
         // `URLComponents` percent-encodes the dots.
         return components.string?.replacingOccurrences(of: "%E2%80%A2", with: "•") ?? "(invalid URL)"
