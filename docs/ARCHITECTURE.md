@@ -340,7 +340,7 @@ as the badge, written afresh to each new Dock tile.
 
 The window follows the "Three-pane · Native" direction of the design: a Liquid Glass sidebar (Mac menu,
 Capture, Analyze, Monitored Apps, Archived, Surge/PostgreSQL status footer), a content column per page,
-and an inspector beside the Requests page's live table (History has none). Native controls are preferred
+and an inspector beside the Requests page's live and History tables. Native controls are preferred
 for switches, tables (`Table`), search fields and sheets; every segmented choice, though, is Tidemark's own
 `DesignSegmentedControl`, never the system's: on a rounded fill track with no dividers, each choice shows an SF
 Symbol, its title and, where the number is already at hand, a count in a small capsule, and the selected one is
@@ -375,6 +375,20 @@ seconds old they are queried again in the background, with no loading state, and
 Results it does not keep are cleared on a return to the page, as on a first visit, while the Live / History switch
 leaves them up until the new page arrives. The live table takes in the stream at most twice a second (once a second
 while the system asks for reduced resource usage); its filter and the Mac scope apply at once.
+
+The inspector opens on a row of either table, its selection following the keyboard too. Under the connection it
+tells the request's journey through Surge (`RequestsJourney`), each stage at its offset from the start and only when
+something tells about it: how the request reached Surge; the DNS it needed (in rule mode Surge's lookup for rule
+matching and the answer that held, in global proxy mode only that the proxy resolved the name, and in both the remote
+IP shown with where it came from and how old it was); the rule; the hops Surge's record shows (entry, policy groups,
+node and its type, proxy server, the exit IP the egress check saw for that policy, destination; never router hops);
+the connection; and how it ended. Its sources are the request's notes, which stay the source of truth, and the
+records joined to it by host and time (`relatedRecords(of:)`), loaded when the request is shown; node types come
+from one `policy-group list` every ten minutes. Surge's log of the request and links to the first-contact alert,
+the site probe and the egress change around it follow. The timing bar times the wait for the Client Hello, the DNS
+lookup Surge timed and the rest of the setup, which in global proxy mode is Surge's own work rather than a connect.
+`Navigation.openRequests(forHost:)` opens History on one exact host, shown as a removable chip beside the filters,
+and the status filter also finds the requests that ended with an error, which Surge marks completed.
 
 The Domains & IPs page draws its table itself, as the native inset table looks and behaves (header and separators,
 rounded alternate rows continued below the last one, each row one VoiceOver element naming its columns), in one
