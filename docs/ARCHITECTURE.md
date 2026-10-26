@@ -316,9 +316,12 @@ no setting changes either. It is an agent app from launch (`LSUIElement`, set th
 no Dock icon flashes at startup. `DockPresence` makes the activation policy `.regular` (a Dock icon, an app switcher
 entry, Tidemark's menus in the menu bar) while the main window, Settings or the Site Probe window is on screen or
 minimized into the Dock, and `.accessory` again 250 ms after the last of them closes, so moving from one window to
-another never takes the icon away. The menu bar panel, sheets, popovers and alerts do not count, and a hidden app keeps
-its icon. It follows each window's `isVisible` (a window that opens behind other apps posts no occlusion change) and
-the window and app notifications, with no polling. The main window opens at launch, so the Dock icon appears with it.
+another never takes the icon away. The menu bar panel, sheets, popovers and alerts do not count. A hidden app keeps
+its icon while a window that hiding took off screen is still there to come back; once the last of them closes, it
+unhides, with nothing to show, and leaves the Dock. Whether Tidemark is in the Dock is its own record, not
+`NSApp.activationPolicy()`, which can read `.accessory` for a moment right after the app unhides. It follows each
+window's `isVisible` (a window that opens behind other apps posts no occlusion change) and the window and app
+notifications, with no polling. The main window opens at launch, so the Dock icon appears with it.
 Leaving the Dock while active, Tidemark first hands the focus back to the app that was in front before it. Turning
 regular while already active (Tidemark opened again from Finder while it runs in the menu bar, say) leaves the previous
 app's menus in the menu bar, and activating an active app does nothing, so Tidemark lends the activation to the Dock
