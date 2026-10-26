@@ -123,9 +123,10 @@ struct SettingsDatabasePane: View {
     /// This Mac's computer name, the placeholder for "Name this Mac".
     private static let computerName = Host.current().localizedName ?? "Mac"
 
+    /// This Mac first, with its writes since the last refresh, then the others by name.
     private var sortedDevices: [Device] {
         let me = model.devices.thisDeviceID
-        return model.devices.devices.sorted { a, b in
+        return model.devices.devices.map { model.devices.current($0) }.sorted { a, b in
             if (a.id == me) != (b.id == me) { return a.id == me }
             return a.name.localizedStandardCompare(b.name) == .orderedAscending
         }

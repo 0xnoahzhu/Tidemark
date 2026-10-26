@@ -725,14 +725,13 @@ final class CaptureEngine {
         debounce("session-check", .milliseconds(300)) { await $0.checkSurgeSession() }
     }
 
-    /// Keeps this Mac's row ("Writing now", row count) current between device refreshes.
+    /// Keeps this Mac's row ("Writing now", row count) current between device refreshes. Counted apart from
+    /// `devices`, so a flush updates only the views that show these counters, not every view that reads the Macs.
     private func touchThisDevice(lastWriteAt: Date?, inserted: Int64) {
-        let id = thisDeviceID
-        guard let index = model.devices.devices.firstIndex(where: { $0.id == id }) else { return }
-        var device = model.devices.devices[index]
-        if let lastWriteAt, device.lastWriteAt.map({ $0 < lastWriteAt }) ?? true { device.lastWriteAt = lastWriteAt }
-        device.rowCount += inserted
-        if device != model.devices.devices[index] { model.devices.devices[index] = device }
+        var writes = model.devices.thisDeviceWrites
+        if let lastWriteAt, writes.lastWriteAt.map({ $0 < lastWriteAt }) ?? true { writes.lastWriteAt = lastWriteAt }
+        writes.rows += inserted
+        if writes != model.devices.thisDeviceWrites { model.devices.thisDeviceWrites = writes }
     }
 
     /// New alerts: into the Notifications list (whichever Mac found them) and as system notifications, the ones
@@ -842,6 +841,8 @@ final class CaptureEngine {
            devices[index].lastWriteAt.map({ $0 < written }) ?? true {
             devices[index].lastWriteAt = written
         }
+        // The table counts the rows written so far.
+        if model.devices.thisDeviceWrites.rows != 0 { model.devices.thisDeviceWrites.rows = 0 }
         if devices != model.devices.devices { model.devices.devices = devices }
     }
 

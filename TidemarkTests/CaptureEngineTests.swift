@@ -495,18 +495,29 @@ struct CaptureEngineTests {
         #expect(await engine.pipeline.isMonitoring(app.id), "attribution and first contact go on")
     }
 
-    @Test func keepsTheRecordingMacsActivityFresh() {
-        let (engine, model) = makeEngine()
+    /// A write flush (about once a second) keeps this Mac's counters current without rewriting the Mac list, which
+    /// almost every page reads; the next read of the list from the database counts those rows itself.
+    @Test func keepsTheRecordingMacsActivityFresh() async throws {
+        let database = CaptureFakeDatabase()
+        let (engine, model) = makeEngine(database: database)
         let me = model.preferences.thisDeviceID
         let then = Date(timeIntervalSince1970: 1_792_000_000)
-        model.devices.devices = [Device(id: me, name: "Mac", model: nil, shortName: "Mac", hue: 240, rowCount: 10,
-                                        lastWriteAt: then, createdAt: then)]
+        let stored = Device(id: me, name: "Mac", model: nil, shortName: "Mac", hue: 240, rowCount: 10, lastWriteAt: then, createdAt: then)
+        model.devices.devices = [stored]
         var update = CaptureUIUpdate()
         update.rowsWritten = 3
         update.lastWriteAt = then.addingTimeInterval(60)
         engine.apply(update, now: then.addingTimeInterval(60))
-        #expect(model.devices.thisDevice?.rowCount == 13)
-        #expect(model.devices.thisDevice?.activity(now: then.addingTimeInterval(61)) == .writingNow)
+        #expect(model.devices.devices == [stored], "the Mac list is left alone")
+        let current = try #require(model.devices.thisDevice.map(model.devices.current))
+        #expect(current.rowCount == 13)
+        #expect(current.activity(now: then.addingTimeInterval(61)) == .writingNow)
+
+        var counted = stored
+        counted.rowCount = 13
+        await database.setDevices([counted])
+        #expect(await engine.connectDatabase())
+        #expect(model.devices.thisDevice.map(model.devices.current)?.rowCount == 13, "the rows are not counted twice")
     }
 }
 
