@@ -360,7 +360,8 @@ private struct AppDetailCardSpace: Layout {
 }
 
 /// A card's way in: its space starts empty and grows to the whole card. The card is clipped to its space, so it is
-/// never drawn over its row or the rows above.
+/// never drawn over its row or the rows above, and takes clicks only inside it: a clip only hides the rest of the card,
+/// which would still take the clicks meant for those rows while the card slides.
 ///
 /// It only plays on the way in. SwiftUI takes a view out of the layout as soon as its removal starts, so on the way
 /// out the rows below would move up on their own, under a card left where it was. A card is removed only once its
@@ -369,6 +370,7 @@ private struct AppDetailCardEntrance: Transition {
     func body(content: Content, phase: TransitionPhase) -> some View {
         AppDetailCardSpace(fraction: phase.isIdentity ? 1 : 0) { content }
             .clipShape(Uncovered())
+            .contentShape(Rectangle())
     }
 
     /// The card's space, from the row's bottom edge down, with room at the sides and bottom for the card's shadow.
