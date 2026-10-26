@@ -44,8 +44,8 @@ struct CaptureSourceRecord: Codable, Hashable, Sendable {
     }
 }
 
-/// First-contact work (inventory entries, alert drafts, touches, sources, process chains, alerts) that
-/// was still queued when Tidemark quit without a database; written after the next launch's spool replay.
+/// First-contact work (inventory entries, alert drafts, touches, sources, process chains, alerts) and DNS answers
+/// that were still queued when Tidemark quit without a database; written after the next launch's spool replay.
 struct CaptureAuxiliaryFile: Codable, Sendable {
     var chains: [CaptureWriteBuffer.ChainWrite] = []
     var newHosts: [AppHost] = []
@@ -53,6 +53,8 @@ struct CaptureAuxiliaryFile: Codable, Sendable {
     var touches: [AppHost] = []
     var sources: [CaptureSourceRecord] = []
     var alerts: [AlertItem] = []
+    /// Optional: the files of earlier versions have none.
+    var dnsAnswers: [DNSAnswer]? = nil
 
     init(_ batch: CaptureWriteBuffer.Batch) {
         chains = batch.chains
@@ -61,6 +63,7 @@ struct CaptureAuxiliaryFile: Codable, Sendable {
         touches = batch.touches
         sources = batch.sources.map(CaptureSourceRecord.init)
         alerts = batch.alerts
+        dnsAnswers = batch.dnsAnswers.isEmpty ? nil : batch.dnsAnswers
     }
 
     var batch: CaptureWriteBuffer.Batch {
@@ -71,6 +74,7 @@ struct CaptureAuxiliaryFile: Codable, Sendable {
         batch.touches = touches
         batch.sources = sources.map(\.touch)
         batch.alerts = alerts
+        batch.dnsAnswers = dnsAnswers ?? []
         return batch
     }
 
@@ -81,6 +85,8 @@ struct CaptureAuxiliaryFile: Codable, Sendable {
         touches = Array((touches + other.touches).prefix(limit))
         sources = Array((sources + other.sources).prefix(limit))
         alerts = Array((alerts + other.alerts).prefix(limit))
+        let answers = (dnsAnswers ?? []) + (other.dnsAnswers ?? [])
+        dnsAnswers = answers.isEmpty ? nil : Array(answers.prefix(limit))
     }
 }
 

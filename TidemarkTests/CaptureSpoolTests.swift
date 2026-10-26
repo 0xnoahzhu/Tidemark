@@ -171,6 +171,30 @@ struct CaptureSpoolTests {
         #expect(replayed == [detailed])
     }
 
+    @Test func keepsDNSAnswersAcrossAQuitWithoutDatabase() throws {
+        let temp = CaptureTempDirectory()
+        let sidecar = CaptureSidecar(directory: temp.url)
+        let earlier = UUID()
+        var batch = CaptureWriteBuffer.Batch()
+        batch.dnsAnswers = [DNSAnswer(deviceID: earlier, domain: "proxycheck.io", resolvedAt: Date(timeIntervalSince1970: 1_793_000_000),
+                                      server: "https://cloudflare-dns.com/dns-query", addresses: ["104.26.8.187"], byTidemark: true)]
+        sidecar.saveAuxiliary(batch)
+        sidecar.saveAuxiliary(batch)
+        let restored = try #require(sidecar.takeAuxiliary())
+        #expect(restored.dnsAnswers.count == 2 && restored.dnsAnswers.first == batch.dnsAnswers.first)
+        #expect(restored.recorded(as: device).dnsAnswers.allSatisfy { $0.deviceID == device }, "written under this Mac's current ID")
+        #expect(restored.deviceIDs == [earlier])
+
+        // A file of an earlier version has no DNS answers.
+        batch = CaptureWriteBuffer.Batch()
+        batch.sources = [HostSourceTouch(kind: .domain, value: "a.com", deviceID: device, sourcePath: "/usr/bin/curl", sourceTitle: "curl",
+                                         appID: nil, bundlePath: nil, seenAt: .distantPast, requestDelta: 1, geo: nil)]
+        sidecar.saveAuxiliary(batch)
+        let saved = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: sidecar.auxiliaryURL)) as? [String: Any])
+        #expect(saved["dnsAnswers"] == nil)
+        #expect(sidecar.takeAuxiliary()?.sources.count == 1)
+    }
+
     @Test func appendsDuringReplayGoToANewSegment() throws {
         let temp = CaptureTempDirectory()
         var spool = CaptureSpool(directory: temp.url, limit: 100, segmentSize: 50)

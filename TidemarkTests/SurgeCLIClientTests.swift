@@ -160,7 +160,7 @@ struct SurgeCLIClientTests {
         for try await event in cli.client().events() {
             if case .other(let line) = event { lines.append(line) }
         }
-        #expect(lines == ["--raw watch request request-update real-time-speed environment reload shutdown"])
+        #expect(lines == ["--raw watch request request-update real-time-speed dns environment reload shutdown"])
     }
 
     @Test func failsTheStreamWithStandardErrorOnNonZeroExit() async throws {

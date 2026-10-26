@@ -6,12 +6,15 @@ import Foundation
 /// expiry says its answer holds, and every other hostname is looked up (`dns lookup`), so no request is given an
 /// address that expired hours ago.
 extension CapturePipeline {
-    /// Reads Surge's DNS cache (`dump dns`) and fills waiting requests. An answer counts until Surge's `expiresTime`
-    /// (Surge keeps expired answers listed for hours); a static mapping of its profile never expires. An answer of
-    /// Tidemark's own lookup keeps its label while Surge reports the same addresses, and a cached answer keeps the time
-    /// Tidemark first saw it until Surge resolves it again (a new expiry).
+    /// Reads Surge's DNS cache (`dump dns`), completes the DNS answers waiting since their `dns` events and fills
+    /// waiting requests. An answer counts until Surge's `expiresTime` (Surge keeps expired answers listed for hours); a
+    /// static mapping of its profile never expires. An answer of Tidemark's own lookup keeps its label while Surge
+    /// reports the same addresses. A cached answer was resolved when its `dns` event arrived, or else (Surge resolved
+    /// it before Tidemark listened) no later than the read that first showed it, until Surge resolves it again (a
+    /// new expiry).
     func refreshDNSCache(now: Date = .now) async {
         guard let records = try? await surge.dnsCache() else { return }
+        completeDNSAnswers(records, now: now)
         for record in records {
             let expires = record.expires ?? .distantFuture
             guard expires > now else { continue }
@@ -19,8 +22,9 @@ extension CapturePipeline {
                current.source != .surgeCache || abs(current.expires.timeIntervalSince(expires)) < 1 {
                 continue
             }
+            let answered = latestDNSAnswers[record.domain].flatMap { $0.addresses == Set(record.addresses) ? $0.at : nil }
             dnsCache[record.domain] = ResolvedHost(ips: record.addresses, expires: expires, source: .surgeCache,
-                                                  resolvedAt: record.isLocal ? nil : now)
+                                                  resolvedAt: record.isLocal ? nil : answered ?? now)
         }
         dnsCache = dnsCache.filter { $0.value.expires > now }
         for host in Array(waitingForHost.keys) {
@@ -76,6 +80,7 @@ extension CapturePipeline {
 
     private func didLookup(host: String, result: SurgeDNSLookup?, now: Date = .now) {
         dnsInFlight.remove(host)
+        finishedLookups[host] = now
         if let result, !result.addresses.isEmpty {
             let ttl = min(3600, max(60, result.expiresIn ?? 0))
             let resolved = ResolvedHost(ips: result.addresses, expires: now.addingTimeInterval(ttl), source: .tidemarkLookup, resolvedAt: now)

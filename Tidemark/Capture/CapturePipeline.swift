@@ -164,6 +164,10 @@ actor CapturePipeline {
     /// Requests an empty `dump active` listing may end at most. More than that still active (in this pipeline
     /// or in PostgreSQL) is likelier a listing that failed than that many connections ending together.
     let emptyListingLimit = 20
+    /// A DNS answer no `dump dns` read completed (read every 30 s) is written as its event had it after this long.
+    let dnsAnswerWait: TimeInterval = 75
+    /// A `dns` event this soon after Tidemark's own lookup of the domain ended is that lookup's.
+    let ownLookupWindow: TimeInterval = 10
 
     // Dependencies
     var database: any TidemarkDatabase
@@ -237,6 +241,14 @@ actor CapturePipeline {
     var geoQueue: [String] = []
     var geoInFlight: Set<String> = []
     var waitingForGeo: [String: Set<Int64>] = [:]
+
+    // DNS answers
+    /// Answers of Surge's `dns` events waiting for a `dump dns` read to complete them, oldest first.
+    var pendingDNSAnswers: [DNSAnswer] = []
+    /// Hosts whose lookup by Tidemark ended lately → when: their `dns` events may arrive after the lookup's reply.
+    var finishedLookups: [String: Date] = [:]
+    /// The latest answer of each domain's `dns` events: when Surge resolved it to these addresses.
+    var latestDNSAnswers: [String: (addresses: Set<String>, at: Date)] = [:]
 
     // Writes
     var buffer: CaptureWriteBuffer
@@ -492,6 +504,7 @@ actor CapturePipeline {
             switch event {
             case .request(let request): ingest(request, now: now)
             case .speed(let speed): pending.speed = speed
+            case .dns(let answer): recordDNSAnswer(answer, now: now)
             case .environmentChanged: pending.signals.append(.environmentChanged)
             case .reload: pending.signals.append(.reload)
             case .shutdown: pending.signals.append(.shutdown)
@@ -931,6 +944,7 @@ actor CapturePipeline {
         processContacts(now: now, only: nil)
         if now.timeIntervalSince(lastScan) >= 1 {
             scanForRewrites(now: now)
+            queueDNSAnswers(olderThan: now.addingTimeInterval(-dnsAnswerWait))
             lastScan = now
         }
         if now.timeIntervalSince(lastEviction) >= 5 {
@@ -966,6 +980,7 @@ actor CapturePipeline {
         for _ in 0..<(final ? 20 : 100) where isFlushing { try? await Task.sleep(for: .milliseconds(50)) }
         if final {
             retireEntries(closingAt: nil, now: now)
+            queueDNSAnswers(olderThan: .distantFuture)
         } else {
             processContacts(now: now.addingTimeInterval(contactGrace), only: nil)
             for id in Array(entries.keys) {
@@ -1073,6 +1088,8 @@ actor CapturePipeline {
         }
         dnsFailures = dnsFailures.filter { $0.value > now }
         geoFailures = geoFailures.filter { $0.value > now }
+        finishedLookups = finishedLookups.filter { now.timeIntervalSince($0.value) < ownLookupWindow }
+        latestDNSAnswers = latestDNSAnswers.filter { now.timeIntervalSince($0.value.at) < 3_600 }
         awaitingInventory = awaitingInventory.filter { $0.value > now }
         inventoryLoadAfter = inventoryLoadAfter.filter { awaitingInventory[$0.key] != nil }
     }

@@ -5,7 +5,7 @@ PostgreSQL, rolls each request up to the app that caused it, and alerts when a m
 domain or IP it has never used before.
 
 ```
- surge-cli --raw watch request request-update real-time-speed environment reload shutdown
+ surge-cli --raw watch request request-update real-time-speed dns environment reload shutdown
         │  (one JSON object per line)
         ▼
  SurgeCLIClient ──► CaptureEngine ──► CaptureWriteBuffer ──► PostgresDatabase ──► PostgreSQL
@@ -47,12 +47,15 @@ Tidemark reads this Mac's Surge only; there is no remote Surge. A remote control
 in the login keychain (`io.tidemark.Tidemark` / `surge.remote.password`) is never read or deleted; users can
 delete it in Keychain Access. A stream that ends or fails is always restarted, with backoff.
 
-* **Stream** — `watch request request-update real-time-speed environment reload shutdown`. First line is
+* **Stream** — `watch request request-update real-time-speed dns environment reload shutdown`. First line is
   `{"result":"Event subscribed"}`. `request` and `request-update` events have the same shape
   (`SurgeRequest`) and carry no event name: a request is *new* the first time its `id` is seen.
   `request-update` fires about once per second for every active connection (~100 events/s on a busy
   Mac), so updates are coalesced in memory. Speed events look like
-  `{"in":23416,"out":1140,"downloadSpeedHistory":[…],"uploadSpeedHistory":[…]}`.
+  `{"in":23416,"out":1140,"downloadSpeedHistory":[…],"uploadSpeedHistory":[…]}`. A `dns` event
+  (`{"domain":…,"server":…,"interface":"","data":[IPs]}`, a few a minute) is a resolution Surge's DNS made; the
+  next `dump dns` read completes it with the CNAME path, log line, time and expiry, and it is stored in
+  `dns_answers`, marked when Tidemark's own lookup caused it ([DATABASE.md › Request details](DATABASE.md#request-details)).
 * **Sessions** — request IDs restart when the Surge engine restarts. `status` → `start-time` (seconds)
   is the session key; the DB key is `(device_id, surge_session_ms, surge_id)`.
 * **Backfill** — on (re)connect, `dump recent` returns the last 200 requests with full details, and `dump active`

@@ -569,6 +569,13 @@ actor CaptureFakeDatabase: TidemarkDatabase {
         egressChangeList.insert(c, at: 0)
     }
     func egressChanges(deviceID: DeviceID, limit: Int) async throws -> [EgressChange] { try check(); return egressChangeList }
+
+    /// Every DNS answer written, in order.
+    var dnsAnswersSaved: [DNSAnswer] = []
+    func saveDNSAnswers(_ answers: [DNSAnswer]) async throws {
+        try check()
+        dnsAnswersSaved.append(contentsOf: answers)
+    }
 }
 
 /// Waits with a deadline in the capture tests: work that never finishes fails its test at once instead of hanging

@@ -26,7 +26,7 @@ struct SurgeEndpoint: Hashable, Sendable, Codable {
 protocol SurgeClient: Sendable {
     var endpoint: SurgeEndpoint { get }
 
-    /// Long-running subscription to `request`, `request-update`, `real-time-speed`, `environment`,
+    /// Long-running subscription to `request`, `request-update`, `real-time-speed`, `dns`, `environment`,
     /// `reload` and `shutdown` events. The stream finishes when the child process exits; callers
     /// reconnect with backoff.
     func events() -> AsyncThrowingStream<SurgeEvent, Error>

@@ -17,8 +17,9 @@ struct SurgeCLIClient: SurgeClientDetails {
         var killGrace: Duration = .seconds(2)
     }
 
-    /// Events subscribed by `events()`. All six are accepted by Surge 6.10 (it ignores names it does not know).
-    static let watchedEvents = ["request", "request-update", "real-time-speed", "environment", "reload", "shutdown"]
+    /// Events subscribed by `events()`. All seven are accepted by Surge 6.10 (it ignores names it does not know);
+    /// `dns` adds a line per resolution Surge's DNS makes (a few a minute).
+    static let watchedEvents = ["request", "request-update", "real-time-speed", "dns", "environment", "reload", "shutdown"]
 
     let endpoint: SurgeEndpoint
     let timeouts: Timeouts

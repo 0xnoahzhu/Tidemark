@@ -1,12 +1,13 @@
 import Foundation
 
-/// Classifies the lines of `surge-cli --raw watch request request-update real-time-speed environment reload shutdown`.
+/// Classifies the lines of `surge-cli --raw watch request request-update real-time-speed dns environment reload shutdown`.
 ///
 /// Events carry no name: surge-cli prints each event's payload as one JSON object per line, so lines are
 /// told apart by their keys.
 /// * `{"result":"Event subscribed"}` → `.subscribed`
 /// * an object with `id` and `remoteHost` or `URL` → `.request` (`request` and `request-update` share the shape)
 /// * an object with `in`, `out` and a speed history → `.speed`
+/// * an object with `domain`, `server` and `data` but no `id` → `.dns`
 /// * environment keys (`ProxyMode`, `ProxyGroupSelection`, …) or an `environment` event name → `.environmentChanged`
 /// * a `reload` / `shutdown` key or event name → `.reload` / `.shutdown`
 ///
@@ -35,6 +36,10 @@ enum SurgeLineParser {
         if keys.contains("in"), keys.contains("out"), keys.contains("downloadSpeedHistory") || keys.contains("uploadSpeedHistory") {
             guard let speed = try? decoder.decode(SurgeSpeed.self, from: line) else { return .other(text(line)) }
             return .speed(speed)
+        }
+        if !keys.contains("id"), keys.contains("domain"), keys.contains("server"), keys.contains("data") {
+            guard let answer = try? decoder.decode(SurgeDNSEvent.self, from: line) else { return .other(text(line)) }
+            return .dns(answer)
         }
         if name == "environment" || !keys.isDisjoint(with: environmentKeys) {
             return .environmentChanged

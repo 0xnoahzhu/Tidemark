@@ -147,6 +147,19 @@ struct SurgeDNSLookup: Decodable, Sendable, Hashable {
     var addresses: [String] { (v4Addresses ?? []) + (v6Addresses ?? []) }
 }
 
+/// `dns` watch event: a resolution Surge's DNS just made, e.g. `{"data":["104.26.8.187","172.67.75.219"],
+/// "interface":"","domain":"proxycheck.io","server":"https://cloudflare-dns.com/dns-query"}`. No request ID: Surge
+/// resolves a domain once for every request that needs it while the answer lasts.
+struct SurgeDNSEvent: Decodable, Sendable, Hashable {
+    var domain: String
+    var server: String?
+    var interface: String?
+    var data: [String]?
+
+    /// The answer's IP addresses, in Surge's order.
+    var addresses: [String] { (data ?? []).filter(HostName.isIPAddress) }
+}
+
 /// One entry of `surge-cli --raw dump dns`: an answer in Surge's DNS cache (`dnsCache`), or a static mapping of its
 /// profile (`local`). Surge keeps expired answers listed for hours, so `expires` decides whether one still holds.
 struct SurgeDNSRecord: Sendable, Hashable {
@@ -200,13 +213,15 @@ struct SurgeRuleMatch: Decodable, Sendable, Hashable {
     var rule: String?
 }
 
-/// Events delivered by `surge-cli --raw watch request request-update real-time-speed …`.
+/// Events delivered by `surge-cli --raw watch request request-update real-time-speed dns …`.
 enum SurgeEvent: Sendable {
     /// `{"result":"Event subscribed"}`
     case subscribed
     /// A new request or an update of a known one (same shape; distinguish by ID).
     case request(SurgeRequest)
     case speed(SurgeSpeed)
+    /// Surge's DNS resolved a domain.
+    case dns(SurgeDNSEvent)
     /// The outbound mode, a policy-group selection or another environment key changed.
     case environmentChanged
     /// The profile was reloaded.

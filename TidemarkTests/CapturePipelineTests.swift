@@ -302,6 +302,63 @@ struct CapturePipelineTests {
         #expect(row.entryMode == 40 && row.modified == false)
     }
 
+    @Test func recordsDNSAnswersCompletedByTheNextDumpDNSRead() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let surge = CaptureFakeSurge()
+        // `dump dns` as it read after the events (Surge Mac 6.10).
+        let dump = try SurgeOutputParser.dnsCache(from: SurgeFixtures.data("surge-dump-dns-answers.json"), command: "dump dns")
+        surge.update {
+            $0.dnsCache = dump
+            $0.dns["proxycheck.io"] = ["104.26.8.187", "104.26.9.187", "172.67.75.219"]
+        }
+        let pipeline = makePipeline(database: database, surge: surge, spoolDirectory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        let events = try SurgeFixtures.lines("surge-watch-dns.jsonl").compactMap { line -> SurgeDNSEvent? in
+            if case .dns(let event) = SurgeLineParser.event(from: line) { return event }
+            return nil
+        }
+        let start = Date.now
+
+        // Tidemark looks up the proxied host itself: Surge's answer to that lookup is marked as Tidemark's.
+        await pipeline.ingest(CaptureFixtures.request(id: 1, host: "proxycheck.io", processPath: ownExecutable, remoteAddress: "203.0.113.10 (Proxy)"),
+                              now: start)
+        #expect(await eventually {
+            let inFlight = await pipeline.dnsInFlight
+            return surge.snapshot.dnsLookups == ["proxycheck.io"] && !inFlight.contains("proxycheck.io")
+        })
+        for event in events { await pipeline.recordDNSAnswer(event, now: start.addingTimeInterval(0.2)) }
+        var unmatched = events[1]
+        unmatched.domain = "Resolved-Again.example."
+        await pipeline.recordDNSAnswer(unmatched, now: start.addingTimeInterval(0.3))
+
+        // Nothing is written before a read completes the answers.
+        await pipeline.tick(now: start.addingTimeInterval(1))
+        #expect(await database.dnsAnswersSaved.isEmpty)
+        await pipeline.refreshDNSCache(now: start.addingTimeInterval(20))
+        await pipeline.tick(now: start.addingTimeInterval(21))
+        let saved = await database.dnsAnswersSaved
+        #expect(saved.map(\.domain) == ["proxycheck.io", "www.qualcomm.cn"])
+        let proxycheck = try #require(saved.first)
+        #expect(proxycheck.byTidemark && proxycheck.deviceID == device)
+        #expect(proxycheck.resolvedAt == start.addingTimeInterval(0.2) && proxycheck.server == "https://cloudflare-dns.com/dns-query")
+        #expect(proxycheck.interface == nil && proxycheck.addresses == ["104.26.8.187", "104.26.9.187", "172.67.75.219"])
+        #expect(proxycheck.log == "318.73ms Receive an A answer from https://cloudflare-dns.com/dns-query")
+        #expect(proxycheck.timeCostMs.map { abs($0 - 318.75) < 0.001 } == true)
+        #expect(proxycheck.expiresAt == Date(timeIntervalSince1970: 1793009567.9200711))
+        let qualcomm = try #require(saved.last)
+        #expect(!qualcomm.byTidemark, "Surge resolved it for someone else")
+        #expect(qualcomm.path == "www.qualcomm.cn -> www.qualcomm.cn.cdn.cloudflare.net -> 172.64.144.37, 104.18.43.219")
+
+        // An answer no read matches is written as its event had it, a little over a minute later.
+        await pipeline.tick(now: start.addingTimeInterval(60))
+        #expect(await database.dnsAnswersSaved.count == 2)
+        await pipeline.tick(now: start.addingTimeInterval(80))
+        let late = try #require(await database.dnsAnswersSaved.last)
+        #expect(await database.dnsAnswersSaved.count == 3)
+        #expect(late.domain == "resolved-again.example" && late.path == nil && late.expiresAt == nil && !late.byTidemark)
+    }
+
     @Test func matchesProbeConnectionsBySourcePort() async throws {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()

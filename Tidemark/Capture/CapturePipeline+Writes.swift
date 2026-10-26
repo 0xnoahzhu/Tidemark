@@ -61,6 +61,8 @@ extension CapturePipeline {
             try await writeSources(&batch, deadline: deadline)
             inFlightBatch = batch
             try await writeAlerts(&batch, deadline: deadline)
+            inFlightBatch = batch
+            try await writeDNSAnswers(&batch, deadline: deadline)
         } catch {
             spoolRows(batch.requests)
             batch.requests = []
@@ -285,6 +287,20 @@ extension CapturePipeline {
         batch.alerts = []
     }
 
+    private func writeDNSAnswers(_ batch: inout CaptureWriteBuffer.Batch, deadline: ContinuousClock.Instant) async throws {
+        guard !batch.dnsAnswers.isEmpty else { return }
+        let answers = batch.dnsAnswers
+        let database = self.database
+        do {
+            try await write(until: deadline) { try await database.saveDNSAnswers(answers) }
+        } catch is CaptureWriteRejection {
+            _ = try await individually(answers, label: "DNS answers") { answer in
+                try await write(until: deadline) { try await database.saveDNSAnswers([answer]) }
+            }
+        }
+        batch.dnsAnswers = []
+    }
+
     /// Stores row IDs and write times back into live rows; counts the rows PostgreSQL inserted.
     func didWrite(_ rows: [RequestRecord], ids: [RequestKey: Int64], inserted: Int, now: Date) {
         for row in rows {
@@ -446,11 +462,12 @@ extension CaptureWriteBuffer.Batch {
         ids.formUnion(touches.compactMap(\.firstDeviceID))
         ids.formUnion(sources.map(\.deviceID))
         ids.formUnion(alerts.map(\.deviceID))
+        ids.formUnion(dnsAnswers.map(\.deviceID))
         return ids
     }
 
-    /// The same work as `device`'s: its process chains, host sources and alerts, the requests its alert drafts
-    /// belong to and the first Mac of its inventory entries (see `CapturePipeline.ownedByThisDevice`).
+    /// The same work as `device`'s: its process chains, host sources, alerts and DNS answers, the requests its alert
+    /// drafts belong to and the first Mac of its inventory entries (see `CapturePipeline.ownedByThisDevice`).
     func recorded(as device: DeviceID) -> Self {
         var batch = self
         for index in batch.chains.indices { batch.chains[index].deviceID = device }
@@ -459,6 +476,7 @@ extension CaptureWriteBuffer.Batch {
         for index in batch.touches.indices where batch.touches[index].firstDeviceID != nil { batch.touches[index].firstDeviceID = device }
         for index in batch.sources.indices { batch.sources[index].deviceID = device }
         for index in batch.alerts.indices { batch.alerts[index].deviceID = device }
+        for index in batch.dnsAnswers.indices { batch.dnsAnswers[index].deviceID = device }
         return batch
     }
 }

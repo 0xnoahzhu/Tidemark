@@ -37,6 +37,33 @@ struct SurgeLineParserTests {
         #expect(updated.startDate == 1792871241.320689)
     }
 
+    @Test func classifiesDNSEvents() throws {
+        // Recorded with `surge-cli --raw watch dns` (Surge Mac 6.10).
+        let events = try SurgeFixtures.lines("surge-watch-dns.jsonl").map(SurgeLineParser.event(from:))
+        try #require(events.count == 3)
+        guard case .subscribed = events[0] else { Issue.record("expected .subscribed, got \(events[0])"); return }
+        guard case .dns(let proxycheck) = events[1], case .dns(let qualcomm) = events[2] else {
+            Issue.record("expected .dns, got \(events[1]), \(events[2])")
+            return
+        }
+        #expect(proxycheck.domain == "proxycheck.io")
+        #expect(proxycheck.server == "https://cloudflare-dns.com/dns-query")
+        #expect(proxycheck.interface == "")
+        #expect(proxycheck.addresses == ["104.26.8.187", "104.26.9.187", "172.67.75.219"])
+        #expect(qualcomm.domain == "www.qualcomm.cn" && qualcomm.addresses == ["172.64.144.37", "104.18.43.219"])
+
+        // Only addresses count; a request record that names a domain stays a request.
+        guard case .dns(let mixed) = SurgeLineParser.event(from: #"{"domain":"a.test","server":"system","data":["10.0.0.1","alias.test"]}"#) else {
+            Issue.record("expected .dns")
+            return
+        }
+        #expect(mixed.addresses == ["10.0.0.1"])
+        guard case .request = SurgeLineParser.event(from: #"{"id":1,"remoteHost":"a.test:443","domain":"a.test","server":"x","data":[]}"#) else {
+            Issue.record("expected .request")
+            return
+        }
+    }
+
     @Test(arguments: [
         #"{"ProxyGroupSelection":{"AI":"AT&T-RackNerd-SNELL"}}"#,
         #"{"ProxyMode":2}"#,

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Batches database writes: request rows (coalesced by key), process chains, inventory entries,
-/// inventory touches, global host sources and alerts.
+/// inventory touches, global host sources, alerts and DNS answers.
 ///
 /// A batch is due every `batchRows` request rows or `batchInterval` seconds, whichever comes first.
 /// Auxiliary queues (everything except requests) are capped so a long outage cannot grow memory
@@ -24,12 +24,13 @@ struct CaptureWriteBuffer {
         var touches: [AppHost] = []
         var sources: [HostSourceTouch] = []
         var alerts: [AlertItem] = []
+        var dnsAnswers: [DNSAnswer] = []
 
         var isEmpty: Bool { requests.isEmpty && auxiliaryIsEmpty }
 
         /// Nothing but request rows (or nothing at all).
         var auxiliaryIsEmpty: Bool {
-            chains.isEmpty && newHosts.isEmpty && drafts.isEmpty && touches.isEmpty && sources.isEmpty && alerts.isEmpty
+            chains.isEmpty && newHosts.isEmpty && drafts.isEmpty && touches.isEmpty && sources.isEmpty && alerts.isEmpty && dnsAnswers.isEmpty
         }
     }
 
@@ -49,6 +50,7 @@ struct CaptureWriteBuffer {
     private var touchOrder: [String] = []
     private var sources: [String: HostSourceTouch] = [:]
     private var sourceOrder: [String] = []
+    private var dnsAnswers: [DNSAnswer] = []
 
     init(batchRows: Int, batchInterval: TimeInterval, auxiliaryLimit: Int = 50_000, now: Date = .now) {
         self.batchRows = max(1, batchRows)
@@ -63,7 +65,7 @@ struct CaptureWriteBuffer {
     var isEmpty: Bool { order.isEmpty && auxiliaryIsEmpty }
 
     var auxiliaryIsEmpty: Bool {
-        chains.isEmpty && newHosts.isEmpty && drafts.isEmpty && alerts.isEmpty && touches.isEmpty && sources.isEmpty
+        chains.isEmpty && newHosts.isEmpty && drafts.isEmpty && alerts.isEmpty && touches.isEmpty && sources.isEmpty && dnsAnswers.isEmpty
     }
 
     /// Inventory entries queued for insertion (still optimistic: not in the database yet).
@@ -103,6 +105,11 @@ struct CaptureWriteBuffer {
     mutating func add(alert: AlertItem) {
         guard alerts.count < auxiliaryLimit else { return }
         alerts.append(alert)
+    }
+
+    mutating func add(dnsAnswer: DNSAnswer) {
+        guard dnsAnswers.count < auxiliaryLimit else { return }
+        dnsAnswers.append(dnsAnswer)
     }
 
     /// Aggregates inventory touches per `(app, kind, value)`.
@@ -165,6 +172,7 @@ struct CaptureWriteBuffer {
         batch.alerts = alerts
         batch.touches = touchOrder.compactMap { touches[$0] }
         batch.sources = sourceOrder.compactMap { sources[$0] }
+        batch.dnsAnswers = dnsAnswers
         chains.removeAll()
         newHosts.removeAll()
         drafts.removeAll()
@@ -173,6 +181,7 @@ struct CaptureWriteBuffer {
         touchOrder.removeAll()
         sources.removeAll()
         sourceOrder.removeAll()
+        dnsAnswers.removeAll()
         return batch
     }
 
@@ -186,6 +195,7 @@ struct CaptureWriteBuffer {
         newHosts = Array((batch.newHosts + newHosts).prefix(auxiliaryLimit))
         drafts = Array((batch.drafts + drafts).prefix(auxiliaryLimit))
         alerts = Array((batch.alerts + alerts).prefix(auxiliaryLimit))
+        dnsAnswers = Array((batch.dnsAnswers + dnsAnswers).prefix(auxiliaryLimit))
         let queuedTouches = touchOrder.compactMap { touches[$0] }
         touches.removeAll()
         touchOrder.removeAll()
