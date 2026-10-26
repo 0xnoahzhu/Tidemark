@@ -539,6 +539,20 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(site.map { InventoryRequests.hosts(of: $0) } == [["api.github.com", "github.com"], ["api.notion.com"]])
     }
 
+    @Test func anAppsRowOffersWhatTheTabLists() {
+        let now = Date()
+        let hosts = [
+            host("api.github.com", now: now),
+            host("github.com", now: now),
+            host("api.notion.com", now: now),
+            host("20.205.243.166", kind: .ip, hosts: ["github.com"], now: now),
+        ]
+        #expect(InventoryRequests.hosts(of: hosts[3]) == ["20.205.243.166"])
+        // A site offers the domains the search keeps.
+        let summary = AppDetailInventorySummary(hosts: hosts, search: "api", now: now, site: naiveSite)
+        #expect(summary.groups.map { InventoryRequests.hosts(of: $0) } == [["api.github.com"], ["api.notion.com"]])
+    }
+
     @Test func opensHistoryAllTimeAndOnAnAppsPageForTheApp() {
         let nav = Navigation()
         nav.open(.inventory)

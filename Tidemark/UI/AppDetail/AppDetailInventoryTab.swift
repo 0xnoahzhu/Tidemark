@@ -3,7 +3,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// "Domains & IPs" tab of a monitored app: every domain (grouped by site) and every IP it used, each
-/// listed once, with a search field and CSV export. Selecting a domain highlights the IPs it resolved to.
+/// listed once, with a search field and CSV export. Selecting a domain highlights the IPs it resolved to. A row's count
+/// and context menu open the app's requests to that host in History, filtered to the app as the count is.
 ///
 /// The tab shows what it showed last for the app (`AppDetailCache`) right after its first frame and reads the
 /// database again in the background; the summary is computed off the main actor, and only when the hosts, the
@@ -208,7 +209,7 @@ struct AppDetailInventoryTab: View {
                         ForEach(summary.groups) { group in
                             siteRow(group, showsFirstSeen: showsFirstSeen)
                             ForEach(group.hosts) { host in
-                                AppDetailDomainRow(host: host, selected: selected == host.value, showsFirstSeen: showsFirstSeen)
+                                AppDetailDomainRow(appID: app.id, host: host, selected: selected == host.value, showsFirstSeen: showsFirstSeen)
                             }
                         }
                     } header: {
@@ -227,7 +228,8 @@ struct AppDetailInventoryTab: View {
     }
 
     private func siteRow(_ group: AppDetailInventorySummary.SiteGroup, showsFirstSeen: Bool) -> some View {
-        AnalyzeColumnsLayout(columns: Self.domainColumns(showsFirstSeen: showsFirstSeen)) {
+        let hosts = InventoryRequests.hosts(of: group)
+        return AnalyzeColumnsLayout(columns: Self.domainColumns(showsFirstSeen: showsFirstSeen)) {
             // In a narrow pane the host count goes and NEW SITE becomes NEW before the site shortens.
             AppDetailNameLayout(spacing: 8.px) {
                 Text(group.site).fontWeight(.semibold).lineLimit(1)
@@ -249,13 +251,19 @@ struct AppDetailInventoryTab: View {
                 Text(AnalyzeFormat.seen(group.firstSeen)).font(.design(12)).foregroundStyle(Theme.ink2).lineLimit(1)
             }
             Text(AppDetailInventoryFormat.lastSeen(group.lastSeen)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
-            Text(Fmt.count(group.requests)).font(Theme.mono(11, weight: .semibold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .trailing)
+            AnalyzeRequestsCount(count: group.requests, font: Theme.mono(11, weight: .semibold), hosts: hosts, open: openRequests)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12.5))
         .padding(.horizontal, 16.px)
         .frame(height: 30.px)
         .background(Theme.bg2)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
+        .contextMenu { AnalyzeRequestsMenu(hosts: hosts, open: openRequests) }
+    }
+
+    private func openRequests(_ host: String) {
+        model.nav.openRequests(forHost: host, app: app.id, range: InventoryRequests.range)
     }
 
     // MARK: IPs
@@ -327,7 +335,7 @@ struct AppDetailInventoryTab: View {
 
     private func ipRow(_ ip: AppHost, selected: String?) -> some View {
         let highlighted = selected.map { ip.hosts.contains($0) } ?? false
-        return AppDetailIPRow(ip: ip, highlighted: highlighted, dimmed: selected != nil && !highlighted)
+        return AppDetailIPRow(appID: app.id, ip: ip, highlighted: highlighted, dimmed: selected != nil && !highlighted)
     }
 
     @ViewBuilder
@@ -433,11 +441,13 @@ struct AppDetailInventoryTab: View {
 /// A domain under its site.
 private struct AppDetailDomainRow: View {
     @Environment(AppModel.self) private var model
+    var appID: AppID
     var host: AppHost
     var selected: Bool
     var showsFirstSeen: Bool
 
     var body: some View {
+        let hosts = InventoryRequests.hosts(of: host)
         AnalyzeColumnsLayout(columns: AppDetailInventoryTab.domainColumns(showsFirstSeen: showsFirstSeen)) {
             HStack(spacing: 7.px) {
                 Text(verbatim: "└").font(Theme.mono(11)).foregroundStyle(Theme.ink3)
@@ -449,7 +459,8 @@ private struct AppDetailDomainRow: View {
                 Text(AnalyzeFormat.seen(host.firstSeen)).foregroundStyle(Theme.ink2).lineLimit(1)
             }
             Text(AppDetailInventoryFormat.lastSeen(host.lastSeen)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
-            Text(Fmt.count(host.requestCount)).font(Theme.mono(11)).lineLimit(1).frame(maxWidth: .infinity, alignment: .trailing)
+            AnalyzeRequestsCount(count: host.requestCount, font: Theme.mono(11), hosts: hosts, open: openRequests)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12))
         .padding(.horizontal, 16.px)
@@ -462,6 +473,11 @@ private struct AppDetailDomainRow: View {
             }
         }
         .help(host.processName.map { trf("First reached by %@", "AppDetail", $0) } ?? host.value)
+        .contextMenu { AnalyzeRequestsMenu(hosts: hosts, open: openRequests) }
+    }
+
+    private func openRequests(_ value: String) {
+        model.nav.openRequests(forHost: value, app: appID, range: InventoryRequests.range)
     }
 }
 
@@ -470,6 +486,8 @@ private struct AppDetailDomainRow: View {
 /// It takes its highlight as plain flags rather than the selection, so selecting another domain only redraws the
 /// rows whose state changes.
 private struct AppDetailIPRow: View {
+    @Environment(AppModel.self) private var model
+    var appID: AppID
     var ip: AppHost
     /// A domain that resolved to it is selected.
     var highlighted: Bool
@@ -477,6 +495,7 @@ private struct AppDetailIPRow: View {
     var dimmed: Bool
 
     var body: some View {
+        let hosts = InventoryRequests.hosts(of: ip)
         AnalyzeColumnsLayout(columns: AppDetailInventoryTab.ipColumns) {
             HStack(spacing: 6.px) {
                 Text(ip.value).font(Theme.mono(11.5)).lineLimit(1).textSelection(.enabled)
@@ -498,7 +517,8 @@ private struct AppDetailIPRow: View {
                         .help(ip.hosts.joined(separator: "\n"))
                 }
             }
-            Text(Fmt.count(ip.requestCount)).font(Theme.mono(11)).lineLimit(1).frame(maxWidth: .infinity, alignment: .trailing)
+            AnalyzeRequestsCount(count: ip.requestCount, font: Theme.mono(11), hosts: hosts, open: openRequests)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12))
         .padding(.horizontal, 16.px)
@@ -507,6 +527,12 @@ private struct AppDetailIPRow: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
         .opacity(dimmed ? 0.35 : 1)
         .animation(.easeOut(duration: 0.2), value: dimmed)
+        .contentShape(.rect)
+        .contextMenu { AnalyzeRequestsMenu(hosts: hosts, open: openRequests) }
+    }
+
+    private func openRequests(_ value: String) {
+        model.nav.openRequests(forHost: value, app: appID, range: InventoryRequests.range)
     }
 }
 
@@ -584,6 +610,17 @@ private struct AppDetailIPHeaderLayout: Layout {
             CGRect(x: cell.x, y: ascent - size[VerticalAlignment.firstTextBaseline], width: cell.width, height: size.height)
         }
         return (frames, ascent + descent)
+    }
+}
+
+/// What the tab's rows open: History filtered to the app as well, so it lists what the row counts.
+extension InventoryRequests {
+    /// The domain or IP of one of the app's rows.
+    static func hosts(of host: AppHost) -> [String] { [RequestsHostFilter.normalized(host.value)] }
+
+    /// The domains a site's row lists (those the search keeps), in its order.
+    static func hosts(of group: AppDetailInventorySummary.SiteGroup) -> [String] {
+        group.hosts.map { RequestsHostFilter.normalized($0.value) }
     }
 }
 
