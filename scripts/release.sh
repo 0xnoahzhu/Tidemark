@@ -1,6 +1,7 @@
 #!/bin/zsh
 # Builds a Release archive of Tidemark and packages it as build/release/Tidemark-<version>.dmg, with the installer
-# window laid out by scripts/dmg (the app, a dashed arrow, the Applications link).
+# window laid out by scripts/dmg (the app, a dashed arrow, the Applications link), next to its debug symbols
+# (Tidemark-<version>.dSYM).
 #
 # Needs Xcode (DEVELOPER_DIR defaults to /Applications/Xcode.app) and uv, which runs dmgbuild. The app is ad-hoc
 # signed: it opens on this Mac, but Gatekeeper blocks it elsewhere until it is opened with right-click › Open.
@@ -29,4 +30,11 @@ uv run --quiet --no-project --with dmgbuild==1.6.7 dmgbuild \
     "Tidemark $version" "$dmg"
 
 hdiutil verify -quiet "$dmg"
+
+# Keep only the DMG and the app's debug symbols: the archive's copy of the app would linger as one more Tidemark.app.
+mv "$out/Tidemark.xcarchive/dSYMs/Tidemark.app.dSYM" "$out/Tidemark-$version.dSYM"
+rm -rf "$out/Tidemark.xcarchive"
+# The archive's build folder keeps a link to where the app was built before it moved into the archive.
+find build/ReleaseDerivedData -name '*.app' -type l -delete
+
 shasum -a 256 "$dmg"

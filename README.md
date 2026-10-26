@@ -26,6 +26,7 @@ target automatically, so adding a file never requires editing the project.
 To make a release, run `scripts/release.sh` (needs [uv](https://docs.astral.sh/uv/)). It archives the Release
 build and writes `build/release/Tidemark-<version>.dmg`, whose installer window shows the app, a dashed arrow and
 the Applications folder (`scripts/dmg`: `settings.py` lays out the window for dmgbuild, `background.swift` draws the
-background). The app is ad-hoc signed, so on other Macs it opens with right-click › Open the first time.
+background), and its debug symbols as `Tidemark-<version>.dSYM`; no other copy of the app is left behind. The app
+is ad-hoc signed, so on other Macs it opens with right-click › Open the first time.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it works.
