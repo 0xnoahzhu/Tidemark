@@ -53,7 +53,7 @@ struct CaptureNotifierTests {
 
     /// The design's banner: "Raycast reached a new site" over "notion.com · first host api.notion.com · via node".
     @Test func wordsAlertsLikeTheDesignsBanner() {
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         let app = UUID()
         let site = alert(1, app: app, scope: .site, value: "api.notion.com", site: "notion.com", ip: "104.18.22.110")
         #expect(CaptureAlertText.title(appName: "Raycast", alert: site) == "Raycast reached a new site")
@@ -74,8 +74,8 @@ struct CaptureNotifierTests {
     }
 
     @Test func translatesAlertsToChinese() {
-        Localizer.shared.preference = .chinese
-        defer { Localizer.shared.preference = .english }
+        Localizer.shared.override = "zh-Hans"
+        defer { Localizer.shared.override = "en" }
         guard Localizer.shared.bundle != nil else { return }
         let site = alert(1, app: UUID(), scope: .site, value: "api.notion.com", site: "notion.com")
         #expect(CaptureAlertText.title(appName: "Raycast", alert: site) == "Raycast 访问了新站点")

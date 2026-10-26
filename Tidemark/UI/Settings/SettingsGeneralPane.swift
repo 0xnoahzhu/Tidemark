@@ -3,7 +3,7 @@ import os
 import ServiceManagement
 import SwiftUI
 
-/// Settings › General: appearance, Liquid Glass, language and login item.
+/// Settings › General: appearance, Liquid Glass and login item. The language follows the system's (`Localizer`).
 struct SettingsGeneralPane: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
@@ -18,7 +18,6 @@ struct SettingsGeneralPane: View {
                 SettingsRow(title: tr("Liquid Glass", "Settings"),
                             note: tr("Follows System Settings › Appearance until you move it here.", "Settings"),
                             verticalPadding: 9) { glassSlider }
-                SettingsRow(title: tr("Language", "Settings"), verticalPadding: 9) { languagePicker }
             }
             SettingsCard {
                 SettingsRow(title: tr("Open at login", "Settings"),
@@ -93,32 +92,6 @@ struct SettingsGeneralPane: View {
         .font(.system(size: 11))
         .foregroundStyle(Theme.ink2)
         .fixedSize()
-    }
-
-    /// English or 简体中文, as in the design. Until one is picked Tidemark follows the system's language, and the
-    /// pop-up shows the one that gives.
-    private var languagePicker: some View {
-        Picker(tr("Language", "Settings"), selection: Binding(
-            get: { Self.shownLanguage(model.preferences.language, isChinese: localizer.isChinese) },
-            set: { value in
-                model.preferences.language = value
-                Localizer.shared.preference = value
-            }
-        )) {
-            Text(verbatim: "English").tag(Preferences.Language.english)
-            Text(verbatim: "简体中文").tag(Preferences.Language.chinese)
-        }
-        .pickerStyle(.menu)
-        .labelsHidden()
-        .frame(width: 128)
-    }
-
-    /// The pop-up's choice for the stored preference: following the system shows the language in use.
-    static func shownLanguage(_ preference: Preferences.Language, isChinese: Bool) -> Preferences.Language {
-        switch preference {
-        case .system: isChinese ? .chinese : .english
-        case .english, .chinese: preference
-        }
     }
 
     // MARK: Login item

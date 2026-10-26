@@ -6,7 +6,6 @@ import Observation
 @Observable
 final class Preferences {
     enum Appearance: String, CaseIterable, Sendable { case system, light, dark }
-    enum Language: String, CaseIterable, Sendable { case system, english, chinese }
 
     /// Write batching presets offered in Settings › Database ("200 · 1 s").
     struct BatchPreset: Hashable, Sendable {
@@ -41,7 +40,6 @@ final class Preferences {
     var appearance: Appearance { didSet { set(appearance.rawValue, "general.appearance") } }
     /// Liquid Glass amount, 0 (clear) … 100 (tinted).
     var glass: Double { didSet { set(glass, "general.glass") } }
-    var language: Language { didSet { set(language.rawValue, "general.language") } }
     var openAtLogin: Bool { didSet { set(openAtLogin, "general.openAtLogin") } }
 
     // MARK: Site probe
@@ -68,7 +66,6 @@ final class Preferences {
 
         appearance = defaults.string(forKey: "general.appearance").flatMap(Appearance.init(rawValue:)) ?? .system
         glass = defaults.object(forKey: "general.glass") as? Double ?? 40
-        language = defaults.string(forKey: "general.language").flatMap(Language.init(rawValue:)) ?? .system
         openAtLogin = defaults.object(forKey: "general.openAtLogin") as? Bool ?? true
 
         probeIsolated = defaults.object(forKey: "probe.isolated") as? Bool ?? true

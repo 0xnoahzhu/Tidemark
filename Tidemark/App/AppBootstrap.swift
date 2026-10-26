@@ -9,7 +9,6 @@ enum AppBootstrap {
     private static var probe: ProbeController?
 
     static func start(_ model: AppModel) {
-        Localizer.shared.preference = model.preferences.language
         applyAppearance(model.preferences.appearance)
 
         let classifier = PublicSuffixClassifier()

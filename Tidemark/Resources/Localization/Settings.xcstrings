@@ -231,16 +231,6 @@
         }
       }
     },
-    "Language" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "语言"
-          }
-        }
-      }
-    },
     "Last write %lld s ago" : {
       "localizations" : {
         "zh-Hans" : {

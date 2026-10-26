@@ -1,49 +1,63 @@
 import Foundation
 import Observation
 
-/// Runtime language switching (Settings › General › Language) on top of String Catalogs.
+/// The UI language on top of String Catalogs: the first of the system's preferred languages that Tidemark has a
+/// translation for, else English.
 ///
 /// Each UI area keeps its strings in its own catalog table (`Sidebar.xcstrings`, `Requests.xcstrings`, …)
-/// with English keys and `zh-Hans` translations. `tr` looks keys up in the bundle of the selected
-/// language; reading `bundle` inside a view body registers an observation, so views re-render when
-/// the language changes.
+/// with English keys and `zh-Hans` translations. `tr` looks keys up in the bundle of the language in use;
+/// reading `bundle` inside a view body registers an observation, so views re-render when the language changes.
 @MainActor
 @Observable
 final class Localizer {
     static let shared = Localizer()
 
-    /// Language codes with a translation bundle.
-    static let supported = ["en", "zh-Hans"]
+    /// Language codes with a translation bundle, as the app bundle's `.lproj` folders name them.
+    nonisolated static let supported = ["en", "zh-Hans"]
 
-    var preference: Preferences.Language = .system {
+    #if DEBUG
+    /// A language from `supported` used in place of the system's, for the debug tour and tests; nil follows the system.
+    var override: String? {
         didSet { resolve() }
     }
+    #endif
 
     private(set) var languageCode = "en"
     /// Translation bundle; nil for English, whose catalog keys are the English text.
     private(set) var bundle: Bundle?
     private(set) var locale = Locale(identifier: "en")
 
-    var isChinese: Bool { languageCode == "zh-Hans" }
+    @ObservationIgnored private var localeChange: NotificationCenter.ObservationToken?
 
-    private init() { resolve() }
+    private init() {
+        resolve()
+        // The preferred languages can change while Tidemark runs (System Settings › General › Language & Region).
+        localeChange = NotificationCenter.default.addObserver(of: Locale.self, for: .currentLocaleDidChange) { [weak self] _ in
+            self?.resolve()
+        }
+    }
+
+    /// The language Tidemark shows for `preferred`, the user's languages most wanted first (`Locale.preferredLanguages`,
+    /// which holds a language chosen for Tidemark alone in System Settings): matched against `supported` the way macOS
+    /// picks an app's localization (so `zh-Hans-CN` gives `zh-Hans`), and English when none of them has a translation.
+    nonisolated static func language(for preferred: [String]) -> String {
+        Bundle.preferredLocalizations(from: supported, forPreferences: preferred).first ?? "en"
+    }
 
     private func resolve() {
-        let code: String
-        switch preference {
-        case .english: code = "en"
-        case .chinese: code = "zh-Hans"
-        case .system:
-            let preferred = Locale.preferredLanguages.first?.lowercased() ?? "en"
-            code = preferred.hasPrefix("zh") ? "zh-Hans" : "en"
-        }
+        var code = Self.language(for: Locale.preferredLanguages)
+        #if DEBUG
+        if let override { code = override }
+        #endif
+        // The notification also comes for region and format changes, which leave the language as it is.
+        guard code != languageCode else { return }
         languageCode = code
         locale = Locale(identifier: code)
         bundle = code == "en" ? nil : Bundle.main.path(forResource: code, ofType: "lproj").flatMap(Bundle.init(path:))
     }
 }
 
-/// Localized string for `key` from catalog `table`, in the language chosen in Settings.
+/// Localized string for `key` from catalog `table`, in the UI language.
 @MainActor
 func tr(_ key: String, _ table: String) -> String {
     guard let bundle = Localizer.shared.bundle else { return key }

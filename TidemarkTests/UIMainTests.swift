@@ -135,15 +135,15 @@ struct RequestsPresentationTests {
         let suite = "tidemark-tests-\(UUID().uuidString)"
         let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: suite)!))
         let quic = F.record(id: 1, method: "QUIC")
-        let saved = Localizer.shared.preference
+        let saved = Localizer.shared.override
         defer {
-            Localizer.shared.preference = saved
+            Localizer.shared.override = saved
             TestDefaults.remove(suite)
         }
 
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         #expect(model.requestsIdentity(for: quic).name == "Unknown process")
-        Localizer.shared.preference = .chinese
+        Localizer.shared.override = "zh-Hans"
         guard Localizer.shared.bundle != nil else { return }
         #expect(model.requestsIdentity(for: quic).name == "未知进程")
     }
@@ -529,7 +529,7 @@ struct RequestsHistoryModelTests {
     }
 
     @Test func reportsErrors() async {
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         let history = RequestsHistoryModel()
         await history.load(RequestQuery(), database: RequestsStubDatabase())
         #expect(history.errorMessage == "PostgreSQL is unreachable: connection refused")
@@ -539,8 +539,8 @@ struct RequestsHistoryModelTests {
         #expect(!history.isLoadingHistogram)
 
         // The failure reads in a language chosen after it.
-        Localizer.shared.preference = .chinese
-        defer { Localizer.shared.preference = .english }
+        Localizer.shared.override = "zh-Hans"
+        defer { Localizer.shared.override = "en" }
         guard Localizer.shared.bundle != nil else { return }
         #expect(history.errorMessage == "连不上 PostgreSQL：connection refused")
     }
@@ -1243,7 +1243,7 @@ struct ShellTests {
     }
 
     @Test func listsMacsWithThisMacFirst() {
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         let state = DeviceState(thisDeviceID: UIMainFixtures.thisMac)
         state.devices = [
             Device(id: UIMainFixtures.otherMac, name: "Mac mini (Office)", model: nil, shortName: "mini", hue: 150, rowCount: 0, lastWriteAt: .now, createdAt: .now),
@@ -1263,7 +1263,7 @@ struct ShellTests {
     }
 
     @Test func describesLinkStatus() {
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         #expect(SidebarStatusText.surge(.connected(detail: "")) == "watching requests")
         #expect(SidebarStatusText.database(.connected(detail: ""), totalRows: 1_284_093) == "1,284,093 rows")
         #expect(SidebarStatusText.help(.failed(DatabaseError.unreachable("connection refused"))) == "PostgreSQL is unreachable: connection refused")

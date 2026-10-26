@@ -143,7 +143,7 @@ struct CaptureEngineTests {
     }
 
     @Test func testsTheDatabaseConnection() async throws {
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         let (engine, _) = makeEngine()
         let result = await engine.testDatabaseConnection()
         #expect(try result.get() == "Connected · PostgreSQL 18.3 · 2 ms")
@@ -327,7 +327,7 @@ struct CaptureEngineTests {
     /// Every alert becomes a system notification on every Mac: this Mac's and the ones other Macs found, which
     /// name their Mac, also for an app whose monitoring is paused here (that only stops this Mac's alerts).
     @Test func notifiesAlertsFromEveryMac() async {
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         let database = CaptureFakeDatabase()
         let (engine, model) = makeEngine(database: database)
         let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
@@ -361,7 +361,7 @@ struct CaptureEngineTests {
     }
 
     @Test func describesWriteFailuresInTheUILanguage() {
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         let (engine, model) = makeEngine()
         var update = CaptureUIUpdate()
         update.databaseFailure = "PostgreSQL refused every write: disk full"
@@ -372,15 +372,15 @@ struct CaptureEngineTests {
         #expect(CaptureEngine.message(for: CaptureTimeoutError(seconds: 20)) == "PostgreSQL did not answer in time")
 
         // The status keeps the error, so it reads in a language chosen after the failure.
-        Localizer.shared.preference = .chinese
-        defer { Localizer.shared.preference = .english }
+        Localizer.shared.override = "zh-Hans"
+        defer { Localizer.shared.override = "en" }
         guard Localizer.shared.bundle != nil else { return }
         #expect(SidebarStatusText.help(model.live.database) == "PostgreSQL 拒绝了所有写入：disk full")
         #expect(CaptureEngine.message(for: CaptureSurgeFailure.stoppedStreaming) == "Surge 已停止推送")
     }
 
     @Test func describesDatabaseAndSurgeFailuresInTheUILanguage() {
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         #expect(CaptureEngine.message(for: DatabaseError.unreachable("connection refused")) == "PostgreSQL is unreachable: connection refused")
         #expect(CaptureEngine.message(for: SurgeError.commandFailed(command: "status", message: "denied")) == "surge-cli status failed: denied")
         #expect(CaptureEngine.message(for: SurgeError.commandFailed(command: "status", message: "exit status 9"))
@@ -398,8 +398,8 @@ struct CaptureEngineTests {
             #expect(CaptureEngine.message(for: error) == error.errorDescription)
         }
 
-        Localizer.shared.preference = .chinese
-        defer { Localizer.shared.preference = .english }
+        Localizer.shared.override = "zh-Hans"
+        defer { Localizer.shared.override = "en" }
         guard Localizer.shared.bundle != nil else { return }
         #expect(CaptureEngine.message(for: DatabaseError.unreachable("connection refused")) == "连不上 PostgreSQL：connection refused")
         #expect(CaptureEngine.message(for: DatabaseError.unreachable(.passwordRequired(target: "db.local:5432/tidemark")))
@@ -429,7 +429,7 @@ struct CaptureEngineTests {
     }
 
     @Test func aFailedConnectionTestIsDescribedInTheUILanguage() async {
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         let failing = CaptureFakeDatabase()
         await failing.setFailing(true)
         let (engine, _) = makeEngine(database: failing)

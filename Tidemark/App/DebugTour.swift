@@ -42,7 +42,7 @@ enum DebugTour {
         let languages = (defaults.string(forKey: "TidemarkDebugLanguages") ?? "en").split(separator: ",").map(String.init)
         let appearances = (defaults.string(forKey: "TidemarkDebugAppearances") ?? "light").split(separator: ",").map(String.init)
         for language in languages {
-            Localizer.shared.preference = language == "zh" ? .chinese : .english
+            Localizer.shared.override = language == "zh" ? "zh-Hans" : "en"
             for appearance in appearances {
                 NSApp.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
                 await tour(model, into: directory, prefix: "\(language)-\(appearance)")
@@ -50,7 +50,7 @@ enum DebugTour {
         }
 
         if let probeURL = defaults.string(forKey: "TidemarkDebugProbe") {
-            Localizer.shared.preference = .english
+            Localizer.shared.override = "en"
             NSApp.appearance = NSAppearance(named: .aqua)
             await probe(model, url: probeURL, into: directory)
         }

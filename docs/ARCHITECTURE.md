@@ -379,7 +379,11 @@ it only when the cached list may lack matches (it holds the query's limit, 2,000
 database also matches a search against the apps that reached a host on the other Macs).
 
 Strings use `tr("English key", "Table")` with one String Catalog per UI area (`Resources/Localization/*.xcstrings`)
-holding the `zh-Hans` translations; Settings › Language switches at runtime.
+holding the `zh-Hans` translations. Tidemark has no language setting: `Localizer` takes the first of the system's
+preferred languages that has a translation (a language chosen for Tidemark alone in System Settings › General ›
+Language & Region comes first), matched the way macOS picks the bundle's `.lproj` folder, so the system's menus and
+alerts read in the same language; English when none has one. It resolves again when the system reports a locale
+change.
 
 ## Conventions
 

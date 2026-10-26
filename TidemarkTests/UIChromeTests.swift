@@ -241,7 +241,7 @@ struct UIChromeTests {
             }
             #expect(white > 20, "\(tab) glyph")
         }
-        withLanguage(.chinese) {
+        withLanguage("zh-Hans") {
             #expect(SettingsTabIcon.title(.database) == "数据库")
             #expect(SettingsTabIcon.title(.surge) == "Surge")
         }
@@ -260,21 +260,21 @@ struct UIChromeTests {
 
     /// One status line, rebuilt in the current language.
     @Test func surgeStatusLine() {
-        withLanguage(.english) {
+        withLanguage("en") {
             #expect(SettingsSurgePane.connectedText == "Found · controller connected · streaming")
         }
-        withLanguage(.chinese) {
+        withLanguage("zh-Hans") {
             #expect(SettingsSurgePane.connectedText == "已找到 · 控制器已连接 · 正在订阅")
         }
     }
 
     @Test func surgeCLIPathProblems() {
-        withLanguage(.english) {
+        withLanguage("en") {
             #expect(SettingsSurgePane.message(for: .missing) == "No file at this path.")
             #expect(SettingsSurgePane.message(for: .inaccessible(.permissionDenied)).hasPrefix("This path cannot be read: "))
             #expect(!SettingsSurgePane.message(for: .inaccessible(.permissionDenied)).contains("%@"))
         }
-        withLanguage(.chinese) {
+        withLanguage("zh-Hans") {
             #expect(SettingsSurgePane.message(for: .missing) == "此路径下没有文件。")
             #expect(SettingsSurgePane.message(for: .notAFile) == "此路径是文件夹，不是 surge-cli 可执行文件。")
             #expect(SettingsSurgePane.message(for: .notExecutable) == "此文件不可执行。")
@@ -425,7 +425,7 @@ struct UIChromeTests {
     }
 
     @Test func databaseFormatting() {
-        withLanguage(.english) {
+        withLanguage("en") {
             #expect(SettingsDatabaseFormat.seconds(1) == "1")
             #expect(SettingsDatabaseFormat.seconds(0.5) == "0.5")
             #expect(SettingsDatabaseFormat.batchLabel(.init(rows: 200, interval: 1)) == "200 · 1 s")
@@ -433,27 +433,19 @@ struct UIChromeTests {
             #expect(SettingsDatabaseFormat.batchNote(.init(rows: 100, interval: 0.5)) == "Every 100 rows or 0.5 seconds, whichever comes first")
             #expect(SettingsDatabaseFormat.milliseconds(.milliseconds(2)) == 2)
         }
-        withLanguage(.chinese) {
+        withLanguage("zh-Hans") {
             #expect(SettingsDatabaseFormat.batchLabel(.init(rows: 200, interval: 1)) == "200 · 1 秒")
             #expect(SettingsDatabaseFormat.batchNote(.init(rows: 200, interval: 1)) == "每 200 行或每 1 秒写一次，先到为准")
         }
     }
 
-    /// The Language pop-up offers English and 简体中文; following the system shows the language in use.
-    @Test func languagePopUpShowsTheLanguageInUse() {
-        #expect(SettingsGeneralPane.shownLanguage(.system, isChinese: false) == .english)
-        #expect(SettingsGeneralPane.shownLanguage(.system, isChinese: true) == .chinese)
-        #expect(SettingsGeneralPane.shownLanguage(.english, isChinese: true) == .english)
-        #expect(SettingsGeneralPane.shownLanguage(.chinese, isChinese: false) == .chinese)
-    }
-
     @Test func addAppLabels() {
-        withLanguage(.english) {
+        withLanguage("en") {
             #expect(AddAppCandidates.backfillLabel(0) == "Nothing recorded yet")
             #expect(AddAppCandidates.backfillLabel(1) == "1 past request")
             #expect(AddAppCandidates.backfillLabel(3204) == "3,204 past requests")
         }
-        withLanguage(.chinese) {
+        withLanguage("zh-Hans") {
             #expect(AddAppCandidates.backfillLabel(3204) == "3,204 条历史请求")
         }
         #expect(AddAppCandidates.normalized("/Applications/Slack.app/") == "/Applications/Slack.app")
@@ -482,6 +474,28 @@ struct UIChromeTests {
     }
 
     // MARK: Localization
+
+    /// The UI reads in the first preferred language Tidemark has a translation for, and in English when none has one.
+    @Test func followsTheFirstTranslatedPreferredLanguage() {
+        #expect(Localizer.language(for: ["ja", "zh-Hans", "en"]) == "zh-Hans")
+        #expect(Localizer.language(for: ["zh-Hans-CN"]) == "zh-Hans")
+        #expect(Localizer.language(for: ["fr", "zh-Hans"]) == "zh-Hans")
+        #expect(Localizer.language(for: ["en-GB", "zh-Hans"]) == "en")
+        #expect(Localizer.language(for: ["fr"]) == "en")
+        #expect(Localizer.language(for: ["fr", "de"]) == "en")
+        // Tidemark has no Traditional Chinese: English, not Simplified Chinese.
+        #expect(Localizer.language(for: ["zh-Hant"]) == "en")
+        #expect(Localizer.language(for: ["zh-HK"]) == "en")
+        #expect(Localizer.language(for: ["zh-TW"]) == "en")
+        #expect(Localizer.language(for: []) == "en")
+    }
+
+    /// The app bundle holds every UI language, so macOS offers them as Tidemark's own language, and its menus and
+    /// alerts read in the same language as Tidemark's views.
+    @Test func theBundleDeclaresEveryUILanguage() {
+        #expect(Set(Bundle.main.localizations).isSuperset(of: Localizer.supported))
+        #expect(Bundle.main.developmentLocalization == "en")
+    }
 
     /// Every `tr`/`trf`/`trn` key used by the menu bar, settings, sheets and commands has a zh-Hans translation.
     @Test func everyChromeStringIsTranslated() throws {
@@ -534,10 +548,10 @@ struct UIChromeTests {
         return result
     }
 
-    private func withLanguage(_ language: Preferences.Language, _ body: () -> Void) {
-        let saved = Localizer.shared.preference
-        Localizer.shared.preference = language
+    private func withLanguage(_ language: String, _ body: () -> Void) {
+        let saved = Localizer.shared.override
+        Localizer.shared.override = language
         body()
-        Localizer.shared.preference = saved
+        Localizer.shared.override = saved
     }
 }

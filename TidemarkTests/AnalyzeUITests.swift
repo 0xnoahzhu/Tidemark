@@ -874,8 +874,8 @@ private final class SlowStopProbeActions: ProbeActions {
 
     /// `egress_checks.error` holds English whatever the UI language, since other Macs and later versions read it.
     @Test func storesCheckErrorsInAStableEnglishForm() {
-        Localizer.shared.preference = .chinese
-        defer { Localizer.shared.preference = .english }
+        Localizer.shared.override = "zh-Hans"
+        defer { Localizer.shared.override = "en" }
         #expect(EgressMonitor.storedError(CaptureTimeoutError(seconds: 20)) == "Timed out after 20 s.")
         #expect(EgressMonitor.storedError(SurgeError.cliNotFound(path: "/x/surge-cli")) == "surge-cli was not found at /x/surge-cli.")
         #expect(EgressMonitor.storedError(SurgeError.commandFailed(command: "test-policy-external-ip X", message: "Policy does not exist."))
@@ -888,8 +888,8 @@ private final class SlowStopProbeActions: ProbeActions {
 
     /// Every stored form reads in Chinese; only Surge's unknown reasons fall back to a general sentence.
     @Test func translatesStoredCheckErrorsIntoChinese() {
-        Localizer.shared.preference = .chinese
-        defer { Localizer.shared.preference = .english }
+        Localizer.shared.override = "zh-Hans"
+        defer { Localizer.shared.override = "en" }
         guard Localizer.shared.bundle != nil else { return }
         let zh = "zh-Hans"
         #expect(EgressFormat.error("Timed out after 20 s.", languageCode: zh) == "20 秒后超时")
@@ -924,8 +924,8 @@ private final class SlowStopProbeActions: ProbeActions {
             #expect(chinese[mode] != nil, "\(mode)")
         }
 
-        Localizer.shared.preference = .chinese
-        defer { Localizer.shared.preference = .english }
+        Localizer.shared.override = "zh-Hans"
+        defer { Localizer.shared.override = "en" }
         guard Localizer.shared.bundle != nil else { return }
         #expect(EgressFormat.surgeMode("Enhanced mode") == "增强模式")
         #expect(EgressFormat.surgeMode("System proxy · something new") == "系统代理 · something new")
@@ -934,10 +934,10 @@ private final class SlowStopProbeActions: ProbeActions {
     /// The IP info service is always on: the lookup card keeps the design's first sentence, names the service
     /// and points at no setting.
     @Test func namesTheIPInfoService() {
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         #expect(EgressFormat.sourcesNote == "Country and ASN come from Surge's own GeoIP database. Type comes from the IP info service, proxycheck.io, and reverse DNS from this Mac's resolver.")
-        Localizer.shared.preference = .chinese
-        defer { Localizer.shared.preference = .english }
+        Localizer.shared.override = "zh-Hans"
+        defer { Localizer.shared.override = "en" }
         guard Localizer.shared.bundle != nil else { return }
         #expect(EgressFormat.sourcesNote == "国家和 ASN 来自 Surge 自带的 GeoIP 数据库。类型来自 IP 信息服务 proxycheck.io，反向解析来自本机的解析器。")
     }

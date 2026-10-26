@@ -87,8 +87,8 @@ These settings live in `Tidemark.xcodeproj` (the project no longer uses XcodeGen
 | `SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY` | `YES` | keep `YES` | Stops NIOCore and Logging members leaking through `import PostgresNIO`. It is the Xcode 27 template default and a Swift 7 feature. |
 | `SWIFT_UPCOMING_FEATURE_EXISTENTIAL_ANY` | — | `YES` | Cheap now: the code base already writes `any SurgeClient`. It is a Swift 7 feature. |
 | `ENABLE_PREVIEWS` (app target) | `YES` | keep `YES` | `#Preview` needs it. |
-| `SWIFT_EMIT_LOC_STRINGS` (app target) | `NO` | keep `NO` | Strings go through `tr("key", "Table")` with runtime `String` keys, which compiler extraction cannot see. Extracting SwiftUI literals would only collect strings that skip the in-app language switch. |
-| `STRING_CATALOG_GENERATE_SYMBOLS` | — | optional `YES` | Only worth it if `tr()` moves to generated `LocalizedStringResource` symbols, which turns a missing key into a compile error. First check that setting `resource.locale` honours the in-app language override (section 8). |
+| `SWIFT_EMIT_LOC_STRINGS` (app target) | `NO` | keep `NO` | Strings go through `tr("key", "Table")` with runtime `String` keys, which compiler extraction cannot see. Extracting SwiftUI literals would only collect strings that bypass `Localizer`. |
+| `STRING_CATALOG_GENERATE_SYMBOLS` | — | optional `YES` | Only worth it if `tr()` moves to generated `LocalizedStringResource` symbols, which turns a missing key into a compile error. First check that setting `resource.locale` honours `Localizer`'s language, which the debug tour and tests override (section 8). |
 | `ENABLE_HARDENED_RUNTIME = YES`, `ENABLE_APP_SANDBOX = NO` | as is | keep | Tidemark spawns `surge-cli` and reads libproc data for other processes' PIDs. |
 | `SWIFT_STRICT_MEMORY_SAFETY` | — | `NO` | The libproc and sockaddr code is legitimately pointer-heavy. At most, try `MIGRATE` once on `Process/`. |
 | `ENABLE_ENHANCED_SECURITY` | — | `NO` for now | Optional arm64e hardening. Check first that SwiftNIO and PostgresNIO build for arm64e. |
@@ -223,7 +223,7 @@ Status: Typechecked. Shield semantics are Runtime-checked: inside the shield `is
 - Surge endpoint or database URL changes → reconnect.
 - Batch preset changes → `WriteBuffer` configuration.
 - `openAtLogin` → `SMAppService` (4.13).
-- `appearance` → `NSApp.appearance`. `language` → `Localizer`.
+- `appearance` → `NSApp.appearance`.
 - Unread count → the menu bar glyph (`StatusItemController` observes it this way), and the Dock badge while Tidemark is in the Dock (`DockIconUpdater`, which `DockPresence` starts with each new Dock tile).
 
 **Why.** `Preferences` persists in `didSet`. The side effects belong in one place. They cannot live in a view's `.onChange`, because that runs only while the view exists, and Tidemark often runs with no window open, only its menu bar item. `withContinuousObservation` re-arms itself, runs on the caller's actor, tracks exactly the properties its closure reads, and delivers changes made in the same turn as one event. The token stops it. This replaces hand-written `withObservationTracking` re-arm loops and Combine.
@@ -696,7 +696,7 @@ actor InsightGenerator {
 - Never delay an alert waiting for a model response.
 - Background requests use non-streaming `respond`; the SDK docs say this reduces `rateLimited` errors.
 - Facts go in the prompt from `HostContext`. Do not use tools: they add latency and gain nothing, because Tidemark already has the facts.
-- The answer language follows `Localizer.shared.languageCode` (the in-app language), not `Locale.current`.
+- The answer language follows `Localizer.shared.languageCode` (the UI language), not `Locale.current`.
 - Track live availability by reading the observable `SystemLanguageModel.default.availability`, either in the view or through 4.2. This keeps `isAvailable` and `unavailableReason` current.
 
 Status: Typechecked, including the `@Generable` enum. Model quality and capabilities can only be judged at runtime.
@@ -1119,5 +1119,5 @@ These findings are uncertain, or their signatures typecheck but their behaviour 
     - Remember that the survey's `@MainActor` version does not compile.
 12. **FoundationModels at runtime (4.8).** No longer applies: host insights were removed.
 13. **`NSStatusItemExpandedInterfaceDelegate` (5.1).** It is compiled only. Panel positioning on multiple displays, focus behaviour and how it interacts with `NSApp.setActivationPolicy` switching between `.accessory` and `.regular` (`DockPresence`) are unverified. Runtime-checked with the panel shown directly (no session): while the panel, a non-activating `NSPanel`, is key, `NSApp.isActive` reads true although another app is frontmost and owns the menu bar; `NSRunningApplication.current.isActive` reads false.
-14. **Localisation with generated symbols (section 3.1).** Before switching `tr()` to generated `LocalizedStringResource` symbols, confirm that resolving a resource with `resource.locale = Localizer.shared.locale` picks the `zh-Hans` table even when the system language is English.
+14. **Localisation with generated symbols (section 3.1).** Before switching `tr()` to generated `LocalizedStringResource` symbols, confirm that resolving a resource with `resource.locale = Localizer.shared.locale` picks the `zh-Hans` table even when the system language is English, as the debug tour's and the tests' language override needs.
 15. **The 27 SDK writes `anyAppleOS` availability.** When checking whether an API exists on macOS, grep for both `anyAppleOS 27` and `macOS 27`. Otherwise you will wrongly conclude many APIs are missing.

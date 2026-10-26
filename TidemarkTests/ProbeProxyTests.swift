@@ -338,7 +338,7 @@ struct ProbeControllerTests {
 
     /// A listener that cannot be read is explained briefly in the UI language, with Surge's own message.
     @Test func explainsAnUnreadableHTTPProxyListener() async {
-        Localizer.shared.preference = .english
+        Localizer.shared.override = "en"
         let surge = EgressFakeSurge()
         surge.update { $0.listenerFailure = .commandFailed(command: "dump event", message: "The controller connection has been closed") }
         let controller = ProbeController(model: makeModel(surge: surge), registry: ProbeRegistry())
@@ -360,8 +360,8 @@ struct ProbeControllerTests {
                 == "surge-cli failed with exit status 1")
         #expect(ProbeController.listenerFailure(URLError(.badServerResponse)) == "An unexpected error occurred")
 
-        Localizer.shared.preference = .chinese
-        defer { Localizer.shared.preference = .english }
+        Localizer.shared.override = "zh-Hans"
+        defer { Localizer.shared.override = "en" }
         guard Localizer.shared.bundle != nil else { return }
         #expect(ProbeController.listenerFailure(SurgeError.commandFailed(command: "dump event", message: "Denied")) == "surge-cli 失败：Denied")
         #expect(ProbeController.listenerFailure(SurgeError.commandFailed(command: "dump event", message: "exit status 1")) == "surge-cli 失败，退出状态 1")
