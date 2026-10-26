@@ -1255,6 +1255,17 @@ struct RequestsHistogramTests {
         #expect(labels(from: now.addingTimeInterval(-30 * 86400), to: now, now: now) == ["Sep 25", "Oct 2", "Oct 9", "Oct 16", "Now"])
     }
 
+    @Test func aNarrowChartGetsFewerLabels() {
+        let now = date(24, 13, 48, 12)
+        let histogram = Histogram(start: now.addingTimeInterval(-86400), end: now, counts: [1])
+        let ticks = RequestsHistogramBin.axisTicks(of: histogram, now: now, locale: english, nowLabel: "Now", parts: 2)
+        #expect(ticks.map(\.label) == ["Oct 23 14:00", "Oct 24 02:00", "Now"])
+        #expect(RequestsHistogramBin.axisParts(forWidth: 1100) == 5)
+        #expect(RequestsHistogramBin.axisParts(forWidth: 560) == 4)
+        #expect(RequestsHistogramBin.axisParts(forWidth: 300) == 2)
+        #expect(RequestsHistogramBin.axisParts(forWidth: 0) == 2)
+    }
+
     @Test func labelsARangeThatEndsBeforeNow() {
         // A chart that no longer reaches now (the page stayed open) is labelled with its end time.
         #expect(labels(from: date(24, 9, 5), to: date(24, 11, 50), now: date(24, 14, 0)) == ["10:00", "11:00", "11:50"])

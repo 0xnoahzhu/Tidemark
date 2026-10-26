@@ -6,11 +6,20 @@ struct RequestsHistogramChart: View {
     var histogram: Histogram
 
     var body: some View {
+        // A narrow chart (the inspector open in a small window) gets fewer labels, so they never run together.
+        GeometryReader { geometry in
+            chart(parts: RequestsHistogramBin.axisParts(forWidth: geometry.size.width / UIScale.factor))
+        }
+    }
+
+    private func chart(parts: Int) -> some View {
         let bins = RequestsHistogramBin.bins(of: histogram)
-        let ticks = RequestsHistogramBin.axisTicks(of: histogram, now: .now, locale: Localizer.shared.locale, nowLabel: tr("Now", "Requests"))
+        let ticks = RequestsHistogramBin.axisTicks(
+            of: histogram, now: .now, locale: Localizer.shared.locale, nowLabel: tr("Now", "Requests"), parts: parts
+        )
         // The newest bar is the current one only while the chart still reaches now.
         let endsNow = abs(histogram.end.timeIntervalSinceNow) < 120
-        Chart {
+        return Chart {
             ForEach(bins) { bin in
                 bar(bin, highlighted: bin.isLast && endsNow)
             }
@@ -84,7 +93,14 @@ struct RequestsHistogramBin: Identifiable, Equatable {
         var label: String
     }
 
-    /// Tick spacings tried in order; the first that splits the range into at most five parts wins.
+    /// Into how many parts a chart `width` design px wide splits its range: five, the design's, where every label
+    /// has room (a date and time label takes about 100 px, and the end's label may sit close to the last tick), down
+    /// to two.
+    static func axisParts(forWidth width: CGFloat) -> Int {
+        min(5, max(2, Int(width / 140)))
+    }
+
+    /// Tick spacings tried in order; the first that splits the range into at most `parts` parts wins.
     static let tickSteps: [TimeInterval] = [
         10, 15, 30, 60, 120, 300, 600, 900, 1800,
         3600, 2 * 3600, 3 * 3600, 6 * 3600, 12 * 3600,
@@ -93,11 +109,11 @@ struct RequestsHistogramBin: Identifiable, Equatable {
 
     /// The design's axis: ticks on round times (24 hours → `Oct 23 14:00 · 20:00 · Oct 24 02:00 · 08:00 ·
     /// Now`), the date only where the day changes, and the range's end labelled "Now" when it is now.
-    static func axisTicks(of histogram: Histogram, now: Date, locale: Locale, calendar: Calendar = .current, nowLabel: String) -> [AxisTick] {
+    static func axisTicks(of histogram: Histogram, now: Date, locale: Locale, calendar: Calendar = .current, nowLabel: String, parts: Int = 5) -> [AxisTick] {
         let start = histogram.start, end = histogram.end
         let span = end.timeIntervalSince(start)
         guard span > 0 else { return [] }
-        let step = tickSteps.first { $0 >= span / 5 } ?? tickSteps[tickSteps.count - 1]
+        let step = tickSteps.first { $0 >= span / Double(max(1, parts)) } ?? tickSteps[tickSteps.count - 1]
         let byDay = step >= 86400
 
         var dates: [Date] = []
