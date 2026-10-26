@@ -6,8 +6,8 @@ import SwiftUI
 ///
 /// It comes in two sizes of the same look: `.regular()` (40 px tall) for page tabs and filters in page content,
 /// `.compact()` (32 px) where that is too tall, such as the window toolbar and Settings rows. Both are drawn at the
-/// UI scale, the compact one no taller than a toolbar item holds. The control sizes to its content; a control with
-/// counts, in a place too narrow for it, drops the counts and then the icons.
+/// UI scale, the compact one in a toolbar no taller than a toolbar item holds. The control sizes to its content; a
+/// control with counts, in a place too narrow for it, drops the counts and then the icons.
 ///
 /// Every choice is a button, so keyboard navigation reaches each one; VoiceOver reads the control as a
 /// segmented picker with its selected choice, and a toolbar's overflow menu lists the choices.
@@ -51,12 +51,13 @@ struct DesignSegmentedControl<Value: Hashable>: View {
         }
 
         /// 13 px titles, 13 px icons and 11 px counts; `padding: 5px 11px; border-radius: 7px` in a 3 px track with
-        /// 10 px corners: 32 px tall. It grows with the UI scale only as far as `toolbarItemHeight`, so a toolbar item
-        /// still holds it without clipping.
-        static func compact(factor: CGFloat = UIScale.factor) -> Size {
+        /// 10 px corners: 32 px tall. In a toolbar it grows with the UI scale only as far as `toolbarItemHeight`, so a
+        /// toolbar item still holds it without clipping; elsewhere (`inToolbar: false`, a Settings row) it grows with
+        /// the rest of the window.
+        static func compact(factor: CGFloat = UIScale.factor, inToolbar: Bool = true) -> Size {
             var size = Size(fontSize: 13, iconSize: 13, badgeFontSize: 11, contentHeight: 16, verticalPadding: 5,
                             horizontalPadding: 11, spacing: 5, cornerRadius: 7, trackPadding: 3, trackCornerRadius: 10, factor: 1)
-            size.factor = min(factor, toolbarItemHeight / size.height)
+            size.factor = inToolbar ? min(factor, toolbarItemHeight / size.height) : factor
             return size
         }
 

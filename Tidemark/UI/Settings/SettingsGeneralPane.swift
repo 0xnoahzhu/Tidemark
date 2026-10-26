@@ -72,7 +72,7 @@ struct SettingsGeneralPane: View {
                 model.preferences.appearance = value
                 AppBootstrap.applyAppearance(value)
             }
-        ), size: .compact(), segments: [
+        ), size: .compact(inToolbar: false), segments: [
             .init(.system, tr("System", "Settings"), systemImage: "circle.lefthalf.filled"),
             .init(.light, tr("Light", "Settings"), systemImage: "sun.max"),
             .init(.dark, tr("Dark", "Settings"), systemImage: "moon"),

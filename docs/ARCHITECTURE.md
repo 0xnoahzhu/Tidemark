@@ -345,10 +345,11 @@ for switches, tables (`Table`), search fields and sheets; every segmented choice
 `DesignSegmentedControl`, never the system's: on a rounded fill track with no dividers, each choice shows an SF
 Symbol, its title and, where the number is already at hand, a count in a small capsule, and the selected one is
 raised on a white cell (20% white in dark mode) with a hairline border. It is 40 px tall in page content and
-32 px (`.compact()`) in the window toolbar and Settings, the compact size growing with the UI scale no taller than
-the toolbar's 36 pt glass capsule; a control with counts drops them, then its icons, where
-it has too little room. In a toolbar it sits outside the glass bubble, and VoiceOver and the overflow menu see a
-picker. Each page draws its title and subtitle in the toolbar's leading item at the design's size
+32 px (`.compact()`) in the window toolbar and Settings, the compact size in a toolbar growing with the UI scale no
+taller than the toolbar's 36 pt glass capsule (Settings' grows with the rest of its pane, `inToolbar: false`); a
+control with counts drops them, then its icons, where it has too little room. In a toolbar it sits outside the glass
+bubble, and VoiceOver and the overflow menu see a picker. Each page draws its title and subtitle in the toolbar's
+leading item at the design's size
 (`pageToolbar(_:subtitle:items:)`, 15 px bold over 11 px) in place of the system's title, whose size is fixed; it
 grows with the UI scale no taller than a toolbar item, and in a narrow window it shortens, the subtitle first, before
 the page's items go to the overflow menu. The window keeps the title and subtitle as its own for the Window menu,

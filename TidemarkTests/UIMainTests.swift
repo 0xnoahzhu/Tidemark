@@ -405,8 +405,8 @@ struct DesignSegmentedControlTests {
         #expect(Self.width(of: Self.kinds(selected: 0, count: 85)) == width)
     }
 
-    /// The two sizes are 40 and 32 px tall. Both grow with the UI scale, the compact one only as far as a toolbar
-    /// item's capsule holds it; the control draws at its size's height.
+    /// The two sizes are 40 and 32 px tall. Both grow with the UI scale, the compact one in a toolbar only as far as a
+    /// toolbar item's capsule holds it; the control draws at its size's height.
     @Test func sizesFollowTheScaleUpToTheToolbarsHeight() {
         typealias Size = DesignSegmentedControl<Int>.Size
         #expect(Size.regular(factor: 1).height == 40)
@@ -418,6 +418,10 @@ struct DesignSegmentedControlTests {
         }
         #expect(Size.compact(factor: 1.1).factor == 1.1)
         #expect(Size.compact(factor: 1.4).factor < 1.4)
+        // At 1.2 a toolbar already holds it a little smaller; outside a toolbar (a Settings row) it keeps the factor.
+        #expect(Size.compact(factor: 1.2).factor < 1.2)
+        #expect(Size.compact(factor: 1.2, inToolbar: false).factor == 1.2)
+        #expect(Size.compact(factor: 1.2, inToolbar: false).height >= UIScale.length(32, factor: 1.2) - 1)
         let drawn = NSHostingController(rootView: Self.kinds(selected: 0, count: 12)).sizeThatFits(in: CGSize(width: CGFloat.infinity, height: .infinity))
         #expect(drawn.height == Size.compact().height)
     }
