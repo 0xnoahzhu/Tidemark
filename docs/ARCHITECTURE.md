@@ -397,10 +397,15 @@ minimum size lay every text of the request out again on each selection. The timi
 Hello, the DNS lookup Surge timed and the rest of the setup, which in global proxy mode, when the request rode an open
 connection of its proxy, is Surge's own work rather than a connect. While the inspector opens, SwiftUI lays the page
 out at no height a few times and AppKit's table, seeing none of itself, scrolls to its top; `RequestsTablePlaceKeeper`
-puts the rows back, so the selected row stays where it was. `Navigation.openRequests(forHost:)` opens History on one
-exact host, shown as a removable chip beside the filters, and the status filter also finds the requests that ended
-with an error, which Surge marks completed; it reads the end reason stored since schema v4, so it finds no request
-recorded before, which its empty state says.
+puts the rows back, so the selected row stays where it was. The header's status chip names an ending with an error as
+the Ended stage does (`Connection reset`, though Surge marked the request completed). `Navigation.openRequests(forHost:)`
+opens History on one exact host, shown as a removable chip beside the filters, and the status filter also finds the
+requests that ended with an error, which Surge marks completed; it reads the end reason stored since schema v4, so it
+finds no request recorded before, which its empty state says. It can also filter on an app and replace the time range:
+Domains & IPs and an app's Domains & IPs tab open a row's host over all time, as their counts span it, and the app's tab
+only that app's requests. There a row's Requests count is the link (a button, or for a site or a network a menu of its
+hosts) and its context menu has "Show Requests"; an IP's count also takes in the requests to the domains that resolved
+to it, which History finds under those domains, and its empty state for an IP says so.
 
 The Domains & IPs page draws its table itself, as the native inset table looks and behaves (header and separators,
 rounded alternate rows continued below the last one, each row one VoiceOver element naming its columns), in one
