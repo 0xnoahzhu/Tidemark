@@ -14,6 +14,8 @@ import SwiftUI
 struct AppDetailView: View {
     @Environment(AppModel.self) private var model
     var appID: AppID
+    /// What the app pages' tabs showed last, kept by the main window.
+    var cache: AppDetailCache
 
     @State private var counters = AppDetailCounters()
     @State private var actionError: (any Error)?
@@ -41,7 +43,7 @@ struct AppDetailView: View {
             AppDetailStatsStrip(app: app, absent: absent, counters: counters, perform: perform)
             AppDetailInstallsRow(app: app)
                 .id(app.id)
-            AppDetailTabContent(app: app, absent: absent, counters: counters)
+            AppDetailTabContent(app: app, absent: absent, counters: counters, cache: cache)
                 .id(app.id)
         }
         .background(Theme.bg)
@@ -160,15 +162,17 @@ private struct AppDetailTabContent: View {
     var app: MonitoredApp
     var absent: Bool
     var counters: AppDetailCounters
+    var cache: AppDetailCache
 
     var body: some View {
+        let scope = absent ? DeviceScope.all : model.devices.scope
         switch model.nav.appTab {
         case .requests:
             AppDetailRequestsTab(app: app, absent: absent, counters: counters)
         case .inventory:
-            AppDetailInventoryTab(app: app, absent: absent)
+            AppDetailInventoryTab(app: app, scope: scope, search: model.nav.appInventorySearch, cache: cache)
         case .tree:
-            AppDetailProcessTreeTab(app: app, absent: absent)
+            AppDetailProcessTreeTab(app: app, scope: scope, cache: cache)
         }
     }
 }

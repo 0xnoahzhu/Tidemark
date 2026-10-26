@@ -3,16 +3,20 @@ import UniformTypeIdentifiers
 
 /// "Domains & IPs" tab of a monitored app: every domain (grouped by site) and every IP it used, each
 /// listed once, with a search field and CSV export. Selecting a domain highlights the IPs it resolved to.
+///
+/// The tab opens with what it showed last for the app (`AppDetailCache`) and reads the database again in the
+/// background; the summary is computed off the main actor, and only when the hosts, the search or a NEW mark
+/// changed.
 struct AppDetailInventoryTab: View {
     @Environment(AppModel.self) private var model
     var app: MonitoredApp
-    var absent: Bool
+    /// Whose hosts are listed: the sidebar's Mac, or every Mac when the app is not on that one.
+    var scope: DeviceScope
+    /// The search as typed.
+    var search: String
+    var cache: AppDetailCache
 
-    @State private var hosts: [AppHost] = []
-    /// The app and scope `hosts` were last loaded for.
-    @State private var loadedKey: LoadKey?
-    /// Groups and counts of `hosts`, recomputed when they or the search change (not on every hover).
-    @State private var summary = AppDetailInventorySummary()
+    @State private var content: Content
     @State private var exportDocument: AnalyzeCSVDocument?
     @State private var isExporting = false
     @State private var exportError: (any Error)?
@@ -20,10 +24,35 @@ struct AppDetailInventoryTab: View {
     fileprivate static let domainColumns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 150), .fixed(104), .fixed(70), .fixed(64)]
     fileprivate static let ipColumns: [AnalyzeColumnsLayout.Column] = [.fixed(150), .flexible(weight: 1, min: 90), .fixed(56)]
 
+    init(app: MonitoredApp, scope: DeviceScope, search: String, cache: AppDetailCache) {
+        self.app = app
+        self.scope = scope
+        self.search = search
+        self.cache = cache
+        _content = State(initialValue: Self.cached(AppDetailCache.Key(appID: app.id, scope: scope), search: search, in: cache) ?? Content())
+    }
+
+    /// The hosts and the summary shown, with what they were read and computed for.
+    private struct Content {
+        /// The app and scope `hosts` were last loaded for (nil before the first load).
+        var key: AppDetailCache.Key?
+        var hosts: [AppHost] = []
+        /// Bumped whenever `hosts` changes, so a summary computed meanwhile can tell it is out of date.
+        var revision = 0
+        /// Groups and counts of `hosts` for `summary.search`.
+        var summary = AppDetailInventorySummary()
+    }
+
+    /// What the tab last showed for `key`, when its summary was made for `search`.
+    private static func cached(_ key: AppDetailCache.Key, search: String, in cache: AppDetailCache) -> Content? {
+        guard let cached = cache.inventory(key), cached.summary.search == search else { return nil }
+        return Content(key: key, hosts: cached.hosts, summary: cached.summary)
+    }
+
     var body: some View {
-        let key = LoadKey(appID: app.id, scope: absent ? .all : model.devices.scope)
+        let key = AppDetailCache.Key(appID: app.id, scope: scope)
         Group {
-            if loadedKey == key && hosts.isEmpty {
+            if content.key == key && content.hosts.isEmpty {
                 waitingState
             } else {
                 VStack(spacing: 0) {
@@ -57,8 +86,12 @@ struct AppDetailInventoryTab: View {
         .task(id: key) {
             await refresh(key)
         }
-        .onChange(of: model.nav.appInventorySearch) { recompute() }
+        .task(id: search) {
+            await follow(search)
+        }
     }
+
+    private var summary: AppDetailInventorySummary { content.summary }
 
     // MARK: Header
 
@@ -75,7 +108,7 @@ struct AppDetailInventoryTab: View {
             FilterField(prompt: tr("Search", "AppDetail"), text: $nav.appInventorySearch, width: 190)
             Button(tr("Export CSV", "AppDetail"), action: export)
                 .buttonStyle(.bordered)
-                .disabled(hosts.isEmpty)
+                .disabled(content.hosts.isEmpty)
                 .help(tr("Save every domain and IP of this app as a CSV file", "AppDetail"))
         }
         .padding(.horizontal, 20)
@@ -271,39 +304,69 @@ struct AppDetailInventoryTab: View {
 
     // MARK: Loading and export
 
-    private struct LoadKey: Hashable {
-        var appID: AppID
-        var scope: DeviceScope
-    }
-
-    private func refresh(_ key: LoadKey) async {
-        if loadedKey != key, !hosts.isEmpty {
-            // Another app or scope: don't show the previous list while the new one loads.
-            hosts = []
-            recompute()
+    private func refresh(_ key: AppDetailCache.Key) async {
+        if content.key != key {
+            // Another scope (the tab stays when the sidebar's Mac changes): what the tab last showed for it, or
+            // nothing rather than the previous list while the new one loads.
+            if let cached = Self.cached(key, search: model.nav.appInventorySearch, in: cache) {
+                content = cached
+            } else if !content.hosts.isEmpty {
+                content = Content()
+            }
         }
         while !Task.isCancelled {
             do {
                 let fresh = try await model.database.appHosts(key.appID, scope: key.scope)
                 if Task.isCancelled { return }
-                hosts = fresh
-                // Also refreshes the NEW marks, which expire with time.
-                recompute()
+                await show(fresh, for: key)
+                if Task.isCancelled { return }
             } catch {
                 // Keep the last list; the sidebar footer reports database problems.
             }
-            loadedKey = key
+            if content.key != key { content.key = key }
             try? await Task.sleep(for: .seconds(10))
         }
     }
 
-    private func recompute() {
-        summary = AppDetailInventorySummary(hosts: hosts, search: model.nav.appInventorySearch,
-                                            site: { model.classifier.site(for: $0) })
+    /// Shows hosts just read. Nothing changes when they are the ones shown and the summary is still current (its
+    /// NEW marks expire with time); otherwise the summary is computed off the main actor.
+    private func show(_ fresh: [AppHost], for key: AppDetailCache.Key) async {
+        let same = content.key == key && fresh == content.hosts
+        if same, content.summary.isCurrent(search: model.nav.appInventorySearch, at: .now) { return }
+        while !Task.isCancelled {
+            let search = model.nav.appInventorySearch
+            let summary = await AppDetailInventorySummary.make(hosts: fresh, search: search, classifier: model.classifier)
+            // Typed meanwhile: summarize again for the new search.
+            guard !Task.isCancelled, search == model.nav.appInventorySearch else { continue }
+            var next = content
+            if !same || next.key != key {
+                next.hosts = fresh
+                next.revision &+= 1
+            }
+            next.key = key
+            next.summary = summary
+            content = next
+            cache.setInventory(AppDetailCache.Inventory(hosts: fresh, summary: summary), for: key)
+            return
+        }
+    }
+
+    /// Filters the shown hosts for a new search, off the main actor.
+    private func follow(_ search: String) async {
+        while !Task.isCancelled {
+            guard let key = content.key, content.summary.search != search else { return }
+            let hosts = content.hosts, revision = content.revision
+            let summary = await AppDetailInventorySummary.make(hosts: hosts, search: search, classifier: model.classifier)
+            // New hosts arrived meanwhile: summarize those.
+            guard !Task.isCancelled, revision == content.revision, key == content.key else { continue }
+            content.summary = summary
+            cache.setInventory(AppDetailCache.Inventory(hosts: hosts, summary: summary), for: key)
+            return
+        }
     }
 
     private func export() {
-        exportDocument = AnalyzeCSVDocument(text: AnalyzeCSV.appHosts(hosts))
+        exportDocument = AnalyzeCSVDocument(text: AnalyzeCSV.appHosts(content.hosts))
         isExporting = true
     }
 }
@@ -399,9 +462,9 @@ enum AppDetailInventoryFormat {
     }
 }
 
-/// Groups and counts behind the "Domains & IPs" tab (pure, so it can be tested).
-struct AppDetailInventorySummary {
-    struct SiteGroup: Identifiable, Equatable {
+/// Groups and counts behind the "Domains & IPs" tab (pure, so it can be tested, and computed off the main actor).
+struct AppDetailInventorySummary: Sendable {
+    struct SiteGroup: Identifiable, Equatable, Sendable {
         var site: String
         var hosts: [AppHost]
         var firstSeen: Date
@@ -421,12 +484,18 @@ struct AppDetailInventorySummary {
     var groups: [SiteGroup] = []
     var directIPs: [AppHost] = []
     var resolvedIPs: [AppHost] = []
+    /// The search the groups and IPs were filtered by.
+    private(set) var search = ""
+    /// When the first of the hosts' NEW marks runs out; the order and `newCount` change then.
+    private(set) var expires: Date?
     private var domainValues: Set<String> = []
 
     /// No hosts.
     init() {}
 
     init(hosts: [AppHost], search: String, now: Date = .now, site: (String) -> String) {
+        self.search = search
+        expires = hosts.lazy.filter { $0.isNew(now: now) }.map { $0.firstSeen.addingTimeInterval(24 * 3600) }.min()
         let domains = hosts.filter { $0.kind == .domain }
         let ips = hosts.filter { $0.kind == .ip }
         domainValues = Set(domains.map(\.value))
@@ -469,6 +538,17 @@ struct AppDetailInventorySummary {
         .sorted(by: order)
         directIPs = visibleIPs.filter(\.isDirect)
         resolvedIPs = visibleIPs.filter { !$0.isDirect }
+    }
+
+    /// Summarizes `hosts` off the caller's actor.
+    @concurrent
+    static func make(hosts: [AppHost], search: String, now: Date = .now, classifier: any SiteClassifying) async -> AppDetailInventorySummary {
+        AppDetailInventorySummary(hosts: hosts, search: search, now: now, site: { classifier.site(for: $0) })
+    }
+
+    /// Whether this summary still describes its hosts for `search` at `now` (no NEW mark has run out since).
+    func isCurrent(search: String, at now: Date) -> Bool {
+        self.search == search && (expires.map { now < $0 } ?? true)
     }
 
     /// `11 domains · 6 sites · 9 IPs (1 by IP only)`, the clause included when it counts none, like the design.

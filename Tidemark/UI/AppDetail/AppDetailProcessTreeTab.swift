@@ -1,14 +1,26 @@
 import SwiftUI
 
 /// "Process Tree" tab of a monitored app: every process whose requests roll up to the app, indented
-/// under its parent, with its domains, requests and whether it still runs.
+/// under its parent, with its domains, requests and whether it still runs. It opens with the tree it showed
+/// last for the app (`AppDetailCache`) and reads it again in the background.
 struct AppDetailProcessTreeTab: View {
     @Environment(AppModel.self) private var model
     var app: MonitoredApp
-    var absent: Bool
+    /// Whose processes are listed: the sidebar's Mac, or every Mac when the app is not on that one.
+    var scope: DeviceScope
+    var cache: AppDetailCache
 
-    @State private var nodes: [ProcessNode] = []
-    @State private var loaded = false
+    @State private var nodes: [ProcessNode]
+    @State private var loaded: Bool
+
+    init(app: MonitoredApp, scope: DeviceScope, cache: AppDetailCache) {
+        self.app = app
+        self.scope = scope
+        self.cache = cache
+        let cached = cache.tree(AppDetailCache.Key(appID: app.id, scope: scope))
+        _nodes = State(initialValue: cached ?? [])
+        _loaded = State(initialValue: cached != nil)
+    }
 
     fileprivate static let columns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 200), .fixed(70), .fixed(80), .fixed(84)]
 
@@ -56,7 +68,7 @@ struct AppDetailProcessTreeTab: View {
             .padding(.top, 14)
             .padding(.bottom, 20)
         }
-        .task(id: LoadKey(appID: app.id, scope: scope)) {
+        .task(id: AppDetailCache.Key(appID: app.id, scope: scope)) {
             await refresh()
         }
     }
@@ -71,19 +83,16 @@ struct AppDetailProcessTreeTab: View {
         scope.deviceID == model.devices.thisDeviceID || model.devices.devices.count <= 1
     }
 
-    private var scope: DeviceScope { absent ? .all : model.devices.scope }
-
-    private struct LoadKey: Hashable {
-        var appID: AppID
-        var scope: DeviceScope
-    }
-
     private func refresh() async {
+        let key = AppDetailCache.Key(appID: app.id, scope: scope)
+        // Another scope (the tab stays when the sidebar's Mac changes): what the tab last showed for it.
+        if let cached = cache.tree(key), cached != nodes { nodes = cached }
         while !Task.isCancelled {
-            if let fresh = try? await model.database.processTree(appID: app.id, scope: scope), !Task.isCancelled {
-                nodes = fresh
+            if let fresh = try? await model.database.processTree(appID: key.appID, scope: key.scope), !Task.isCancelled {
+                if fresh != nodes { nodes = fresh }
+                cache.setTree(fresh, for: key)
             }
-            loaded = true
+            if !loaded { loaded = true }
             try? await Task.sleep(for: .seconds(10))
         }
     }
