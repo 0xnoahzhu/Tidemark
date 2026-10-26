@@ -20,8 +20,11 @@ enum UIScale {
     /// The tallest toolbar item, in points at every factor: the glass capsule an item sits in.
     static let toolbarItemHeight: CGFloat = 36
 
-    /// The factor in use: `standard`, or in Debug builds the `-TidemarkUIScale 1.3` launch argument, clamped to
-    /// `range` and lowered to fit the main screen.
+    /// The factor asked for: `standard`, or in Debug builds the `-TidemarkUIScale 1.3` launch argument, clamped to
+    /// `range`. Unlike `factor`, it is the same whatever screen the app launches on.
+    static let requested: CGFloat = resolve(requested: requestedFactor, visibleSize: nil)
+
+    /// The factor in use: `requested`, lowered to fit the main screen.
     static let factor: CGFloat = resolve(requested: requestedFactor, visibleSize: launchScreenSize)
 
     /// The main screen's visible size when the factor was resolved; nil if that was off the main thread or without a

@@ -119,15 +119,34 @@ struct UIScaleWindowTests {
         suite.set(frame, forKey: "NSWindow Frame main")
         suite.set(["0, 0, 244, 812, NO, NO"], forKey: "NSSplitView Subview Frames main, SidebarNavigationSplitView")
         suite.set(frame, forKey: "NSWindow Frame probe-browser")
-        suite.set(Double(UIScale.factor) + 0.3, forKey: MainWindowFrame.defaultsKey)
+        suite.set(Double(UIScale.requested) + 0.3, forKey: MainWindowFrame.defaultsKey)
 
         MainWindowFrame.resetIfScaleChanged(defaults: suite)
         #expect(suite.object(forKey: "NSWindow Frame main") == nil)
         #expect(suite.object(forKey: "NSSplitView Subview Frames main, SidebarNavigationSplitView") == nil)
         #expect(suite.string(forKey: "NSWindow Frame probe-browser") == frame)
-        #expect(suite.double(forKey: MainWindowFrame.defaultsKey) == Double(UIScale.factor))
+        #expect(suite.double(forKey: MainWindowFrame.defaultsKey) == Double(UIScale.requested))
 
         suite.set(frame, forKey: "NSWindow Frame main")
+        MainWindowFrame.resetIfScaleChanged(defaults: suite)
+        #expect(suite.string(forKey: "NSWindow Frame main") == frame)
+    }
+
+    /// The frame is stored with the factor asked for, which a small screen lowers only for drawing: launches that
+    /// alternate between a laptop's screen and a larger display keep the saved frame.
+    @Test func savedLayoutFollowsTheRequestedFactorNotTheScreen() {
+        #expect(UIScale.range.contains(UIScale.requested))
+        #expect(UIScale.factor <= UIScale.requested)
+        #expect(UIScale.factor == UIScale.resolve(requested: UIScale.requested, visibleSize: UIScale.launchScreenSize))
+        // 1.3 on a 13" laptop with the Dock shown, and on a large display.
+        #expect(UIScale.resolve(requested: 1.3, visibleSize: CGSize(width: 1470, height: 856)) < 1.3)
+        #expect(UIScale.resolve(requested: 1.3, visibleSize: CGSize(width: 2560, height: 1415)) == 1.3)
+
+        let defaults = TestDefaults()
+        let suite = defaults.make()
+        let frame = "40 80 1564 812 0 0 2560 1410 "
+        suite.set(frame, forKey: "NSWindow Frame main")
+        suite.set(Double(UIScale.requested), forKey: MainWindowFrame.defaultsKey)
         MainWindowFrame.resetIfScaleChanged(defaults: suite)
         #expect(suite.string(forKey: "NSWindow Frame main") == frame)
     }

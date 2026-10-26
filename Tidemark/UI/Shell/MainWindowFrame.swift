@@ -7,6 +7,10 @@ import Foundation
 /// content drawn larger or smaller. When the factor differs from the one stored with the frame, the saved frame and
 /// split view sizes are forgotten before the window is built, and the window opens at the default size, centered.
 /// Versions before the UI scale drew at 1.0, which a missing value stands for.
+///
+/// The stored factor is the one asked for (`UIScale.requested`), not the one fitted to the screen, so a Mac that
+/// launches the app on a screen too small for that factor and then on a larger one keeps its frame both times; AppKit
+/// fits a restored frame to the screen it opens on.
 enum MainWindowFrame {
     static let defaultsKey = "window.mainScale"
     /// The design's window, in design px.
@@ -33,12 +37,12 @@ enum MainWindowFrame {
         key == "NSWindow Frame \(WindowID.main)" || key.hasPrefix("NSSplitView Subview Frames \(WindowID.main),")
     }
 
-    /// Forgets the main window's saved layout if it was saved at another factor, and stores the factor in use. The
-    /// app calls it before it builds its first window.
+    /// Forgets the main window's saved layout if it was saved at another factor, and stores the factor asked for.
+    /// The app calls it before it builds its first window.
     static func resetIfScaleChanged(defaults: UserDefaults = .standard) {
         let stored = defaults.object(forKey: defaultsKey) as? Double
-        defaults.set(Double(UIScale.factor), forKey: defaultsKey)
-        guard needsReset(stored: stored, factor: UIScale.factor) else { return }
+        defaults.set(Double(UIScale.requested), forKey: defaultsKey)
+        guard needsReset(stored: stored, factor: UIScale.requested) else { return }
         for key in defaults.dictionaryRepresentation().keys where isSavedLayout(key) {
             defaults.removeObject(forKey: key)
         }
