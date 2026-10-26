@@ -573,7 +573,7 @@ private final class SlowStopProbeActions: ProbeActions {
 
         nav.open(.app(UIMainFixtures.cursor.id), tab: .inventory)
         nav.history.range = .last7Days
-        let link = AppDetailRequestsLink(appID: UIMainFixtures.cursor.id, appName: "Cursor")
+        let link = AppDetailRequestsLink(appID: UIMainFixtures.cursor.id, appName: "Cursor", oneMac: false)
         link.open("104.18.19.125", in: nav)
         #expect(nav.page == .requests)
         #expect(nav.history.remoteIP == "104.18.19.125" && nav.history.appID == UIMainFixtures.cursor.id && nav.history.range == .all)
@@ -584,22 +584,25 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(nav.history.range == .last24Hours && nav.history.appID == nil)
     }
 
-    /// A count's help says what it opens: every request to a domain or that reached an IP, or on an app's tab the app's.
+    /// A count's help says what it opens: every request to a domain or that reached an IP, or on an app's tab the app's,
+    /// and with one Mac in the sidebar that History lists only that Mac's while the tab counts every Mac's.
     @Test func helpSaysWhatACountOpens() {
         Localizer.shared.override = "en"
         #expect(InventoryRequests.help(hosts: ["api2.cursor.sh"]) == "Show every stored request to api2.cursor.sh in History")
         #expect(InventoryRequests.help(hosts: ["104.18.19.125"]) == "Show every stored request that reached 104.18.19.125 in History")
         #expect(InventoryRequests.help(hosts: ["104.18.19.125", "104.18.18.125"]) == "Choose a host to show its stored requests in History")
-        let link = AppDetailRequestsLink(appID: UIMainFixtures.cursor.id, appName: "Cursor")
+        var link = AppDetailRequestsLink(appID: UIMainFixtures.cursor.id, appName: "Cursor", oneMac: false)
         #expect(link.help(hosts: ["api2.cursor.sh"]) == "Show Cursor requests to api2.cursor.sh in History")
         #expect(link.help(hosts: ["2001:db8::1"]) == "Show Cursor requests that reached 2001:db8::1 in History")
-        #expect(link.help(hosts: ["api2.cursor.sh", "cursor.sh"]) == "Choose a host to show its Cursor requests in History")
+        link.oneMac = true
+        #expect(link.help(hosts: ["api2.cursor.sh", "cursor.sh"])
+            == "Choose a host to show its Cursor requests in History\nThe count covers every Mac; History lists only the requests of the Mac chosen in the sidebar.")
 
         Localizer.shared.override = "zh-Hans"
         defer { Localizer.shared.override = "en" }
         guard Localizer.shared.bundle != nil else { return }
         #expect(InventoryRequests.help(hosts: ["104.18.19.125"]) == "在历史中显示到达 104.18.19.125 的全部已存请求")
-        #expect(link.help(hosts: ["api2.cursor.sh"]) == "在历史中显示 Cursor 发往 api2.cursor.sh 的请求")
+        #expect(link.help(hosts: ["api2.cursor.sh"]) == "在历史中显示 Cursor 发往 api2.cursor.sh 的请求\n此数字涵盖所有 Mac；历史只列出边栏所选 Mac 的请求。")
     }
 
     /// The demo lists a host with as many requests as History then finds for it, everywhere and for one app.
@@ -631,6 +634,12 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(try await database.queryRequests(RequestQuery(range: .all, appID: cursor, remoteIP: appIP.value)).totalCount == 3)
         // One Mac lists only what that Mac saw.
         #expect(try await database.inventory(kind: .domain, search: "", scope: .device(UIMainFixtures.otherMac)).map(\.requestCount) == [1])
+        // An app's tab lists what one Mac reported with every Mac's counts, as the real database does; History keeps
+        // the sidebar's Mac, which the count's help says.
+        let otherMac = try await database.appHosts(cursor, scope: .device(UIMainFixtures.otherMac))
+        #expect(otherMac.map { "\($0.value) \($0.requestCount)" } == ["104.18.19.125 3", "api2.cursor.sh 2"])
+        let onOtherMac = RequestQuery(scope: .device(UIMainFixtures.otherMac), range: .all, appID: cursor, host: "api2.cursor.sh")
+        #expect(try await database.queryRequests(onOtherMac).totalCount == 1)
     }
 }
 

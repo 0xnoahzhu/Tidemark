@@ -268,9 +268,9 @@ struct AppDetailInventoryTab: View {
         requestsLink.open(host, in: model.nav)
     }
 
-    /// What the rows open in History.
+    /// What the rows open in History. History keeps the sidebar's Mac, not the tab's.
     private var requestsLink: AppDetailRequestsLink {
-        AppDetailRequestsLink(appID: app.id, appName: app.name)
+        AppDetailRequestsLink(appID: app.id, appName: app.name, oneMac: model.devices.scope.deviceID != nil)
     }
 
     // MARK: IPs
@@ -634,10 +634,13 @@ extension InventoryRequests {
 }
 
 /// What an app's rows open in History: the app's requests to a domain, or that reached an IP, over all time
-/// (`InventoryRequests.open`).
+/// (`InventoryRequests.open`). The tab's counts are every Mac's (the inventory is shared), while History keeps the
+/// sidebar's Mac, so with one Mac there the count's help says History lists only that Mac's.
 struct AppDetailRequestsLink: Equatable {
     var appID: AppID
     var appName: String
+    /// The sidebar has one Mac.
+    var oneMac: Bool
 
     @MainActor
     func open(_ host: String, in nav: Navigation) {
@@ -647,12 +650,15 @@ struct AppDetailRequestsLink: Equatable {
     /// The help of a row's count: what it opens.
     @MainActor
     func help(hosts: [String]) -> String {
-        guard hosts.count == 1, let host = hosts.first else {
-            return trf("Choose a host to show its %@ requests in History", "AppDetail", appName)
+        let opens = if hosts.count == 1, let host = hosts.first {
+            HostName.isIPAddress(host)
+                ? trf("Show %1$@ requests that reached %2$@ in History", "AppDetail", appName, host)
+                : trf("Show %1$@ requests to %2$@ in History", "AppDetail", appName, host)
+        } else {
+            trf("Choose a host to show its %@ requests in History", "AppDetail", appName)
         }
-        return HostName.isIPAddress(host)
-            ? trf("Show %1$@ requests that reached %2$@ in History", "AppDetail", appName, host)
-            : trf("Show %1$@ requests to %2$@ in History", "AppDetail", appName, host)
+        guard oneMac else { return opens }
+        return opens + "\n" + tr("The count covers every Mac; History lists only the requests of the Mac chosen in the sidebar.", "AppDetail")
     }
 }
 

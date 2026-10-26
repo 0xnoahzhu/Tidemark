@@ -96,10 +96,13 @@ struct ShellDemoDatabase: TidemarkDatabase {
 
     func appHosts(_ appID: AppID, scope: DeviceScope) async throws -> [AppHost] {
         // Oldest first, so the first request of a host names its first process and the domains of an IP keep their order.
+        // As in the real database, one Mac keeps the entries it reported, whose counts and dates stay every Mac's.
         var hosts: [String: AppHost] = [:]
-        for row in rows.reversed() where row.appID == appID && scope.includes(row.deviceID) {
+        var reported: Set<String> = []
+        for row in rows.reversed() where row.appID == appID {
             for (kind, value) in Self.inventoryValues(of: row) {
                 let key = "\(kind.rawValue):\(value)"
+                if scope.includes(row.deviceID) { reported.insert(key) }
                 var host = hosts[key] ?? AppHost(
                     appID: appID, kind: kind, value: value, site: nil, firstSeen: row.startedAt, lastSeen: row.startedAt, requestCount: 0,
                     processName: row.processName, policy: nil, geo: nil, isDirect: kind == .ip && row.isIPLiteral, hosts: [],
@@ -113,7 +116,8 @@ struct ShellDemoDatabase: TidemarkDatabase {
                 hosts[key] = host
             }
         }
-        return hosts.values.sorted { a, b in a.firstSeen != b.firstSeen ? a.firstSeen > b.firstSeen : a.value < b.value }
+        return hosts.filter { reported.contains($0.key) }.values
+            .sorted { a, b in a.firstSeen != b.firstSeen ? a.firstSeen > b.firstSeen : a.value < b.value }
     }
 
     func inventory(kind: HostKind?, search: String, scope: DeviceScope) async throws -> [InventoryEntry] {

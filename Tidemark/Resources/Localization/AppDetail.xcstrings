@@ -994,6 +994,17 @@
         }
       }
     },
+    "The count covers every Mac; History lists only the requests of the Mac chosen in the sidebar." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此数字涵盖所有 Mac；历史只列出边栏所选 Mac 的请求。"
+          }
+        }
+      }
+    },
     "This app is no longer monitored" : {
       "localizations" : {
         "zh-Hans" : {
