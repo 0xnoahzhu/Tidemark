@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -24,17 +25,33 @@ struct AppDetailInventoryTab: View {
     static let domainColumns = domainColumns(factor: UIScale.factor)
     static let ipColumns = ipColumns(factor: UIScale.factor)
 
-    // The columns at any UI scale. First seen and the counts are fixed to the longest of their text (`Yesterday 23:59`
-    // in 12 px, `1,234,567` in 11 px SF Mono), the IP to `255.255.255.255` in 11.5 px SF Mono and a NEW badge: text that
-    // grows with the scale as the widths do.
+    // The columns at any UI scale. First seen, Last seen and the counts are fixed to the longest of their text
+    // (`Yesterday 23:59` in 12 px, `Yesterday` and `1,234,567` in 11 px SF Mono), the IP to `255.255.255.255` in
+    // 11.5 px SF Mono and a NEW badge: text that grows with the scale as the widths do. The names take what is left,
+    // however little (the design's `minmax(0, 1fr)`), so in a narrow window they shorten and the rest stays whole.
     static func domainColumns(factor: CGFloat) -> [AnalyzeColumnsLayout.Column] {
         func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
-        return [.flexible(weight: 1, min: px(150)), .fixed(px(104)), .fixed(px(70)), .fixed(px(64))]
+        return [.flexible(weight: 1), .fixed(px(104)), .fixed(px(70)), .fixed(px(64))]
     }
 
     static func ipColumns(factor: CGFloat) -> [AnalyzeColumnsLayout.Column] {
         func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
-        return [.fixed(px(150)), .flexible(weight: 1, min: px(90)), .fixed(px(56))]
+        return [.fixed(px(150)), .flexible(weight: 1), .fixed(px(56))]
+    }
+
+    /// The Domains pane's width in a tab `width` points wide: 1.4 of every 2.4, as in the design, but never so much
+    /// that the IP pane, beside an always-visible scroller, keeps less than 70 px for the network.
+    static func domainsPaneWidth(_ width: CGFloat, factor: CGFloat = UIScale.factor) -> CGFloat {
+        func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
+        let columns = ipColumns(factor: factor)
+        let fixed = columns.reduce(CGFloat(0)) { total, column in
+            if case .fixed(let width) = column { total + width } else { total }
+        }
+        // The IP pane's fixed columns, the spaces between its columns, its 16 px margins, the network, the scroller and
+        // the hairline between the panes.
+        let ipMinimum = fixed + px(10) * CGFloat(columns.count - 1) + px(16) * 2 + px(70)
+            + NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) + 0.5
+        return max(0, min(width * 1.4 / 2.4, width - ipMinimum))
     }
 
     /// The hosts and the summary shown, with what they were read and computed for.
@@ -72,7 +89,7 @@ struct AppDetailInventoryTab: View {
                         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
                     GeometryReader { geometry in
                         HStack(spacing: 0) {
-                            domainsPane.frame(width: geometry.size.width * 1.4 / 2.4)
+                            domainsPane.frame(width: Self.domainsPaneWidth(geometry.size.width))
                             Rectangle().fill(Theme.line).frame(width: 0.5)
                             ipsPane.frame(maxWidth: .infinity)
                         }
@@ -112,7 +129,7 @@ struct AppDetailInventoryTab: View {
             Spacer(minLength: 0)
             FilterField(prompt: tr("Search", "AppDetail"), text: $nav.appInventorySearch, width: 190)
             Button(tr("Export CSV", "AppDetail"), action: export)
-                .buttonStyle(.bordered)
+                .buttonStyle(DesignButtonStyle())
                 .disabled(content.hosts.isEmpty)
                 .help(tr("Save every domain and IP of this app as a CSV file", "AppDetail"))
         }
@@ -184,17 +201,18 @@ struct AppDetailInventoryTab: View {
 
     private func siteRow(_ group: AppDetailInventorySummary.SiteGroup) -> some View {
         AnalyzeColumnsLayout(columns: Self.domainColumns) {
+            // In a narrow pane the host count shortens before the site.
             HStack(spacing: 8.px) {
-                Text(group.site).fontWeight(.semibold).lineLimit(1)
+                Text(group.site).fontWeight(.semibold).lineLimit(1).layoutPriority(1)
                 Text(trn("%lld host", "%lld hosts", group.hosts.count, "AppDetail"))
                     .font(.design(11))
                     .foregroundStyle(Theme.ink2)
-                    .fixedSize()
+                    .lineLimit(1)
                 if group.isNewSite { TagBadge(text: tr("NEW SITE", "AppDetail"), style: .new) }
             }
             Text(AnalyzeFormat.seen(group.firstSeen)).font(.design(12)).foregroundStyle(Theme.ink2).lineLimit(1)
-            Text(AnalyzeFormat.seen(group.lastSeen, timeOnlyToday: true)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
-            Text(Fmt.count(group.requests)).font(Theme.mono(11, weight: .semibold)).frame(maxWidth: .infinity, alignment: .trailing)
+            Text(AppDetailInventoryFormat.lastSeen(group.lastSeen)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
+            Text(Fmt.count(group.requests)).font(Theme.mono(11, weight: .semibold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12.5))
         .padding(.horizontal, 16.px)
@@ -288,9 +306,10 @@ struct AppDetailInventoryTab: View {
     }
 
     private func ipGroupHeader(_ title: String, count: Int, note: String) -> some View {
+        // In a narrow pane the note shortens; the title and the count stay on one line.
         HStack(alignment: .firstTextBaseline, spacing: 7.px) {
-            Text(title).foregroundStyle(Theme.ink)
-            Text(verbatim: String(count)).fontWeight(.medium).foregroundStyle(Theme.ink3)
+            Text(title).foregroundStyle(Theme.ink).fixedSize()
+            Text(verbatim: String(count)).fontWeight(.medium).foregroundStyle(Theme.ink3).fixedSize()
             Text(note).fontWeight(.medium).foregroundStyle(Theme.ink3).lineLimit(1)
             Spacer(minLength: 0)
         }
@@ -389,8 +408,8 @@ private struct AppDetailDomainRow: View {
             }
             .padding(.leading, 12.px)
             Text(AnalyzeFormat.seen(host.firstSeen)).foregroundStyle(Theme.ink2).lineLimit(1)
-            Text(AnalyzeFormat.seen(host.lastSeen, timeOnlyToday: true)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
-            Text(Fmt.count(host.requestCount)).font(Theme.mono(11)).frame(maxWidth: .infinity, alignment: .trailing)
+            Text(AppDetailInventoryFormat.lastSeen(host.lastSeen)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
+            Text(Fmt.count(host.requestCount)).font(Theme.mono(11)).lineLimit(1).frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12))
         .padding(.horizontal, 16.px)
@@ -439,7 +458,7 @@ private struct AppDetailIPRow: View {
                         .help(ip.hosts.joined(separator: "\n"))
                 }
             }
-            Text(Fmt.count(ip.requestCount)).font(Theme.mono(11)).frame(maxWidth: .infinity, alignment: .trailing)
+            Text(Fmt.count(ip.requestCount)).font(Theme.mono(11)).lineLimit(1).frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12))
         .padding(.horizontal, 16.px)
@@ -530,6 +549,17 @@ private struct AppDetailIPHeaderLayout: Layout {
 
 /// Text helpers of the "Domains & IPs" tab.
 enum AppDetailInventoryFormat {
+    /// The Last seen column's short form, as in the design: `14:31` today, `Yesterday`, then `Oct 24`, so the value
+    /// fits its column whole.
+    @MainActor
+    static func lastSeen(_ date: Date, now: Date = .now) -> String {
+        switch Fmt.seen(date, now: now, timeOnlyToday: true) {
+        case .time(let time), .today(let time): time
+        case .yesterday: tr("Yesterday", "AppDetail")
+        case .date(let day): Fmt.monthDay(day, locale: Localizer.shared.locale)
+        }
+    }
+
     /// `api.anthropic.com, claude.ai +2`: the first hosts in full, then how many more there are.
     static func domains(_ hosts: [String], limit: Int = 3) -> String {
         let head = hosts.prefix(limit).joined(separator: ", ")

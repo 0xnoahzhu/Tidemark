@@ -230,7 +230,9 @@ private enum AppDetailContext {
 
 // MARK: - Stats strip
 
-/// The app's counters, with its Monitoring switch and Archive button (or, archived, Restore and Delete).
+/// The app's counters, with its Monitoring switch and Archive button (or, archived, Restore and Delete). In a window
+/// too narrow for the whole strip, the note beside the controls shortens; the counters, the switch and the buttons keep
+/// their size.
 private struct AppDetailStatsStrip: View {
     @Environment(AppModel.self) private var model
     var app: MonitoredApp
@@ -274,7 +276,8 @@ private struct AppDetailStatsStrip: View {
     }
 
     private var archivedControls: some View {
-        HStack(spacing: 10.px) {
+        let note = tr("Not monitoring · history kept in the database", "AppDetail")
+        return HStack(spacing: 10.px) {
             Text(tr("ARCHIVED", "AppDetail"))
                 .font(.design(11, .bold))
                 .tracking(0.44 * UIScale.factor)
@@ -282,26 +285,41 @@ private struct AppDetailStatsStrip: View {
                 .padding(.vertical, 2.px)
                 .background(Theme.fill2, in: RoundedRectangle(cornerRadius: 5.px, style: .continuous))
                 .foregroundStyle(Theme.ink2)
-            Text(tr("Not monitoring · history kept in the database", "AppDetail"))
+                .fixedSize()
+            Text(note)
                 .font(.design(12))
                 .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
+                .help(note)
             Button(tr("Restore", "AppDetail")) { perform { try await model.capture.restoreApp(app.id) } }
-            Button(tr("Delete…", "AppDetail"), role: .destructive) { model.nav.confirmDeleteApp = app.id }
+                .fixedSize()
+            Button(role: .destructive) {
+                model.nav.confirmDeleteApp = app.id
+            } label: {
+                // Red on the fill, as the design's: the label's color comes before the style's ink.
+                Text(tr("Delete…", "AppDetail")).foregroundStyle(Color(oklch: 0.58, 0.19, 27))
+            }
+            .fixedSize()
         }
-        .buttonStyle(.bordered)
-        .fixedSize()
+        .buttonStyle(Self.buttonStyle)
     }
+
+    /// Archive, Restore and Delete…: the design's 26 px buttons on the fill.
+    private static let buttonStyle = DesignButtonStyle(height: 26, cornerRadius: 7, horizontalPadding: 10)
 
     private var activeControls: some View {
         HStack(spacing: 16.px) {
             if absent {
+                let note = trf("Not monitored on %@", "AppDetail", AppDetailContext.macName(model))
                 HStack(spacing: 7.px) {
                     Toggle(tr("Monitoring", "AppDetail"), isOn: .constant(false))
                         .labelsHidden()
                         .disabled(true)
-                    Text(trf("Not monitored on %@", "AppDetail", AppDetailContext.macName(model)))
+                        .fixedSize()
+                    Text(note)
                         .foregroundStyle(Theme.ink3)
+                        .lineLimit(1)
+                        .help(note)
                 }
             } else {
                 HStack(spacing: 7.px) {
@@ -309,16 +327,17 @@ private struct AppDetailStatsStrip: View {
                         .labelsHidden()
                     Text(tr("Monitoring", "AppDetail"))
                 }
+                .fixedSize()
             }
             Button(tr("Archive", "AppDetail")) { perform { try await model.capture.archiveApp(app.id) } }
-                .buttonStyle(.bordered)
+                .buttonStyle(Self.buttonStyle)
+                .fixedSize()
         }
         .toggleStyle(.switch)
         // The system draws the switch, which only grows a control size at a time: one step up once the page is
         // drawn larger.
         .controlSize(UIScale.factor >= 1.2 ? .regular : .small)
         .font(.design(12))
-        .fixedSize()
     }
 
     /// The switch never flips by itself: it asks for confirmation first, like the design's dialog.
@@ -332,7 +351,8 @@ private struct AppDetailStatsStrip: View {
 
 // MARK: - Installed on
 
-/// "Installed on" and a chip per Mac saying what the app's path is there.
+/// "Installed on" and a chip per Mac saying what the app's path is there, wrapping onto more rows when the page is
+/// too narrow for them all.
 private struct AppDetailInstallsRow: View {
     @Environment(AppModel.self) private var model
     var app: MonitoredApp
@@ -340,18 +360,17 @@ private struct AppDetailInstallsRow: View {
     var body: some View {
         let devices = model.devices.devices
         if !devices.isEmpty {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8.px) {
-                    Text(tr("Installed on", "AppDetail")).foregroundStyle(Theme.ink2)
-                    ForEach(devices) { device in
-                        installChip(device)
-                    }
+            AppDetailInstallsLayout {
+                Text(tr("Installed on", "AppDetail")).foregroundStyle(Theme.ink2)
+                ForEach(devices) { device in
+                    installChip(device)
                 }
-                .padding(.horizontal, 20.px)
-                .padding(.vertical, 8.px)
             }
-            .scrollIndicators(.never)
             .font(.design(11.5))
+            .lineLimit(1)
+            .padding(.horizontal, 20.px)
+            .padding(.vertical, 8.px)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
         }
     }
@@ -380,7 +399,49 @@ private struct AppDetailInstallsRow: View {
         .padding(.vertical, 2.px)
         .background(Theme.fill, in: Capsule())
         .opacity(installed == false ? 0.55 : 1)
-        .fixedSize()
+    }
+}
+
+/// Lays out the Installed on row like the design's `flex-wrap`: the label and the chips in a row, 8 px apart, and
+/// what does not fit on a row starts the next, 8 px below, each row's items centered on it. A chip wider than the
+/// whole row gets the row's width.
+struct AppDetailInstallsLayout: Layout {
+    var spacing: CGFloat = 8.px
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let frames = Self.frames(for: subviews.map { $0.sizeThatFits(.unspecified) }, width: proposal.width ?? .infinity, spacing: spacing)
+        return CGSize(width: proposal.width ?? frames.map(\.maxX).max() ?? 0, height: frames.map(\.maxY).max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let frames = Self.frames(for: subviews.map { $0.sizeThatFits(.unspecified) }, width: bounds.width, spacing: spacing)
+        for (subview, frame) in zip(subviews, frames) {
+            subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), proposal: ProposedViewSize(frame.size))
+        }
+    }
+
+    /// The frames of items of `sizes` in rows `width` wide.
+    static func frames(for sizes: [CGSize], width: CGFloat, spacing: CGFloat) -> [CGRect] {
+        var frames: [CGRect] = []
+        var rowStart = 0, y: CGFloat = 0, x: CGFloat = 0, rowHeight: CGFloat = 0
+        func centerRow() {
+            for index in rowStart..<frames.count { frames[index].origin.y = y + (rowHeight - frames[index].height) / 2 }
+        }
+        for size in sizes {
+            let itemWidth = min(size.width, width)
+            if x > 0, x + itemWidth > width {
+                centerRow()
+                y += rowHeight + spacing
+                x = 0
+                rowHeight = 0
+                rowStart = frames.count
+            }
+            frames.append(CGRect(x: x, y: y, width: itemWidth, height: size.height))
+            x += itemWidth + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        centerRow()
+        return frames
     }
 }
 

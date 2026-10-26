@@ -1021,6 +1021,16 @@
         }
       }
     },
+    "Yesterday" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "昨天"
+          }
+        }
+      }
+    },
     "failed" : {
       "localizations" : {
         "zh-Hans" : {

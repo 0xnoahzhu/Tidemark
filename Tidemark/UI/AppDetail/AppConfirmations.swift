@@ -38,7 +38,7 @@ struct AppMonitoringConfirmation: ViewModifier {
 }
 
 /// "Delete Raycast?": the page's delete sheet. The app's tile sits beside the title, the message says what
-/// deleting removes and what stays, and Cancel and a red Delete close it at the right.
+/// deleting removes and what stays, and Cancel and a red Delete, the design's 28 px buttons, close it at the right.
 struct AppDeleteConfirmation: View {
     @Environment(\.dismiss) private var dismiss
     var app: MonitoredApp
@@ -64,14 +64,13 @@ struct AppDeleteConfirmation: View {
                 Spacer(minLength: 0)
                 Button(tr("Cancel", "AppDetail")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .buttonStyle(DesignButtonStyle(horizontalPadding: 12))
                 Button(tr("Delete", "AppDetail"), role: .destructive) {
                     dismiss()
                     onDelete()
                 }
-                .buttonStyle(.glassProminent)
-                .tint(Theme.destructive)
+                .buttonStyle(DesignButtonStyle(kind: .destructive, horizontalPadding: 12))
             }
-            .controlSize(.large)
             .padding(.top, 4.px)
         }
         .padding(20.px)

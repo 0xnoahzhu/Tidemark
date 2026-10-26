@@ -29,7 +29,8 @@ struct AppDetailRequestsTab: View {
     @State private var freshTick = 0
 
     /// Policy grows like the global table's (up to 200 px), so a chip such as `AI › AT&T-RackNerd-Hysteria2` is
-    /// whole at the default window width and only shortens when the window is narrow.
+    /// whole at the default window width and only shortens when the window is narrow. At the narrowest window, beside
+    /// an always-visible scroller, every column is still at least its minimum.
     static let columns = columns(factor: UIScale.factor)
     /// The method before each host (`HTTPS`, `CONNECT`): the design's 40 px and the 2 px more a seven-letter method
     /// needs, which the design lets run into the gap.
@@ -41,7 +42,7 @@ struct AppDetailRequestsTab: View {
     static func columns(factor: CGFloat) -> [AnalyzeColumnsLayout.Column] {
         func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
         return [
-            .fixed(px(104)), .flexible(weight: 1, min: px(120)), .flexible(weight: 1.5, min: px(150)), .fixed(px(118)),
+            .fixed(px(104)), .flexible(weight: 1, min: px(108)), .flexible(weight: 1.5, min: px(150)), .fixed(px(118)),
             .flexible(weight: 1, min: px(104), max: px(200)), .fixed(px(62)),
         ]
     }
