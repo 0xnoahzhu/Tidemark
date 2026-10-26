@@ -197,7 +197,7 @@ struct UIScaleDrawingTests {
     @Test func pageToolbarKeepsTheWindowTitle() async throws {
         let page = Color.clear
             .frame(width: 600, height: 300)
-            .pageToolbar("Requests", subtitle: "Every request Surge sees") {
+            .pageToolbar("Requests", subtitle: "Every request Surge sees, kept in PostgreSQL") {
                 ToolbarItem(placement: .primaryAction) { Text(verbatim: "Item") }
             }
         let host = NSHostingView(rootView: page)
@@ -215,8 +215,23 @@ struct UIScaleDrawingTests {
             try await Task.sleep(for: .milliseconds(50))
         }
         #expect(window.title == "Requests")
-        #expect(window.subtitle == "Every request Surge sees")
+        #expect(window.subtitle == "Every request Surge sees, kept in PostgreSQL")
         let items = try #require(window.toolbar?.items)
         #expect(items.count >= 3, "the title, the room after it and the page's item")
+
+        // The title's item gives way to the page's items: the toolbar may narrow it down to the title's minimum.
+        func holdsAnchor(_ view: NSView) -> Bool {
+            view is ToolbarItemCompressionAnchor || view.subviews.contains(where: holdsAnchor)
+        }
+        let titleView = try #require(items.lazy.compactMap(\.view).first(where: holdsAnchor))
+        // A window that is never ordered in puts its toolbar's views in when it is drawn.
+        let drawn = ContinuousClock.now + .seconds(5)
+        while titleView.window == nil, ContinuousClock.now < drawn {
+            window.displayIfNeeded()
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(titleView.contentCompressionResistancePriority(for: .horizontal) < .fittingSizeCompression)
+        #expect(titleView.fittingSize.width < titleView.intrinsicContentSize.width)
+        #expect(titleView.fittingSize.width >= UIScale.length(PageTitle.minimumWidth, factor: PageTitle.Metrics().factor))
     }
 }

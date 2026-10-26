@@ -78,6 +78,9 @@ struct PageTitle: View {
         }
     }
 
+    /// The narrowest the page toolbar shortens the block to, in px: every page's name, and the start of its subtitle.
+    static let minimumWidth: CGFloat = 128
+
     var title: String
     var subtitle: String?
     /// Draws the subtitle in the monospaced font (an app's path).
@@ -146,12 +149,18 @@ extension View {
             .toolbar(removing: .title)
             .toolbar {
                 ToolbarItem(placement: .navigation) {
+                    let metrics = PageTitle.Metrics()
                     HStack(spacing: 10.px) {
                         leading
-                        PageTitle(title: title, subtitle: subtitle, monospacedSubtitle: monospacedSubtitle)
+                        // In a narrow window the title gives way before the page's items, as the system's did: the
+                        // subtitle shortens first, then the title, down to room for a page's name and the start of
+                        // its subtitle. Below that the toolbar moves items to its overflow menu.
+                        PageTitle(title: title, subtitle: subtitle, monospacedSubtitle: monospacedSubtitle, metrics: metrics)
+                            .frame(minWidth: UIScale.length(PageTitle.minimumWidth, factor: metrics.factor), alignment: .leading)
                     }
                     .padding(.leading, inset.px)
                     .padding(.trailing, 2.px)
+                    .toolbarItemCompressible()
                 }
                 // Text on the toolbar itself, as the system's title, rather than in a glass bubble.
                 .sharedBackgroundVisibility(.hidden)

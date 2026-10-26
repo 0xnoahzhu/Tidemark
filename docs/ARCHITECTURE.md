@@ -348,8 +348,9 @@ the toolbar's 36 pt glass capsule; a control with counts drops them, then its ic
 it has too little room. In a toolbar it sits outside the glass bubble, and VoiceOver and the overflow menu see a
 picker. Each page draws its title and subtitle in the toolbar's leading item at the design's size
 (`pageToolbar(_:subtitle:items:)`, 15 px bold over 11 px) in place of the system's title, whose size is fixed; it
-grows with the UI scale no taller than a toolbar item. The window keeps the title and subtitle as its own for the
-Window menu, Mission Control and VoiceOver. Every window's root
+grows with the UI scale no taller than a toolbar item, and in a narrow window it shortens, the subtitle first, before
+the page's items go to the overflow menu. The window keeps the title and subtitle as its own for the Window menu,
+Mission Control and VoiceOver. Every window's root
 sets the design's line height (`Theme.lineHeight`, CSS `line-height: 1.35`, which SwiftUI also takes as a multiple
 of the font's size). The pause /
 resume and Stop monitoring confirmations are the design's glass dialogs (`GlassDialog`), laid over the whole
@@ -411,6 +412,8 @@ list applies at the next launch.
   The main window's saved frame and sidebar width are forgotten once when the factor changes (`MainWindowFrame`).
 * A toolbar whose page draws its own title (`toolbar(removing: .title)`) needs a `ToolbarSpacer(.flexible)` in
   the same toolbar content as the trailing items, or they follow the title instead of keeping to the trailing end.
+  The toolbar keeps a SwiftUI item at its ideal width and drops spaces and items instead of narrowing it, unless
+  its content is `toolbarItemCompressible()`, as the page title is.
 * English for all code, comments, docs and commit messages; other languages only in String Catalogs.
 * Conventional Commits (`feat(capture): …`, `fix(ui): …`, `test(database): …`).
 * No credentials in the repository.
