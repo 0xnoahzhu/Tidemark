@@ -12,12 +12,41 @@ enum UIScale {
     static let standard: CGFloat = 1.0
     /// The factors the app can be drawn at.
     static let range: ClosedRange<CGFloat> = 1.0...1.5
-    /// The main window's minimum size in design px; a factor whose scaled minimum does not fit the screen is lowered.
+    /// The main window's minimum content size in design px; a factor whose scaled minimum does not fit the screen is
+    /// lowered.
     static let minimumWindow = CGSize(width: 1000, height: 640)
+    /// What the window adds above its content, in points at every factor: the toolbar's band.
+    static let windowChromeHeight: CGFloat = 52
 
     /// The factor in use: `standard`, or in Debug builds the `-TidemarkUIScale 1.3` launch argument, clamped to
     /// `range` and lowered to fit the main screen.
-    static let factor: CGFloat = resolve(requested: requestedFactor, visibleSize: mainScreenVisibleSize)
+    static let factor: CGFloat = resolve(requested: requestedFactor, visibleSize: launchScreenSize)
+
+    /// The main screen's visible size when the factor was resolved; nil if that was off the main thread or without a
+    /// screen, when the factor is not fitted to the screen.
+    static let launchScreenSize: CGSize? = mainScreenVisibleSize
+
+    /// Resolves `factor` on the main thread, where the screen is known, so the clamp to the screen always applies.
+    /// The app calls it before it builds its first window; every later read gets the same value.
+    @MainActor
+    static func resolveAtLaunch() {
+        _ = factor
+    }
+
+    /// The main window's minimum content size in points: `minimumWindow` at the factor, never larger than the screen
+    /// leaves below the toolbar.
+    static let minimumWindowSize = minimumWindowSize(factor: factor, visibleSize: launchScreenSize)
+
+    /// `minimumWindow` at `factor`, cut to `visibleSize` less the toolbar where the screen is smaller: a screen too
+    /// small even at the lowest factor, which `resolve` never goes below, or the half point a rounded length can add.
+    static func minimumWindowSize(factor: CGFloat, visibleSize: CGSize?) -> CGSize {
+        var size = CGSize(width: length(minimumWindow.width, factor: factor), height: length(minimumWindow.height, factor: factor))
+        if let visibleSize, visibleSize.width > 0, visibleSize.height > windowChromeHeight {
+            size.width = min(size.width, visibleSize.width)
+            size.height = min(size.height, visibleSize.height - windowChromeHeight)
+        }
+        return size
+    }
 
     /// `px` design px in points at the current factor.
     static func length(_ px: CGFloat) -> CGFloat {
@@ -30,11 +59,12 @@ enum UIScale {
     }
 
     /// The factor for a `requested` one (nil for `standard`) on a screen whose visible frame is `visibleSize` (nil
-    /// when unknown): within `range`, and no larger than lets the scaled minimum window fit the screen.
+    /// when unknown): within `range`, and no larger than lets the scaled minimum window, with its toolbar, fit the
+    /// screen.
     static func resolve(requested: CGFloat?, visibleSize: CGSize?) -> CGFloat {
         var result = min(max(requested ?? standard, range.lowerBound), range.upperBound)
-        if let visibleSize, visibleSize.width > 0, visibleSize.height > 0 {
-            let fitting = min(visibleSize.width / minimumWindow.width, visibleSize.height / minimumWindow.height)
+        if let visibleSize, visibleSize.width > 0, visibleSize.height > windowChromeHeight {
+            let fitting = min(visibleSize.width / minimumWindow.width, (visibleSize.height - windowChromeHeight) / minimumWindow.height)
             result = max(range.lowerBound, min(result, fitting))
         }
         return result

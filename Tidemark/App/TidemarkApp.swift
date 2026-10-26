@@ -6,6 +6,7 @@ struct TidemarkApp: App {
 
     init() {
         TableRowHeightDefaults.register()
+        UIScale.resolveAtLaunch()
     }
 
     var body: some Scene {
