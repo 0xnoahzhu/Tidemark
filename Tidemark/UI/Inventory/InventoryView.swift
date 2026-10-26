@@ -466,7 +466,20 @@ private struct InventoryEntryRow: View {
         .padding(.vertical, InventoryTableMetrics.rowPadding)
         .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
         .background { if striped { InventoryRowStripe(inset: insetStripe) } }
-        .accessibilityElement(children: .combine)
+        // One element per row that names each column, as VoiceOver reads a table's row; the name's tooltip (an
+        // IP's network) is its help.
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isStaticText)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityHint(entry.geo?.display ?? "")
+    }
+
+    private var accessibilityText: String {
+        trf("Name: %1$@, Type: %2$@, Seen by: %3$@, First seen: %4$@, Last seen: %5$@, Requests: %6$@", "Inventory",
+            entry.value, entry.kind == .ip ? tr("IP", "Inventory") : tr("Domain", "Inventory"),
+            InventorySourcesList.accessibilityText(entry.sources),
+            AnalyzeFormat.seen(entry.firstSeen), AnalyzeFormat.seen(entry.lastSeen, timeOnlyToday: true),
+            Fmt.count(entry.requestCount))
     }
 }
 
@@ -511,7 +524,20 @@ private struct InventoryGroupRow: View {
         .padding(.vertical, InventoryTableMetrics.rowPadding)
         .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
         .background { if striped { InventoryRowStripe(inset: insetStripe) } }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isStaticText)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        trf("Site or network: %1$@, %2$@, %3$@, Seen by: %4$@, Requests: %5$@", "Inventory",
+            group.name,
+            group.kind == .ip
+                ? trn("%lld IP", "%lld IPs", group.names.count, "Inventory")
+                : trn("%lld host", "%lld hosts", group.names.count, "Inventory"),
+            group.preview,
+            group.sources.prefix(5).map(InventorySourcesList.displayTitle).joined(separator: ", "),
+            Fmt.count(group.requests))
     }
 }
 
@@ -751,6 +777,14 @@ struct InventorySourcesList: View {
     @MainActor
     static func displayTitle(_ source: InventorySource) -> String {
         isProbe(source) ? displayPath(source) : source.title
+    }
+
+    /// The sources shown, as VoiceOver reads them: each app's name and process path, or the probe or "not reported".
+    @MainActor
+    static func accessibilityText(_ sources: [InventorySource]) -> String {
+        sources.prefix(6).map { source in
+            isProbe(source) || isUnreported(source) ? displayPath(source) : "\(source.title), \(displayPath(source))"
+        }.joined(separator: "; ")
     }
 }
 

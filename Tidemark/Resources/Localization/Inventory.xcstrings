@@ -221,6 +221,17 @@
         }
       }
     },
+    "Name: %1$@, Type: %2$@, Seen by: %3$@, First seen: %4$@, Last seen: %5$@, Requests: %6$@" : {
+      "comment" : "VoiceOver label of a row of the Domains & IPs table: each column's title and the row's value in it.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名称：%1$@，类型：%2$@，来源：%3$@，首次出现：%4$@，最近出现：%5$@，请求：%6$@"
+          }
+        }
+      }
+    },
     "No domains or IPs match “%@”" : {
       "localizations" : {
         "zh-Hans" : {
@@ -307,6 +318,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "站点或网络"
+          }
+        }
+      }
+    },
+    "Site or network: %1$@, %2$@, %3$@, Seen by: %4$@, Requests: %5$@" : {
+      "comment" : "VoiceOver label of a row of the Domains & IPs table: each column's title and the row's value in it.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "站点或网络：%1$@，%2$@，%3$@，来源：%4$@，请求：%5$@"
           }
         }
       }
