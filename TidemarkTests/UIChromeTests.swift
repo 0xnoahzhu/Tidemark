@@ -144,14 +144,17 @@ struct UIChromeTests {
     // MARK: Menu bar panel
 
     @Test func menuBarPanelMatchesTheDesignWidth() {
-        #expect(MenuBarPanel.width == 320)
+        #expect(MenuBarPanel.width == 320.px)
+        #expect(MenuBarPanel.cornerRadius == 16.px)
     }
 
-    /// The egress IP and its policy chip stay inside the room the 320 pt panel leaves next to the "Egress"
+    /// The egress IP and its policy chip stay inside the room the 320 px panel leaves next to the "Egress"
     /// label, even for a full-length IPv6 address and a long policy name: IPv4 and short IPv6 addresses share
     /// one line with the chip, a full-length IPv6 address moves the chip to a second line.
     @Test func egressValueNeverRunsPastThePanel() {
-        let available = CGSize(width: 230, height: 200)
+        // The panel's 12 px padding and the row's 10 px, and the label with the 8 px after it.
+        let label = ("Egress" as NSString).size(withAttributes: [.font: NSFont.design(12)]).width.rounded(.up)
+        let available = CGSize(width: MenuBarPanel.width - 2 * 12.px - 2 * 10.px - label - 8.px, height: 200.px)
         let policy = ["AI", "AT&T-RackNerd-Hysteria2"]
         func size(_ ip: String) -> CGSize {
             NSHostingController(rootView: MenuBarEgressValue(ip: ip, policyPath: policy)).sizeThatFits(in: available)
@@ -160,9 +163,9 @@ struct UIChromeTests {
             #expect(size(ip).width <= available.width, "\(ip)")
         }
         let oneLine = size("255.255.255.255").height
-        #expect(oneLine < 24)
+        #expect(oneLine < 24.px)
         #expect(size("2a01:4f8:c17:1234::1").height == oneLine)
-        #expect(size("2001:0db8:85a3:0000:0000:8a2e:0370:7334").height > oneLine + 10)
+        #expect(size("2001:0db8:85a3:0000:0000:8a2e:0370:7334").height > oneLine + 10.px)
     }
 
     // MARK: Settings chrome

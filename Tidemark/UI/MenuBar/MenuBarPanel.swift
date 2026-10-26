@@ -17,13 +17,14 @@ struct MenuBarPanel: View {
     /// Closes the panel (ends the status item's expanded-interface session).
     var onDismiss: @MainActor () -> Void = {}
 
-    static let width: CGFloat = 320
-    static let cornerRadius: CGFloat = 16
+    /// The design's 320 px, which `StatusItemController` also sizes the panel's window and glass to.
+    static let width = 320.px
+    static let cornerRadius = 16.px
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 10.px) {
             header
-            HStack(spacing: 8) {
+            HStack(spacing: 8.px) {
                 MenuBarStatTile(title: tr("Today", "MenuBar"), value: Fmt.count(model.live.todayCount))
                 MenuBarStatTile(title: tr("Right now", "MenuBar"), value: Fmt.rate(model.live.rate))
             }
@@ -31,7 +32,7 @@ struct MenuBarPanel: View {
             latest
             footer
         }
-        .padding(12)
+        .padding(12.px)
         .frame(width: Self.width)
         .foregroundStyle(Theme.ink)
         .background(
@@ -43,29 +44,32 @@ struct MenuBarPanel: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(spacing: 10) {
-            // The asset keeps the system icon margin; drawn at 45 pt its tile fills the design's 36 pt.
+        HStack(spacing: 10.px) {
+            // The asset keeps the system icon margin; drawn a quarter larger, its tile fills the design's 36 px.
+            let tile = 36.px, drawn = tile * 1.25
             Image("BrandIcon")
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 45, height: 45)
-                .padding(-4.5)
+                .frame(width: drawn, height: drawn)
+                .padding(-(drawn - tile) / 2)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 1.px) {
                 Text(verbatim: "Tidemark")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.design(13, .bold))
                 Text(statusLine)
-                    .font(.system(size: 11.5))
+                    .font(.design(11.5))
                     .foregroundStyle(Theme.ink2)
                     .lineLimit(1)
                     .contentTransition(.numericText())
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 8.px)
             Toggle(isOn: recordingBinding) {
                 Text(tr("Recording", "MenuBar"))
             }
             .toggleStyle(.switch)
-            .controlSize(.small)
+            // The system's switch, which does not follow the UI scale: a size larger from 1.2 on, near the
+            // design's 34 × 20 px there.
+            .controlSize(UIScale.factor >= 1.2 ? .regular : .small)
             .labelsHidden()
             .tint(Theme.accent)
             .help(model.live.recording ? tr("Pause recording…", "MenuBar") : tr("Resume recording…", "MenuBar"))
@@ -98,7 +102,7 @@ struct MenuBarPanel: View {
     // MARK: Egress
 
     private var egressRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 8.px) {
             Text(tr("Egress", "MenuBar"))
                 .foregroundStyle(Theme.ink2)
                 .fixedSize()
@@ -111,12 +115,12 @@ struct MenuBarPanel: View {
                 Spacer(minLength: 0)
             }
         }
-        .font(.system(size: 12))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .font(.design(12))
+        .padding(.horizontal, 10.px)
+        .padding(.vertical, 6.px)
         // One line normally; a long IPv6 address puts the policy chip on a second line.
-        .frame(minHeight: 32)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .frame(minHeight: 32.px)
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10.px, style: .continuous))
     }
 
     // MARK: Latest alerts
@@ -125,18 +129,18 @@ struct MenuBarPanel: View {
     @ViewBuilder
     private var latest: some View {
         Text(tr("Latest", "MenuBar").uppercased(with: localizer.locale))
-            .font(.system(size: 10.5, weight: .semibold))
-            .tracking(0.6)
+            .font(.design(10.5, .semibold))
+            .tracking(0.6 * UIScale.factor)
             .foregroundStyle(Theme.ink2)
-            .padding(.horizontal, 2)
-            .padding(.top, 2)
+            .padding(.horizontal, 2.px)
+            .padding(.top, 2.px)
         let items = Array(model.alerts.items.prefix(3))
         if items.isEmpty {
             Text(tr("Nothing here. New domains and IPs show up the first time they're seen.", "MenuBar"))
-                .font(.system(size: 11.5))
+                .font(.design(11.5))
                 .foregroundStyle(Theme.ink2)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 2)
+                .padding(.horizontal, 2.px)
         } else {
             ForEach(items) { alert in
                 MenuBarAlertRow(alert: alert) { open(alert) }
@@ -147,26 +151,26 @@ struct MenuBarPanel: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: 6) {
-            Button {
+        HStack(spacing: 6.px) {
+            Button(tr("Open Window", "MenuBar")) {
                 showMainWindow()
-            } label: {
-                Text(tr("Open Window", "MenuBar")).frame(maxWidth: .infinity)
             }
+            .buttonStyle(DesignButtonStyle(fillsWidth: true))
             Button(tr("Settings…", "MenuBar")) {
                 onDismiss()
                 DockPresence.willShowWindow()
                 NSApp.activate()
                 openSettings()
             }
-            Button(tr("Quit", "MenuBar")) {
+            Button {
                 onDismiss()
                 AppDelegate.requestQuit()
+            } label: {
+                Text(tr("Quit", "MenuBar")).foregroundStyle(Theme.ink2)
             }
-            .foregroundStyle(Theme.ink2)
         }
-        .buttonStyle(MenuBarPanelButtonStyle())
-        .padding(.top, 8)
+        .buttonStyle(DesignButtonStyle())
+        .padding(.top, 8.px)
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.line).frame(height: 0.5)
         }
@@ -193,40 +197,27 @@ struct MenuBarPanel: View {
     }
 }
 
-/// The footer's flat buttons: 28 pt high on the design's fill, darker while pressed.
-private struct MenuBarPanelButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .medium))
-            .lineLimit(1)
-            .padding(.horizontal, 11)
-            .frame(height: 28)
-            .background(configuration.isPressed ? Theme.fill2 : Theme.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-}
-
 /// `Today 128,513` / `Right now 2.8/s` tile.
 private struct MenuBarStatTile: View {
     var title: String
     var value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: 1.px) {
             Text(title)
-                .font(.system(size: 10.5))
+                .font(.design(10.5))
                 .foregroundStyle(Theme.ink2)
             Text(value)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.design(17, .semibold))
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .contentTransition(.numericText())
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 10.px)
+        .padding(.vertical, 9.px)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10.px, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
@@ -242,16 +233,16 @@ struct MenuBarEgressValue: View {
     var policyPath: [String]
 
     /// Room the chip asks for when deciding whether the IP and the chip share a line.
-    static let chipRoom: CGFloat = 56
+    static let chipRoom = 56.px
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
+            HStack(spacing: 12.px) {
                 ipText.fixedSize()
                 MenuBarPolicyChip(policyPath: policyPath)
                     .frame(minWidth: 0, idealWidth: Self.chipRoom, maxWidth: .infinity, alignment: .trailing)
             }
-            VStack(alignment: .trailing, spacing: 4) {
+            VStack(alignment: .trailing, spacing: 4.px) {
                 ipText
                     .minimumScaleFactor(0.75)
                     .truncationMode(.middle)
@@ -277,12 +268,12 @@ private struct MenuBarPolicyChip: View {
     var body: some View {
         let tint = Theme.tint(Theme.policyHue(policyPath))
         Text(policyPath.last ?? "—")
-            .font(.system(size: 11, weight: .medium))
+            .font(.design(11, .medium))
             .lineLimit(1)
             .truncationMode(.head)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 1)
-            .background(tint.background, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .padding(.horizontal, 7.px)
+            .padding(.vertical, 1.px)
+            .background(tint.background, in: RoundedRectangle(cornerRadius: 5.px, style: .continuous))
             .foregroundStyle(tint.foreground)
     }
 }
@@ -296,26 +287,26 @@ private struct MenuBarAlertRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: 9.px) {
                 AppTile(identity: identity, size: 22.px)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 2.px) {
                     Text(value)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.design(12, .semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Text([identity.name, alert.knownProcessName].compactMap { $0 }.joined(separator: " · "))
-                        .font(.system(size: 10.5))
+                        .font(.design(10.5))
                         .foregroundStyle(Theme.ink2)
                         .lineLimit(1)
                 }
-                Spacer(minLength: 6)
+                Spacer(minLength: 6.px)
                 Text(time)
-                    .font(.system(size: 10.5))
+                    .font(.design(10.5))
                     .foregroundStyle(Theme.ink3)
                     .monospacedDigit()
             }
-            .padding(.horizontal, 2)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 2.px)
+            .padding(.vertical, 3.px)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

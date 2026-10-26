@@ -175,7 +175,8 @@ final class StatusItemController: NSObject {
         }
     }
 
-    /// Places the panel under the status item, left-aligned with it and kept on screen.
+    /// Places the panel under the status item, left-aligned with it and kept on screen, where a menu would sit:
+    /// 6 pt below the menu bar and 8 pt from the screen's edges, in points at every UI scale.
     private func position(_ panel: NSWindow) {
         guard let buttonWindow = statusItem.button?.window else { return }
         let anchor = buttonWindow.frame
