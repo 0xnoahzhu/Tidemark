@@ -308,9 +308,11 @@ over any background.
 History runs its page query and its histogram side by side: the rows appear as soon as the page arrives, a
 histogram that fails leaves them in place (the chart area says it is unavailable and why), and a newer query
 cancels the older one's histogram. Its results live in `AppModel` (`requestsHistory`), so History brought back
-within a minute with the same filters shows them at once instead of querying again. The live table takes in the
-stream at most twice a second (once a second while the system asks for reduced resource usage); its filter and
-the Mac scope apply at once.
+within a minute with the same filters, and the same database, shows them at once; once they are more than five
+seconds old they are queried again in the background, with no loading state, and only what changed is redrawn.
+Results it does not keep are cleared on a return to the page, as on a first visit, while the Live / History switch
+leaves them up until the new page arrives. The live table takes in the stream at most twice a second (once a second
+while the system asks for reduced resource usage); its filter and the Mac scope apply at once.
 
 The Domains & IPs page draws its table itself, as the native inset table looks and behaves (header and separators,
 rounded alternate rows continued below the last one, each row one VoiceOver element naming its columns), in one
