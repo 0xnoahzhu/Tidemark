@@ -7,9 +7,11 @@ struct FilterField: View {
     @Binding var text: String
     /// The field's width in design px.
     var width: CGFloat
+    /// The narrowest the field gets in a row short of room, in design px; nil to keep `width`.
+    var minWidth: CGFloat? = nil
 
     var body: some View {
-        HStack(spacing: 6.px) {
+        let field = HStack(spacing: 6.px) {
             Image(systemName: "magnifyingglass")
                 .font(.design(10.5, .semibold))
                 .foregroundStyle(Theme.ink3)
@@ -17,6 +19,10 @@ struct FilterField: View {
                 .autocorrectionDisabled()
                 .onExitCommand { text = "" }
         }
-        .designField(width: width)
+        if let minWidth {
+            field.designField().frame(minWidth: minWidth.px, idealWidth: width.px, maxWidth: width.px)
+        } else {
+            field.designField(width: width)
+        }
     }
 }

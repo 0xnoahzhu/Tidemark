@@ -23,35 +23,57 @@ struct AppDetailInventoryTab: View {
     @State private var exportError: (any Error)?
 
     static let domainColumns = domainColumns(factor: UIScale.factor)
+    /// The Domains pane's columns without First seen, for a narrow page.
+    static let narrowDomainColumns = domainColumns(factor: UIScale.factor, showsFirstSeen: false)
     static let ipColumns = ipColumns(factor: UIScale.factor)
 
     // The columns at any UI scale. First seen, Last seen and the counts are fixed to the longest of their text
     // (`Yesterday 23:59` in 12 px, `Yesterday` and `1,234,567` in 11 px SF Mono), the IP to `255.255.255.255` in
-    // 11.5 px SF Mono and a NEW badge: text that grows with the scale as the widths do. The names take what is left,
-    // however little (the design's `minmax(0, 1fr)`), so in a narrow window they shorten and the rest stays whole.
-    static func domainColumns(factor: CGFloat) -> [AnalyzeColumnsLayout.Column] {
+    // 11.5 px SF Mono and a NEW badge: text that grows with the scale as the widths do. The names take what is left
+    // (the design's `minmax(0, 1fr)`); `split` keeps them room.
+    static func domainColumns(factor: CGFloat, showsFirstSeen: Bool = true) -> [AnalyzeColumnsLayout.Column] {
         func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
-        return [.flexible(weight: 1), .fixed(px(104)), .fixed(px(70)), .fixed(px(64))]
+        return [.flexible(weight: 1)] + (showsFirstSeen ? [.fixed(px(104))] : []) + [.fixed(px(70)), .fixed(px(64))]
+    }
+
+    static func domainColumns(showsFirstSeen: Bool) -> [AnalyzeColumnsLayout.Column] {
+        showsFirstSeen ? domainColumns : narrowDomainColumns
     }
 
     static func ipColumns(factor: CGFloat) -> [AnalyzeColumnsLayout.Column] {
         func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
-        return [.fixed(px(150)), .flexible(weight: 1), .fixed(px(56))]
+        return [.fixed(px(150)), .flexible(weight: 1), .fixed(px(64))]
     }
 
-    /// The Domains pane's width in a tab `width` points wide: 1.4 of every 2.4, as in the design, but never so much
-    /// that the IP pane, beside an always-visible scroller, keeps less than 70 px for the network.
-    static func domainsPaneWidth(_ width: CGFloat, factor: CGFloat = UIScale.factor) -> CGFloat {
+    /// How the tab shares a page between its panes.
+    struct PaneSplit: Equatable {
+        /// The Domains pane's width; the IP pane takes the rest, after the hairline between them.
+        var domainsWidth: CGFloat
+        /// The Domains pane has room for its First seen column.
+        var showsFirstSeen: Bool
+    }
+
+    /// The panes of a page `width` points wide. The Domains pane takes 1.4 of every 2.4, as in the design, while each
+    /// pane keeps its fixed columns and an always-visible scroller, and its names their old minimums: 150 px for a site
+    /// and its NEW SITE badge, 90 px for the network. A page too narrow for both drops the Domains pane's First seen
+    /// (the NEW badges still mark what is new) rather than squeeze the names; one too narrow even then cuts the Domains
+    /// pane.
+    static func split(_ width: CGFloat, factor: CGFloat = UIScale.factor) -> PaneSplit {
         func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
-        let columns = ipColumns(factor: factor)
-        let fixed = columns.reduce(CGFloat(0)) { total, column in
-            if case .fixed(let width) = column { total + width } else { total }
+        let scroller = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+        // A pane's width less its names: its fixed columns, the spaces between its columns, its 16 px margins and the
+        // scroller.
+        func fixed(_ columns: [AnalyzeColumnsLayout.Column]) -> CGFloat {
+            columns.reduce(px(10) * CGFloat(columns.count - 1) + px(16) * 2 + scroller) { total, column in
+                if case .fixed(let width) = column { total + width } else { total }
+            }
         }
-        // The IP pane's fixed columns, the spaces between its columns, its 16 px margins, the network, the scroller and
-        // the hairline between the panes.
-        let ipMinimum = fixed + px(10) * CGFloat(columns.count - 1) + px(16) * 2 + px(70)
-            + NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) + 0.5
-        return max(0, min(width * 1.4 / 2.4, width - ipMinimum))
+        // The IP pane with the hairline between the panes.
+        let ipMinimum = fixed(ipColumns(factor: factor)) + px(90) + 0.5
+        let showsFirstSeen = fixed(domainColumns(factor: factor)) + px(150) + ipMinimum <= width
+        let domainsMinimum = fixed(domainColumns(factor: factor, showsFirstSeen: showsFirstSeen)) + px(150)
+        let domains = min(max(width * 1.4 / 2.4, domainsMinimum), width - ipMinimum)
+        return PaneSplit(domainsWidth: max(0, domains), showsFirstSeen: showsFirstSeen)
     }
 
     /// The hosts and the summary shown, with what they were read and computed for.
@@ -88,8 +110,9 @@ struct AppDetailInventoryTab: View {
                         .padding(.vertical, 8.px)
                         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
                     GeometryReader { geometry in
+                        let split = Self.split(geometry.size.width)
                         HStack(spacing: 0) {
-                            domainsPane.frame(width: Self.domainsPaneWidth(geometry.size.width))
+                            domainsPane(showsFirstSeen: split.showsFirstSeen).frame(width: split.domainsWidth)
                             Rectangle().fill(Theme.line).frame(width: 0.5)
                             ipsPane.frame(maxWidth: .infinity)
                         }
@@ -119,17 +142,21 @@ struct AppDetailInventoryTab: View {
 
     private var summaryLine: some View {
         @Bindable var nav = model.nav
+        // In a narrow page the search field gives way before the headline; the pill and the button stay whole.
         return HStack(spacing: 12.px) {
             Text(summary.headline)
                 .font(.design(12, .semibold))
                 .lineLimit(1)
+                .layoutPriority(2)
             if summary.newCount > 0 {
                 AnalyzePill(text: trn("%lld new domain or IP in 24 h", "%lld new domains & IPs in 24 h", summary.newCount, "AppDetail"), size: 11)
             }
             Spacer(minLength: 0)
-            FilterField(prompt: tr("Search", "AppDetail"), text: $nav.appInventorySearch, width: 190)
+            FilterField(prompt: tr("Search", "AppDetail"), text: $nav.appInventorySearch, width: 190, minWidth: 120)
+                .layoutPriority(1)
             Button(tr("Export CSV", "AppDetail"), action: export)
                 .buttonStyle(DesignButtonStyle())
+                .fixedSize()
                 .disabled(content.hosts.isEmpty)
                 .help(tr("Save every domain and IP of this app as a CSV file", "AppDetail"))
         }
@@ -158,7 +185,7 @@ struct AppDetailInventoryTab: View {
 
     // MARK: Domains
 
-    private var domainsPane: some View {
+    private func domainsPane(showsFirstSeen: Bool) -> some View {
         let selected = summary.selectedHost(model.nav.appSelectedHost)
         return VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8.px) {
@@ -179,15 +206,15 @@ struct AppDetailInventoryTab: View {
                 LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                     Section {
                         ForEach(summary.groups) { group in
-                            siteRow(group)
+                            siteRow(group, showsFirstSeen: showsFirstSeen)
                             ForEach(group.hosts) { host in
-                                AppDetailDomainRow(host: host, selected: selected == host.value)
+                                AppDetailDomainRow(host: host, selected: selected == host.value, showsFirstSeen: showsFirstSeen)
                             }
                         }
                     } header: {
-                        AnalyzeHeaderRow(columns: Self.domainColumns, height: 26.px, horizontalPadding: 16.px) {
+                        AnalyzeHeaderRow(columns: Self.domainColumns(showsFirstSeen: showsFirstSeen), height: 26.px, horizontalPadding: 16.px) {
                             Text(tr("Site · host", "AppDetail"))
-                            Text(tr("First seen", "AppDetail"))
+                            if showsFirstSeen { Text(tr("First seen", "AppDetail")) }
                             Text(tr("Last seen", "AppDetail"))
                             Text(tr("Requests", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
                         }
@@ -199,18 +226,28 @@ struct AppDetailInventoryTab: View {
         }
     }
 
-    private func siteRow(_ group: AppDetailInventorySummary.SiteGroup) -> some View {
-        AnalyzeColumnsLayout(columns: Self.domainColumns) {
-            // In a narrow pane the host count shortens before the site.
-            HStack(spacing: 8.px) {
-                Text(group.site).fontWeight(.semibold).lineLimit(1).layoutPriority(1)
-                Text(trn("%lld host", "%lld hosts", group.hosts.count, "AppDetail"))
-                    .font(.design(11))
-                    .foregroundStyle(Theme.ink2)
-                    .lineLimit(1)
-                if group.isNewSite { TagBadge(text: tr("NEW SITE", "AppDetail"), style: .new) }
+    private func siteRow(_ group: AppDetailInventorySummary.SiteGroup, showsFirstSeen: Bool) -> some View {
+        AnalyzeColumnsLayout(columns: Self.domainColumns(showsFirstSeen: showsFirstSeen)) {
+            // In a narrow pane the host count goes and NEW SITE becomes NEW before the site shortens.
+            AppDetailNameLayout(spacing: 8.px) {
+                Text(group.site).fontWeight(.semibold).lineLimit(1)
+                ViewThatFits(in: .horizontal) {
+                    Text(trn("%lld host", "%lld hosts", group.hosts.count, "AppDetail"))
+                        .font(.design(11))
+                        .foregroundStyle(Theme.ink2)
+                        .fixedSize()
+                    Color.clear.frame(width: 0, height: 0)
+                }
+                if group.isNewSite {
+                    ViewThatFits(in: .horizontal) {
+                        TagBadge(text: tr("NEW SITE", "AppDetail"), style: .new)
+                        TagBadge(text: tr("NEW", "AppDetail"), style: .new)
+                    }
+                }
             }
-            Text(AnalyzeFormat.seen(group.firstSeen)).font(.design(12)).foregroundStyle(Theme.ink2).lineLimit(1)
+            if showsFirstSeen {
+                Text(AnalyzeFormat.seen(group.firstSeen)).font(.design(12)).foregroundStyle(Theme.ink2).lineLimit(1)
+            }
             Text(AppDetailInventoryFormat.lastSeen(group.lastSeen)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
             Text(Fmt.count(group.requests)).font(Theme.mono(11, weight: .semibold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -398,16 +435,19 @@ private struct AppDetailDomainRow: View {
     @Environment(AppModel.self) private var model
     var host: AppHost
     var selected: Bool
+    var showsFirstSeen: Bool
 
     var body: some View {
-        AnalyzeColumnsLayout(columns: AppDetailInventoryTab.domainColumns) {
+        AnalyzeColumnsLayout(columns: AppDetailInventoryTab.domainColumns(showsFirstSeen: showsFirstSeen)) {
             HStack(spacing: 7.px) {
                 Text(verbatim: "└").font(Theme.mono(11)).foregroundStyle(Theme.ink3)
                 Text(host.value).lineLimit(1).truncationMode(.middle)
                 if host.isNew() { TagBadge(text: tr("NEW", "AppDetail"), style: .new) }
             }
             .padding(.leading, 12.px)
-            Text(AnalyzeFormat.seen(host.firstSeen)).foregroundStyle(Theme.ink2).lineLimit(1)
+            if showsFirstSeen {
+                Text(AnalyzeFormat.seen(host.firstSeen)).foregroundStyle(Theme.ink2).lineLimit(1)
+            }
             Text(AppDetailInventoryFormat.lastSeen(host.lastSeen)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
             Text(Fmt.count(host.requestCount)).font(Theme.mono(11)).lineLimit(1).frame(maxWidth: .infinity, alignment: .trailing)
         }
