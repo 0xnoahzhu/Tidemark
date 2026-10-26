@@ -281,6 +281,11 @@ struct UIChromeTests {
         #expect(SettingsDatabaseURL.unmasked("postgres://tide:•••@127.0.0.1:5432/tidemark", saved: saved)
                 == "postgres://tide:s%40cret@127.0.0.1:5432/tidemark", "an edited mask")
         #expect(SettingsDatabaseURL.masked("POSTGRES://tide:pw@h/db") == "POSTGRES://tide:••••••••@h/db", "schemes ignore case")
+        // Only the password's own place is masked: the same text anywhere else stays, and is saved as it was.
+        let echoed = "postgres://tide:tidemark@h/tidemark?application_name=tidemark"
+        #expect(SettingsDatabaseURL.masked(echoed) == "postgres://tide:••••••••@h/tidemark?application_name=tidemark")
+        #expect(SettingsDatabaseURL.unmasked("postgres://tide:••••••••@h2/tidemark?application_name=tidemark", saved: echoed)
+                == "postgres://tide:tidemark@h2/tidemark?application_name=tidemark")
 
         // A typed password, or none, is saved as typed.
         #expect(SettingsDatabaseURL.unmasked("postgres://tide:new@h/db", saved: saved) == "postgres://tide:new@h/db")

@@ -321,26 +321,29 @@ enum SettingsDatabaseURL {
     }
 
     static let mask = "••••••••"
-    /// ASCII stand-in for the mask while `URLComponents` builds the string (it would percent-encode the dots).
-    private static let placeholder = "TIDEMARKPASSWORD"
 
-    /// The saved URL as the field shows it: every password in it (user info, `password` parameters) masked.
-    /// Text that is not a PostgreSQL URL comes back unchanged; Settings never saves such text.
+    /// The saved URL as the field shows it: every password in it (user info, `password` parameters) masked, and
+    /// nothing else changed. Text that is not a PostgreSQL URL comes back unchanged; Settings never saves such text.
     static func masked(_ url: String) -> String {
-        guard var components = postgresComponents(url) else { return url }
-        var masked = false
-        if components.percentEncodedPassword?.isEmpty == false {
-            components.percentEncodedPassword = placeholder
-            masked = true
-        }
-        if let items = components.percentEncodedQueryItems, items.contains(where: { isPassword($0) && $0.value?.isEmpty == false }) {
-            components.percentEncodedQueryItems = items.map { item in
-                isPassword(item) && item.value?.isEmpty == false ? URLQueryItem(name: item.name, value: placeholder) : item
+        guard let components = postgresComponents(url), let string = components.string else { return url }
+        var passwords = components.rangeOfQuery.map { query in
+            string[query].split(separator: "&").compactMap { item -> Range<String.Index>? in
+                guard let equals = item.firstIndex(of: "="), isPassword(named: item[..<equals]) else { return nil }
+                let value = item.index(after: equals)..<item.endIndex
+                return value.isEmpty ? nil : value
             }
-            masked = true
+        } ?? []
+        if let password = components.rangeOfPassword, !password.isEmpty { passwords.append(password) }
+        guard !passwords.isEmpty else { return url }
+        // Only those ranges change: the same text anywhere else in the URL stays as it is.
+        var shown = ""
+        var rest = string.startIndex
+        for range in passwords.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+            shown += string[rest..<range.lowerBound]
+            shown += mask
+            rest = range.upperBound
         }
-        guard masked, let string = components.string else { return url }
-        return string.replacingOccurrences(of: placeholder, with: mask)
+        return shown + string[rest...]
     }
 
     /// The URL to save for the field's text: the text as typed, except that a mask (or what is left of it) stands
@@ -389,8 +392,10 @@ enum SettingsDatabaseURL {
     }
 
     /// A `password` parameter, whatever its case and encoding.
-    private static func isPassword(_ item: URLQueryItem) -> Bool {
-        (item.name.removingPercentEncoding ?? item.name).lowercased() == "password"
+    private static func isPassword(_ item: URLQueryItem) -> Bool { isPassword(named: item.name) }
+
+    private static func isPassword(named name: some StringProtocol) -> Bool {
+        (name.removingPercentEncoding ?? String(name)).lowercased() == "password"
     }
 
     private static func isMaskedPassword(_ item: URLQueryItem) -> Bool {
