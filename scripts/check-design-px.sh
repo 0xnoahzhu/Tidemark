@@ -20,6 +20,11 @@ cd "${0:A:h}/.."
 allowed=(
     # The probe window is sized for the web page in it, which keeps its CSS px whatever the scale.
     'Tidemark/UI/SiteProbe/ProbeBrowserWindow.swift|idealWidth: 1280'
+    'Tidemark/UI/SiteProbe/ProbeBrowserWindow.swift|idealHeight: 824'
+    # The iPhone frame drawn around the page's 393 CSS px viewport, which the scale must not change either.
+    'Tidemark/UI/SiteProbe/ProbeBrowserWindow.swift|iphone \? (37|10|46|24) : 0'
+    # The Domains & IPs header's rule, a hairline drawn 1.5 pt thick so it stays crisp under the row above it.
+    'Tidemark/UI/Inventory/InventoryView.swift|frame\(height: 1\.5\)'
     # Xcode previews of the main window at the design's size.
     'Tidemark/UI/Shell/ShellDemoData.swift|frame\(width: 1248, height: 812\)'
 )
@@ -160,10 +165,21 @@ ALLOWED="${(pj:\t:)allowed}" awk '
     }
 
     # Counts the design numbers in the expression from `start` to `end` in `text`: every number literal but zero and
-    # hairlines, a factor or divisor, also one in parentheses or a call (`size * 0.3`, `1 / displayScale`,
+    # hairlines (0.5 and 1 pt, which the scale leaves as they are), one in a parenthesized expression scaled as a whole
+    # (`(compact ? 14 : 18).px`), a factor or divisor, also one in parentheses or a call (`size * 0.3`, `1 / displayScale`,
     # `width / max(total, 0.001)`), the operand of a comparison, a number in px already (`14.px`, `points(2)`) and an
     # index.
-    function checkExpression(start, end,    i, c, j, depth, enclosing, factor, token, value, before, after) {
+    function checkExpression(start, end,    i, c, j, k, depth, enclosing, factor, token, value, before, after, opens, top, scaledFrom, scaledTo, scaledCount) {
+        # Parenthesized expressions followed by `.px`: their numbers are design px.
+        top = scaledCount = 0
+        for (i = start; i <= end; i++) {
+            c = substr(text, i, 1)
+            if (c == "(") opens[++top] = i
+            else if (c == ")" && top > 0) {
+                if (substr(text, i + 1, 3) == ".px") { scaledFrom[++scaledCount] = opens[top]; scaledTo[scaledCount] = i }
+                top--
+            }
+        }
         depth = 0
         split("", enclosing)
         split("", factor)
@@ -191,7 +207,9 @@ ALLOWED="${(pj:\t:)allowed}" awk '
             i = j - 1
             if (after ~ /^\.px([^A-Za-z0-9_]|$)/ || before ~ /[*\/<>=]/ || after ~ /^[*\/<>=!]/) continue
             value = token + 0
-            if (value == 0 || value == 0.5 || insideExempt(enclosing, factor, depth)) continue
+            if (value == 0 || value == 0.5 || value == 1 || insideExempt(enclosing, factor, depth)) continue
+            for (k = 1; k <= scaledCount; k++) if (i > scaledFrom[k] && i < scaledTo[k]) break
+            if (k <= scaledCount) continue
             sizesOnLine[lineOf(i)]++
         }
     }
