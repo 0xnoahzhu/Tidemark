@@ -18,6 +18,10 @@ enum Theme {
     static let segment = Color.dynamic(light: NSColor(hex: 0xffffff), dark: .white(0.2))
     static let segmentBorder = Color.dynamic(light: .black(0.1), dark: .white(0.12))
     static let segmentShadow = Color.dynamic(light: .black(0.06), dark: .clear)
+    /// A count's capsule on the selected segment: `ink2` on `fill` in light mode; in dark mode a darker capsule and
+    /// lighter digits, as `fill` would lighten the grey cell towards `ink2`.
+    static let segmentCount = Color.dynamic(light: NSColor(hex: 0x6e6e73), dark: NSColor(hex: 0xdedee3))
+    static let segmentCountFill = Color.dynamic(light: .black(0.055), dark: .black(0.2))
 
     // Text
     static let ink = Color.dynamic(light: NSColor(hex: 0x1d1d1f), dark: NSColor(hex: 0xf2f2f4))

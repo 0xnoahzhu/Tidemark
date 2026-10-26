@@ -167,7 +167,7 @@ extension DesignSegmentedControl {
                             .font(.system(size: size.fontSize, weight: isSelected ? .medium : .regular))
                     }
                 if showsCount, let count = segment.count {
-                    CountCapsule(count: count, size: size)
+                    CountCapsule(count: count, isSelected: isSelected, size: size)
                 }
             }
             .lineLimit(1)
@@ -178,19 +178,21 @@ extension DesignSegmentedControl {
     }
 
     /// `12`, `9,412`, `1.28M`: the count in monospaced digits on a faint capsule, at least as wide as it is tall, so
-    /// a count that changes keeps the capsule (and the choices after it) in place until it gains a digit.
+    /// a count that changes keeps the capsule (and the choices after it) in place until it gains a digit. On the
+    /// raised cell, which is light grey in dark mode, the capsule darkens it rather than lightening it further.
     private struct CountCapsule: View {
         var count: Int
+        var isSelected: Bool
         var size: Size
 
         var body: some View {
             Text(Fmt.short(count))
                 .font(.system(size: size.badgeFontSize, weight: .medium))
                 .monospacedDigit()
-                .foregroundStyle(Theme.ink2)
+                .foregroundStyle(isSelected ? Theme.segmentCount : Theme.ink2)
                 .padding(.horizontal, size.badgeFontSize / 2)
                 .frame(minWidth: size.contentHeight, minHeight: size.contentHeight)
-                .background(Theme.fill, in: Capsule())
+                .background(isSelected ? Theme.segmentCountFill : Theme.fill, in: Capsule())
         }
     }
 
