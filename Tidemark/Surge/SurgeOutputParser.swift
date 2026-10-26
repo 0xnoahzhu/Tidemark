@@ -178,6 +178,38 @@ enum SurgeOutputParser {
         return nil
     }
 
+    /// `dump traffic` → `{"connector":{"<node>":{"lineHash":"POLICY::…","in":…,"out":…},…},"startTime":…}`: the line
+    /// hash of each proxy node that carried traffic since Surge started (DIRECT has none).
+    static func lineHashes(fromTraffic data: Data, command: String) throws(SurgeError) -> [String: String] {
+        let root = try decode(SurgeJSONValue.self, from: data, command: command)
+        guard let connectors = root["connector"]?.objectValue else { throw .decoding(command: command, message: "no connector list") }
+        return connectors.compactMapValues { connector in
+            guard let hash = connector["lineHash"]?.stringValue, !hash.isEmpty else { return nil }
+            return hash
+        }
+    }
+
+    /// `proxy-runtime-status <policy>` → `{"type":"Hysteria 2","errors":[{"error":"Stream closed","time":1793008209.85,
+    /// "targetHostname":"api.github.com"}…],"traffic":{…},…}`. Surge answers `{"result":"Policy X doesn't exist."}` for a
+    /// name it does not know (a node of a policy-path subscription is known only by its line hash): that fails. Errors
+    /// without a message or time are skipped.
+    static func proxyRuntimeStatus(from data: Data, command: String) throws(SurgeError) -> SurgeProxyRuntimeStatus {
+        let root = try decode(SurgeJSONValue.self, from: data, command: command)
+        guard let status = root.objectValue else { throw .decoding(command: command, message: "expected an object") }
+        let errors = status["errors"]?.arrayValue
+        if errors == nil, status["type"] == nil, let result = status["result"]?.stringValue {
+            throw .commandFailed(command: command, message: result)
+        }
+        return SurgeProxyRuntimeStatus(
+            type: status["type"]?.stringValue,
+            errors: (errors ?? []).compactMap { error in
+                guard let message = error["error"]?.stringValue, !message.isEmpty, let time = error["time"]?.doubleValue, time > 0 else { return nil }
+                return SurgeProxyRuntimeStatus.ProxyError(message: message, time: Date(timeIntervalSince1970: time),
+                                                          targetHost: error["targetHostname"]?.stringValue ?? "")
+            }
+        )
+    }
+
     /// `test external-ip` / `test-policy-external-ip <policy>` → `{"address":"203.0.113.7"}`.
     static func externalIP(from data: Data, command: String) throws(SurgeError) -> String {
         let reply = try decode(AddressReply.self, from: data, command: command)

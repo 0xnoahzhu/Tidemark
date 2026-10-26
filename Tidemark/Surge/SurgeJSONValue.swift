@@ -52,6 +52,15 @@ enum SurgeJSONValue: Decodable, Sendable, Hashable {
         }
     }
 
+    /// Numbers and numeric strings.
+    var doubleValue: Double? {
+        switch self {
+        case .number(let value): value
+        case .string(let value): Double(value.trimmingCharacters(in: .whitespaces))
+        case .bool, .object, .array, .null: nil
+        }
+    }
+
     /// Integral numbers, numeric strings and booleans (as 0 / 1).
     var intValue: Int? {
         switch self {

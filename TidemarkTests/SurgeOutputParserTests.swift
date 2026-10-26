@@ -78,6 +78,30 @@ struct SurgeOutputParserTests {
         #expect(mapped[1].addresses == ["10.0.0.1"] && mapped[1].isLocal)
     }
 
+    @Test func readsProxyRuntimeErrorsAndLineHashes() throws {
+        // `proxy-runtime-status POLICY::…` of a Hysteria 2 node (Surge Mac 6.10), cut to four errors.
+        let status = try SurgeOutputParser.proxyRuntimeStatus(from: SurgeFixtures.data("surge-proxy-runtime-status.json"), command: "proxy-runtime-status")
+        #expect(status.type == "Hysteria 2")
+        #expect(status.errors.map(\.targetHost) == ["49.51.190.94", "api.github.com", "encrypted-tbn0.gstatic.com", "collector.github.com"])
+        #expect(status.errors.allSatisfy { $0.message == "Stream closed" })
+        #expect(status.errors.first?.time == Date(timeIntervalSince1970: 1793008209.852242))
+
+        // A policy-path subscription's node is unknown by name.
+        #expect(throws: SurgeError.commandFailed(command: "proxy-runtime-status", message: "Policy AT&T-RackNerd-Hysteria2 doesn't exist.")) {
+            try SurgeOutputParser.proxyRuntimeStatus(from: Data(#"{"result":"Policy AT&T-RackNerd-Hysteria2 doesn't exist."}"#.utf8),
+                                                     command: "proxy-runtime-status")
+        }
+        let partial = try SurgeOutputParser.proxyRuntimeStatus(from: Data(#"{"type":"Snell","errors":[{"error":"Timeout","time":1793000000},{"time":1}]}"#.utf8),
+                                                               command: "proxy-runtime-status")
+        #expect(partial.errors == [SurgeProxyRuntimeStatus.ProxyError(message: "Timeout", time: Date(timeIntervalSince1970: 1_793_000_000), targetHost: "")])
+
+        let hashes = try SurgeOutputParser.lineHashes(fromTraffic: Data(#"""
+            {"connector":{"US-Hysteria2":{"in":5044050081,"out":975270299,"lineHash":"POLICY::2ed45e4c"},
+             "DIRECT":{"in":6849074838,"out":48988330}},"startTime":1792921314.590141,"interface":{"en0":{}}}
+            """#.utf8), command: "dump traffic")
+        #expect(hashes == ["US-Hysteria2": "POLICY::2ed45e4c"], "DIRECT has no line hash")
+    }
+
     @Test func decodesPolicyGroupsWithLineHashes() throws {
         let groups = try SurgeOutputParser.policyGroups(
             from: SurgeFixtures.data("surge-policy-groups.json"),

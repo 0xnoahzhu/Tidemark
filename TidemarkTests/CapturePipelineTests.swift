@@ -359,6 +359,73 @@ struct CapturePipelineTests {
         #expect(late.domain == "resolved-again.example" && late.path == nil && late.expiresAt == nil && !late.byTidemark)
     }
 
+    @Test func asksTheBusyProxyNodesForTheirErrorsOnceAMinute() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let surge = CaptureFakeSurge()
+        let recorded = try SurgeOutputParser.proxyRuntimeStatus(from: SurgeFixtures.data("surge-proxy-runtime-status.json"), command: "proxy-runtime-status")
+        surge.update {
+            $0.lineHashes = ["US-Hysteria2": "POLICY::2ed45e4c", "JP-Snell": "POLICY::c7f4fe8c"]
+            $0.runtimeStatus["POLICY::2ed45e4c"] = SurgeProxyRuntimeStatus(type: "Hysteria 2", errors: Array(recorded.errors.suffix(2)))
+            $0.runtimeStatus["POLICY::c7f4fe8c"] = SurgeProxyRuntimeStatus(type: "Snell", errors: [])
+            $0.dns["api.github.com"] = ["140.82.112.6"]
+        }
+        let pipeline = makePipeline(database: database, surge: surge, spoolDirectory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        func traffic(_ first: Int64, count: Int64 = 1, via node: String, at now: Date) async {
+            for id in first..<(first + count) {
+                var request = CaptureFixtures.request(id: id, host: "api.github.com", processPath: "/usr/bin/git", remoteAddress: "203.0.113.10 (Proxy)",
+                                                      policy: node)
+                request.notes = ["10:00:00.000001 [Rule] Policy decision path: AI -> \(node)"]
+                await pipeline.ingest(request, now: now)
+            }
+        }
+
+        // Fifty requests through one node, and DIRECT ones: no surge-cli process per request (one lookup for the host).
+        await traffic(1, count: 50, via: "US-Hysteria2", at: base)
+        await traffic(100, count: 5, via: "DIRECT", at: base)
+        #expect(await eventually { surge.snapshot.dnsLookups == ["api.github.com"] })
+        #expect(surge.snapshot.proxyCommands.isEmpty)
+
+        // First minute: the node's line hash; second: its errors. One process each.
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(30))
+        #expect(surge.snapshot.proxyCommands == ["dump traffic"])
+        await traffic(51, via: "US-Hysteria2", at: base.addingTimeInterval(50))
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(90))
+        #expect(surge.snapshot.proxyCommands == ["dump traffic", "proxy-runtime-status POLICY::2ed45e4c"])
+        await pipeline.tick(now: base.addingTimeInterval(91))
+        let saved = await database.proxyErrorsSaved
+        #expect(saved.map(\.targetHost) == ["encrypted-tbn0.gstatic.com", "collector.github.com"])
+        #expect(saved.allSatisfy { $0.policy == "US-Hysteria2" && $0.lineHash == "POLICY::2ed45e4c" && $0.deviceID == device && $0.error == "Stream closed" })
+
+        // The node lists its last errors every time: only a new one is written.
+        let fresh = SurgeProxyRuntimeStatus.ProxyError(message: "Stream closed", time: base.addingTimeInterval(120), targetHost: "api.github.com")
+        surge.update { $0.runtimeStatus["POLICY::2ed45e4c"]?.errors.insert(fresh, at: 0) }
+        await traffic(52, via: "US-Hysteria2", at: base.addingTimeInterval(130))
+        await traffic(200, via: "JP-Snell", at: base.addingTimeInterval(140))
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(150))
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(160))
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(170))
+        #expect(surge.snapshot.proxyCommands.suffix(3) == ["proxy-runtime-status POLICY::c7f4fe8c", "proxy-runtime-status POLICY::2ed45e4c",
+                                                           "proxy-runtime-status POLICY::c7f4fe8c"], "the node asked least recently first")
+        await pipeline.tick(now: base.addingTimeInterval(171))
+        #expect(await database.proxyErrorsSaved.count == 3)
+        #expect(await database.proxyErrorsSaved.last?.at == fresh.time)
+
+        // No requests through a proxy for a minute: nothing to ask.
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(400))
+        #expect(surge.snapshot.proxyCommands.count == 5)
+
+        // A node Surge cannot report on (no line hash, unknown by name) waits ten minutes.
+        await traffic(300, via: "Gone-Node", at: base.addingTimeInterval(1_000))
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(1_010))
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(1_020))
+        #expect(surge.snapshot.proxyCommands.suffix(2) == ["dump traffic", "proxy-runtime-status Gone-Node"])
+        await traffic(301, via: "Gone-Node", at: base.addingTimeInterval(1_050))
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(1_080))
+        #expect(surge.snapshot.proxyCommands.count == 7)
+    }
+
     @Test func matchesProbeConnectionsBySourcePort() async throws {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()

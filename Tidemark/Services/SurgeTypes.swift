@@ -182,6 +182,22 @@ struct SurgeDNSRecord: Sendable, Hashable {
     var isLocal = false
 }
 
+/// `surge-cli --raw proxy-runtime-status <policy>` (subset): a proxy node's type and the last errors it reported
+/// (Surge keeps 15).
+struct SurgeProxyRuntimeStatus: Sendable, Hashable {
+    struct ProxyError: Sendable, Hashable {
+        /// e.g. `Stream closed`
+        var message: String
+        var time: Date
+        /// Host name or IP the failed connection was for.
+        var targetHost: String
+    }
+
+    /// e.g. `Hysteria 2`
+    var type: String?
+    var errors: [ProxyError]
+}
+
 /// `surge-cli --raw geoip <ip>`
 struct SurgeGeoIP: Decodable, Sendable, Hashable {
     var address: String?

@@ -52,6 +52,21 @@ protocol SurgeClient: Sendable {
     func network() async throws -> ThisMacNetwork
     /// Port of Surge's HTTP proxy listener (`http-listen`, usually 6152).
     func httpProxyPort() async throws -> Int
+    /// The `POLICY::…` line hash of each proxy node that carried traffic since Surge started, by name (`dump traffic`).
+    func proxyLineHashes() async throws -> [String: String]
+    /// A proxy node's runtime status with its last errors (`proxy-runtime-status`); `policy` is a line hash or a name.
+    func proxyRuntimeStatus(_ policy: String) async throws -> SurgeProxyRuntimeStatus
+}
+
+extension SurgeClient {
+    /// For clients that cannot ask (placeholders, test doubles): no proxy details.
+    func proxyLineHashes() async throws -> [String: String] {
+        throw SurgeError.commandFailed(command: "dump traffic", message: "not available")
+    }
+
+    func proxyRuntimeStatus(_ policy: String) async throws -> SurgeProxyRuntimeStatus {
+        throw SurgeError.commandFailed(command: "proxy-runtime-status", message: "not available")
+    }
 }
 
 // MARK: - Processes

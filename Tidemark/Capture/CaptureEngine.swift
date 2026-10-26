@@ -618,6 +618,10 @@ final class CaptureEngine {
             await engine.refreshToday()
         }
         every("dns", .seconds(30), delay: .seconds(5)) { await $0.pipeline.refreshDNSCache() }
+        every("proxy-errors", .seconds(60), delay: .seconds(60)) { engine in
+            guard engine.model.live.surge.isHealthy else { return }
+            await engine.pipeline.pollProxyErrors()
+        }
         every("shared", .seconds(60), delay: .seconds(60)) { await $0.refreshSharedState() }
         every("inventory", .seconds(300), delay: .seconds(300)) { await $0.mergeInventory() }
         every("total", .seconds(60), delay: .seconds(60)) { await $0.refreshTotal() }

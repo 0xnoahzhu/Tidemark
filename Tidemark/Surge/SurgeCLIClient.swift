@@ -74,6 +74,14 @@ struct SurgeCLIClient: SurgeClientDetails {
         try await run(["dump", "dns"]) { try SurgeOutputParser.dnsCache(from: $0, command: $1) }
     }
 
+    func proxyLineHashes() async throws -> [String: String] {
+        try await run(["dump", "traffic"]) { try SurgeOutputParser.lineHashes(fromTraffic: $0, command: $1) }
+    }
+
+    func proxyRuntimeStatus(_ policy: String) async throws -> SurgeProxyRuntimeStatus {
+        try await run(["proxy-runtime-status", policy]) { try SurgeOutputParser.proxyRuntimeStatus(from: $0, command: $1) }
+    }
+
     func geoIP(_ ip: String) async throws -> SurgeGeoIP {
         try await run(["geoip", ip], decoding: SurgeGeoIP.self)
     }

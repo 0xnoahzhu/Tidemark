@@ -136,6 +136,12 @@ final class CaptureFakeSurge: SurgeClient {
         var statusCalls = 0
         /// Open silent streams; `emit(_:)` delivers to them.
         var streams: [AsyncThrowingStream<SurgeEvent, Error>.Continuation] = []
+        /// What `dump traffic` lists: node → line hash.
+        var lineHashes: [String: String] = [:]
+        /// What `proxy-runtime-status` answers, by line hash or name; others fail like an unknown policy.
+        var runtimeStatus: [String: SurgeProxyRuntimeStatus] = [:]
+        /// Every `dump traffic` and `proxy-runtime-status <policy>` call, in order.
+        var proxyCommands: [String] = []
     }
 
     let endpoint: SurgeEndpoint
@@ -204,6 +210,20 @@ final class CaptureFakeSurge: SurgeClient {
         ThisMacNetwork(interface: "en0", interfaceDetail: "Wi-Fi", localIP: "192.168.31.24", router: "192.168.31.1", dnsServers: ["223.5.5.5"], surgeMode: nil)
     }
     func httpProxyPort() async throws -> Int { snapshot.httpPort }
+    func proxyLineHashes() async throws -> [String: String] {
+        state.withLock { s in
+            s.proxyCommands.append("dump traffic")
+            return s.lineHashes
+        }
+    }
+    func proxyRuntimeStatus(_ policy: String) async throws -> SurgeProxyRuntimeStatus {
+        let status = state.withLock { s in
+            s.proxyCommands.append("proxy-runtime-status \(policy)")
+            return s.runtimeStatus[policy]
+        }
+        guard let status else { throw SurgeError.commandFailed(command: "proxy-runtime-status \(policy)", message: "Policy \(policy) doesn't exist.") }
+        return status
+    }
 }
 
 /// In-memory database that records what the engine writes. `failing` makes every write throw
@@ -575,6 +595,13 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func saveDNSAnswers(_ answers: [DNSAnswer]) async throws {
         try check()
         dnsAnswersSaved.append(contentsOf: answers)
+    }
+
+    /// Every proxy error written, in order.
+    var proxyErrorsSaved: [ProxyNodeError] = []
+    func saveProxyErrors(_ errors: [ProxyNodeError]) async throws {
+        try check()
+        proxyErrorsSaved.append(contentsOf: errors)
     }
 }
 

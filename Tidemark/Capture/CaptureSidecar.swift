@@ -44,8 +44,9 @@ struct CaptureSourceRecord: Codable, Hashable, Sendable {
     }
 }
 
-/// First-contact work (inventory entries, alert drafts, touches, sources, process chains, alerts) and DNS answers
-/// that were still queued when Tidemark quit without a database; written after the next launch's spool replay.
+/// First-contact work (inventory entries, alert drafts, touches, sources, process chains, alerts), DNS answers and
+/// proxy errors that were still queued when Tidemark quit without a database; written after the next launch's spool
+/// replay.
 struct CaptureAuxiliaryFile: Codable, Sendable {
     var chains: [CaptureWriteBuffer.ChainWrite] = []
     var newHosts: [AppHost] = []
@@ -55,6 +56,7 @@ struct CaptureAuxiliaryFile: Codable, Sendable {
     var alerts: [AlertItem] = []
     /// Optional: the files of earlier versions have none.
     var dnsAnswers: [DNSAnswer]? = nil
+    var proxyErrors: [ProxyNodeError]? = nil
 
     init(_ batch: CaptureWriteBuffer.Batch) {
         chains = batch.chains
@@ -64,6 +66,7 @@ struct CaptureAuxiliaryFile: Codable, Sendable {
         sources = batch.sources.map(CaptureSourceRecord.init)
         alerts = batch.alerts
         dnsAnswers = batch.dnsAnswers.isEmpty ? nil : batch.dnsAnswers
+        proxyErrors = batch.proxyErrors.isEmpty ? nil : batch.proxyErrors
     }
 
     var batch: CaptureWriteBuffer.Batch {
@@ -75,6 +78,7 @@ struct CaptureAuxiliaryFile: Codable, Sendable {
         batch.sources = sources.map(\.touch)
         batch.alerts = alerts
         batch.dnsAnswers = dnsAnswers ?? []
+        batch.proxyErrors = proxyErrors ?? []
         return batch
     }
 
@@ -87,6 +91,8 @@ struct CaptureAuxiliaryFile: Codable, Sendable {
         alerts = Array((alerts + other.alerts).prefix(limit))
         let answers = (dnsAnswers ?? []) + (other.dnsAnswers ?? [])
         dnsAnswers = answers.isEmpty ? nil : Array(answers.prefix(limit))
+        let errors = (proxyErrors ?? []) + (other.proxyErrors ?? [])
+        proxyErrors = errors.isEmpty ? nil : Array(errors.prefix(limit))
     }
 }
 

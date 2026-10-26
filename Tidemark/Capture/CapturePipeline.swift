@@ -168,6 +168,11 @@ actor CapturePipeline {
     let dnsAnswerWait: TimeInterval = 75
     /// A `dns` event this soon after Tidemark's own lookup of the domain ended is that lookup's.
     let ownLookupWindow: TimeInterval = 10
+    /// Proxy nodes that carried requests within this long are asked for their errors (`pollProxyErrors`).
+    let proxyNodeRecency: TimeInterval = 60
+    /// `dump traffic` is read again for a node it lacked at most this often, and a node Surge could not report on is
+    /// asked again after this long.
+    let proxyNodeRetryInterval: TimeInterval = 600
 
     // Dependencies
     var database: any TidemarkDatabase
@@ -249,6 +254,18 @@ actor CapturePipeline {
     var finishedLookups: [String: Date] = [:]
     /// The latest answer of each domain's `dns` events: when Surge resolved it to these addresses.
     var latestDNSAnswers: [String: (addresses: Set<String>, at: Date)] = [:]
+
+    // Proxy errors
+    /// Proxy nodes (final policies) that carried requests → when one last did.
+    var proxyNodesSeen: [String: Date] = [:]
+    /// Proxy node → its `POLICY::…` line hash (`dump traffic`), and when that was read.
+    var proxyLineHashes: [String: String] = [:]
+    var proxyLineHashesReadAt: Date?
+    /// Proxy node → when it was last asked for its errors, and when it may be asked again after a failure.
+    var proxyNodesPolledAt: [String: Date] = [:]
+    var proxyNodeRetryAt: [String: Date] = [:]
+    /// Line hash (or name) → the errors the node listed last time; it lists its last 15 every time it is asked.
+    var proxyErrorsListed: [String: Set<SurgeProxyRuntimeStatus.ProxyError>] = [:]
 
     // Writes
     var buffer: CaptureWriteBuffer
@@ -602,6 +619,7 @@ actor CapturePipeline {
         } else {
             create(mapped, request: request, backfill: backfill, now: now)
         }
+        if !backfill { noteProxyNode(mapped.finalPolicy, now: now) }
         if request.id > (maxSeen?.id ?? .min) { maxSeen = (request.id, mapped.startedAt) }
     }
 

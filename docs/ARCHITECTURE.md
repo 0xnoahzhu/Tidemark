@@ -90,6 +90,12 @@ delete it in Keychain Access. A stream that ends or fails is always restarted, w
   (`POLICY::…`). Policies that come from a policy-path subscription are **not** addressable by name:
   `test-policy-external-ip` and `test-policy` must be given the line hash. `environment` →
   `ProxyGroupSelection` gives each group's current choice; `ProxyMode` 0/1/2 = direct/global/rule.
+* **Proxy errors** — a proxy node keeps its last 15 errors (`proxy-runtime-status <line hash>` →
+  `{"errors":[{"error":"Stream closed","time":…,"targetHostname":…}]}`). Once a minute Tidemark asks the node (final
+  policy) that carried requests in the last minute and was asked least recently, and stores the errors it had not
+  listed before in `proxy_errors`: one short-lived surge-cli process a minute at most, never one per request. The line
+  hashes come from `dump traffic`, read instead of a poll when a node is missing from them (at most every 10 minutes);
+  a node with none is asked by name, and one Surge cannot report on waits 10 minutes.
 * **Other commands** — `summary` (interface, IP, router, DNS), `http probe <url> [policy]`,
   `rule match <host> process-path=…`, `test external-ip`, `dump event` / profile (`http-listen` port, usually 6152).
 
