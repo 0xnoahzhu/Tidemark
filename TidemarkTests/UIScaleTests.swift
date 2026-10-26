@@ -162,13 +162,34 @@ struct UIScaleDrawingTests {
         #expect(Self.fittingHeight(FilterField(prompt: "Search", text: .constant(""), width: 190)) == 28.px)
     }
 
-    /// The title block fits the toolbar's 52 pt band, which does not grow with the UI scale, at every factor.
-    @Test func pageTitleFitsTheToolbarAtEveryFactor() {
-        let lines: CGFloat = 15 + 11
-        let drawn = Self.fittingHeight(PageTitle(title: "Requests", subtitle: "Every request Surge sees"))
-        #expect(abs(drawn - (lines * 1.2 * UIScale.factor + 1.px)) <= 1.5)
-        let largest = UIScale.range.upperBound
-        #expect(lines * 1.2 * largest + UIScale.length(1, factor: largest) <= 52)
+    /// The title block is no taller than a toolbar item, which does not grow with the UI scale, at every factor: it
+    /// grows with the scale at a line height of 1.2, then with a tighter line height, then no further.
+    @Test func pageTitleFitsAToolbarItemAtEveryFactor() {
+        typealias Metrics = PageTitle.Metrics
+        for factor: CGFloat in [1, 1.05] {
+            #expect(Metrics(factor: factor).factor == factor)
+            #expect(Metrics(factor: factor).lineHeight == 1.2)
+        }
+        #expect(Metrics(factor: 1.3).factor < 1.3)
+        #expect(Metrics(factor: 1.3).lineHeight == 1.1)
+        #expect(PageTitle(title: "Requests").metrics == Metrics(factor: UIScale.factor))
+
+        let steps = stride(from: 1.0, through: 1.5, by: 0.05).map { Metrics(factor: $0) }
+        for (smaller, larger) in zip(steps, steps.dropFirst()) {
+            #expect(larger.factor >= smaller.factor)
+            #expect(larger.lineHeight <= smaller.lineHeight)
+        }
+        for metrics in steps {
+            for monospaced in [false, true] {
+                let subtitle = monospaced ? "/Applications/Cursor.app" : "Every request Surge sees, kept in PostgreSQL"
+                let drawn = Self.fittingHeight(PageTitle(title: "Domains & IPs", subtitle: subtitle, monospacedSubtitle: monospaced,
+                                                         metrics: metrics))
+                #expect(drawn <= UIScale.toolbarItemHeight, "at \(metrics.factor)")
+                // The two line boxes and the 1 px between them; each box rounds up to a whole point here.
+                let lines = 26 * metrics.factor * metrics.lineHeight + UIScale.length(1, factor: metrics.factor)
+                #expect(drawn >= lines && drawn <= lines + 2, "at \(metrics.factor)")
+            }
+        }
     }
 
     /// A page draws its title in the toolbar, and the window keeps it as its title for the Window menu, Mission

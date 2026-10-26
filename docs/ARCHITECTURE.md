@@ -347,8 +347,9 @@ raised on a white cell (20% white in dark mode) with a hairline border. It is 40
 the toolbar's 36 pt glass capsule; a control with counts drops them, then its icons, where
 it has too little room. In a toolbar it sits outside the glass bubble, and VoiceOver and the overflow menu see a
 picker. Each page draws its title and subtitle in the toolbar's leading item at the design's size
-(`pageToolbar(_:subtitle:items:)`, 15 px bold over 11 px) in place of the system's title, whose size is fixed; the
-window keeps them as its title and subtitle for the Window menu, Mission Control and VoiceOver. Every window's root
+(`pageToolbar(_:subtitle:items:)`, 15 px bold over 11 px) in place of the system's title, whose size is fixed; it
+grows with the UI scale no taller than a toolbar item. The window keeps the title and subtitle as its own for the
+Window menu, Mission Control and VoiceOver. Every window's root
 sets the design's line height (`Theme.lineHeight`, CSS `line-height: 1.35`, which SwiftUI also takes as a multiple
 of the font's size). The pause /
 resume and Stop monitoring confirmations are the design's glass dialogs (`GlassDialog`), laid over the whole

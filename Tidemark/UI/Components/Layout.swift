@@ -61,32 +61,47 @@ extension KeyValueRow where Value == Text {
 /// ink. Pages draw it in the window toolbar (`pageToolbar(_:subtitle:items:)`), whose own title the system keeps
 /// at its fixed size whatever the scale. Like the system's title, it greys out while its window is inactive.
 struct PageTitle: View {
+    /// The UI scale and line height the title block is drawn at. A toolbar item is 36 pt tall at most, whatever the
+    /// scale, so the block grows only as far as that holds it, as the toolbar's segmented control does: at the UI
+    /// scale with a line height of 1.2 (tighter than the page's 1.35) while it fits, then with the line height
+    /// tightening to 1.1, then no further.
+    struct Metrics: Equatable {
+        var factor: CGFloat
+        var lineHeight: CGFloat
+
+        init(factor: CGFloat = UIScale.factor) {
+            // What the 15 and 11 px lines may take of the item: all but the 1 px between them (1.5 pt at most) and
+            // the half point each line may round up to.
+            let room = UIScale.toolbarItemHeight - 1.5 - 2 * 0.5
+            lineHeight = min(max(room / (26 * factor), 1.1), 1.2)
+            self.factor = min(factor, room / (26 * lineHeight))
+        }
+    }
+
     var title: String
     var subtitle: String?
     /// Draws the subtitle in the monospaced font (an app's path).
     var monospacedSubtitle = false
+    var metrics = Metrics()
 
     @Environment(\.appearsActive) private var appearsActive
 
-    static let lineHeight = AttributedString.LineHeight.multiple(factor: 1.2)
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 1.px) {
+        let factor = metrics.factor
+        VStack(alignment: .leading, spacing: UIScale.length(1, factor: factor)) {
             Text(title)
-                .font(.design(15, .bold))
-                .tracking(-0.15 * UIScale.factor)
+                .font(.system(size: 15 * factor, weight: .bold))
+                .tracking(-0.15 * factor)
                 .foregroundStyle(appearsActive ? Theme.ink : Theme.ink3)
             if let subtitle, !subtitle.isEmpty {
                 Text(subtitle)
-                    .font(monospacedSubtitle ? Theme.mono(11) : .design(11))
+                    .font(.system(size: 11 * factor, design: monospacedSubtitle ? .monospaced : .default))
                     .foregroundStyle(appearsActive ? Theme.ink2 : Theme.ink3)
                     .truncationMode(monospacedSubtitle ? .middle : .tail)
             }
         }
         .lineLimit(1)
-        // Tighter than the page's 1.35: the toolbar stays 52 pt tall at every scale, and the two lines fit it up to
-        // the largest factor.
-        .lineHeight(Self.lineHeight)
+        .lineHeight(.multiple(factor: metrics.lineHeight))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }

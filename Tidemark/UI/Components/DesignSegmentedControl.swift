@@ -61,7 +61,7 @@ struct DesignSegmentedControl<Value: Hashable>: View {
         }
 
         /// The tallest control a toolbar item's glass capsule holds, which the system draws the same at every scale.
-        static var toolbarItemHeight: CGFloat { 36 }
+        static var toolbarItemHeight: CGFloat { UIScale.toolbarItemHeight }
     }
 
     /// One choice: its value, (localized) title, and optionally an SF Symbol and a count.

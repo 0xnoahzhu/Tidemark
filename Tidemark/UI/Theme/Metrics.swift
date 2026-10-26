@@ -17,6 +17,8 @@ enum UIScale {
     static let minimumWindow = CGSize(width: 1000, height: 640)
     /// What the window adds above its content, in points at every factor: the toolbar's band.
     static let windowChromeHeight: CGFloat = 52
+    /// The tallest toolbar item, in points at every factor: the glass capsule an item sits in.
+    static let toolbarItemHeight: CGFloat = 36
 
     /// The factor in use: `standard`, or in Debug builds the `-TidemarkUIScale 1.3` launch argument, clamped to
     /// `range` and lowered to fit the main screen.
