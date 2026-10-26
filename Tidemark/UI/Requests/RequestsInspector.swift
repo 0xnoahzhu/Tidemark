@@ -35,8 +35,11 @@ struct RequestsInspector: View {
             RequestsInspectorActions(record: record, identity: identity)
         }
         .task(id: RequestsInspectorDetails.Source(record)) {
-            let loaded = await RequestsInspectorDetails.load(for: record, model: model)
-            if !Task.isCancelled { self.details = loaded }
+            try? await Task.sleep(for: RequestsInspectorDetails.settleDelay)
+            guard !Task.isCancelled else { return }
+            await RequestsInspectorDetails.load(for: record, model: model) { loaded in
+                if !Task.isCancelled { self.details = loaded }
+            }
         }
     }
 }

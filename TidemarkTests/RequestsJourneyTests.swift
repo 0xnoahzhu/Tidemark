@@ -398,6 +398,40 @@ struct RequestsJourneyLabelTests {
     }
 }
 
+/// What the inspector loads beside a request.
+@MainActor
+struct RequestsInspectorDetailsTests {
+    let scratch = TestDefaults()
+
+    /// The related records come first, never waiting for Surge; the node's type follows, and only for a request of
+    /// this Mac, whose Surge lists the policy groups.
+    @Test func loadsTheRelatedRecordsFirstAndTypesOnlyThisMacsNodes() async {
+        let model = AppModel(preferences: Preferences(defaults: scratch.make()))
+        let surge = CaptureFakeSurge()
+        surge.update { s in
+            s.groups = [SurgePolicyGroup(name: "Proxy", options: [SurgePolicyOption(name: "HK-01", typeDescription: "Hysteria 2", isGroup: false)])]
+        }
+        model.surge = surge
+        var record = UIMainFixtures.record(id: 1, device: model.devices.thisDeviceID, policy: ["Proxy", "HK-01"])
+        record.remoteAddress = "23.254.139.175 (Proxy)"
+        model.database = ShellDemoDatabase(rows: [record])
+
+        var updates: [RequestsInspectorDetails] = []
+        await RequestsInspectorDetails.load(for: record, model: model) { updates.append($0) }
+        #expect(updates.first?.related != nil)
+        #expect(updates.first?.nodeType == nil)
+        let type = await RequestsNodeTypes.type(of: "HK-01", surge: surge)
+        #expect(updates.last?.nodeType == type)
+
+        // Another Mac's request: this Mac's policy groups say nothing of its node.
+        let other = UIMainFixtures.record(id: 2, device: UUID(), policy: ["Proxy", "HK-01"])
+        updates = []
+        await RequestsInspectorDetails.load(for: other, model: model) { updates.append($0) }
+        #expect(!updates.isEmpty)
+        #expect(updates.allSatisfy { $0.nodeType == nil })
+    }
+}
+
 /// History on one exact host, and the status filter's "ended with an error".
 @MainActor
 struct RequestsHostHistoryTests {

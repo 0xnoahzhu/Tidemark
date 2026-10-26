@@ -4,6 +4,10 @@ import Foundation
 /// errors, first-contact alert, probe session and the egress around it), the type of the proxy node it left through
 /// and the network of the proxy server.
 struct RequestsInspectorDetails {
+    /// How long the selection rests before the details load: going through requests with a held arrow key asks
+    /// PostgreSQL only for the one it stops on, and the inspector draws each request passed once.
+    static let settleDelay: Duration = .milliseconds(150)
+
     /// The request these details are for.
     var key: RequestKey
     var related: RequestRelatedRecords?
@@ -29,23 +33,44 @@ struct RequestsInspectorDetails {
         }
     }
 
+    /// Loads the details of `record` and passes them to `update` as each part arrives: the related records first,
+    /// which never wait for Surge, then the proxy server's network and the node's type.
     @MainActor
-    static func load(for record: RequestRecord, model: AppModel) async -> RequestsInspectorDetails {
+    static func load(for record: RequestRecord, model: AppModel, update: (RequestsInspectorDetails) -> Void) async {
         let database = model.database
-        var details = RequestsInspectorDetails(key: record.key)
+        let surge = model.surge
+        // Surge's policy groups are this Mac's, as they are now: they say nothing of another Mac's nodes.
+        let node = record.deviceID == model.devices.thisDeviceID && RequestsJourney.isProxied(record) ? record.finalPolicy : nil
         async let related = database.relatedRecords(of: record)
-        if let server = RequestsJourney.proxyServer(of: record), HostName.isIPAddress(server) {
-            details.proxyGeo = try? await database.ipInfo(server)
-        }
-        if RequestsJourney.isProxied(record), let node = record.finalPolicy {
-            details.nodeType = await RequestsNodeTypes.type(of: node, surge: model.surge)
-        }
+        async let proxyGeo = loadProxyGeo(of: record, database: database)
+        async let nodeType = loadNodeType(of: node, surge: surge)
+        var details = RequestsInspectorDetails(key: record.key)
         do {
             details.related = try await related
         } catch {
             details.failure = error
         }
-        return details
+        update(details)
+        if let geo = await proxyGeo {
+            details.proxyGeo = geo
+            update(details)
+        }
+        if let type = await nodeType {
+            details.nodeType = type
+            update(details)
+        }
+    }
+
+    /// What Tidemark knows of the network of the proxy server the request went through.
+    private static func loadProxyGeo(of record: RequestRecord, database: any TidemarkDatabase) async -> GeoInfo? {
+        guard let server = RequestsJourney.proxyServer(of: record), HostName.isIPAddress(server) else { return nil }
+        return try? await database.ipInfo(server)
+    }
+
+    /// The type of the proxy node named `node`.
+    private static func loadNodeType(of node: String?, surge: any SurgeClient) async -> String? {
+        guard let node else { return nil }
+        return await RequestsNodeTypes.type(of: node, surge: surge)
     }
 }
 
