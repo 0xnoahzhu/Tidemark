@@ -3,8 +3,8 @@ import Foundation
 
 /// In-memory request store behind the History view in demo mode, previews and tests.
 ///
-/// Request queries, histograms and policy lists are answered from `rows`; everything else behaves like
-/// `OfflineDatabase`.
+/// Request queries, histograms, policy lists and the domains and IPs of Domains & IPs and the app pages are answered
+/// from `rows`; everything else behaves like `OfflineDatabase`.
 struct ShellDemoDatabase: TidemarkDatabase {
     var rows: [RequestRecord]
     /// Names for the search filter's app match (the real database joins `apps`).
@@ -77,6 +77,74 @@ struct ShellDemoDatabase: TidemarkDatabase {
 
     func estimatedRequestCount() async throws -> Int64 { Int64(rows.count) }
 
+    // Inventory, as capture records it: each request counts once for its domain and once for the IP it reached (the
+    // address its domain resolved to, or the host itself when it is an IP).
+
+    func appHosts(_ appID: AppID, scope: DeviceScope) async throws -> [AppHost] {
+        // Oldest first, so the first request of a host names its first process and the domains of an IP keep their order.
+        var hosts: [String: AppHost] = [:]
+        for row in rows.reversed() where row.appID == appID && scope.includes(row.deviceID) {
+            for (kind, value) in Self.inventoryValues(of: row) {
+                let key = "\(kind.rawValue):\(value)"
+                var host = hosts[key] ?? AppHost(
+                    appID: appID, kind: kind, value: value, site: nil, firstSeen: row.startedAt, lastSeen: row.startedAt, requestCount: 0,
+                    processName: row.processName, policy: nil, geo: nil, isDirect: kind == .ip && row.isIPLiteral, hosts: [],
+                    firstDeviceID: row.deviceID
+                )
+                host.lastSeen = row.startedAt
+                host.requestCount += 1
+                host.policy = row.policyPath.isEmpty ? host.policy : row.policyDisplay
+                host.geo = row.geo ?? host.geo
+                if kind == .ip, !row.isIPLiteral, !host.hosts.contains(row.host) { host.hosts.append(row.host) }
+                hosts[key] = host
+            }
+        }
+        return hosts.values.sorted { a, b in a.firstSeen != b.firstSeen ? a.firstSeen > b.firstSeen : a.value < b.value }
+    }
+
+    func inventory(kind: HostKind?, search: String, scope: DeviceScope) async throws -> [InventoryEntry] {
+        var entries: [String: InventoryEntry] = [:]
+        for row in rows.reversed() where scope.includes(row.deviceID) {
+            let source = inventorySource(of: row)
+            for (entryKind, value) in Self.inventoryValues(of: row) where kind == nil || entryKind == kind {
+                let key = "\(entryKind.rawValue):\(value)"
+                var entry = entries[key] ?? InventoryEntry(kind: entryKind, value: value, sources: [], firstSeen: row.startedAt,
+                                                           lastSeen: row.startedAt, requestCount: 0, geo: nil)
+                entry.lastSeen = row.startedAt
+                entry.requestCount += 1
+                if entryKind == .ip { entry.geo = row.geo ?? entry.geo }
+                if !entry.sources.contains(source) { entry.sources.append(source) }
+                entries[key] = entry
+            }
+        }
+        let term = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let matches = entries.values.filter { entry in
+            term.isEmpty || entry.value.contains(term) || entry.sources.contains { $0.title.lowercased().contains(term) }
+        }
+        return Array(matches.map { entry in
+            var entry = entry
+            entry.sources.sort { ($0.title, $0.path) < ($1.title, $1.path) }
+            return entry
+        }
+        .sorted { a, b in a.firstSeen != b.firstSeen ? a.firstSeen > b.firstSeen : a.value < b.value }
+        .prefix(2000))
+    }
+
+    /// Who a request counts for: its process, named as the real database names it.
+    private func inventorySource(of row: RequestRecord) -> InventorySource {
+        let path = row.processPath ?? row.bundlePath ?? ""
+        return InventorySource(title: path.isEmpty ? "" : (row.chain.last?.name ?? row.processName), path: path, appID: row.appID,
+                               probeSessionID: nil, bundlePath: row.bundlePath)
+    }
+
+    /// The domain and the IP a request counts for in the inventory.
+    private static func inventoryValues(of row: RequestRecord) -> [(HostKind, String)] {
+        let host = RequestsHostFilter.normalized(row.host)
+        guard !host.isEmpty else { return [] }
+        if row.isIPLiteral { return [(.ip, host)] }
+        return [(.domain, host)] + (row.remoteIP.map { [(.ip, $0.lowercased())] } ?? [])
+    }
+
     // Everything else is offline.
     func connect() async throws { try await base.connect() }
     func migrate() async throws -> Int { try await base.migrate() }
@@ -111,11 +179,7 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func knownHosts() async throws -> [AppID: Set<String>] { try await base.knownHosts() }
     func insertAppHosts(_ hosts: [AppHost]) async throws -> [AppHost] { try await base.insertAppHosts(hosts) }
     func touchAppHosts(_ hosts: [AppHost]) async throws { try await base.touchAppHosts(hosts) }
-    func appHosts(_ appID: AppID, scope: DeviceScope) async throws -> [AppHost] { try await base.appHosts(appID, scope: scope) }
     func touchHostSources(_ sources: [HostSourceTouch]) async throws { try await base.touchHostSources(sources) }
-    func inventory(kind: HostKind?, search: String, scope: DeviceScope) async throws -> [InventoryEntry] {
-        try await base.inventory(kind: kind, search: search, scope: scope)
-    }
     func ipInfo(_ ip: String) async throws -> GeoInfo? { try await base.ipInfo(ip) }
     func saveIPInfo(_ ip: String, geo: GeoInfo) async throws { try await base.saveIPInfo(ip, geo: geo) }
     func insertAlerts(_ alerts: [AlertItem]) async throws -> [AlertItem] { try await base.insertAlerts(alerts) }
