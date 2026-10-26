@@ -261,17 +261,20 @@ private struct EgressChangesCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
             }
-            ForEach(changes) { change in
-                AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
-                    Text(AnalyzeFormat.seen(change.changedAt, timeOnlyToday: true)).foregroundStyle(Theme.ink2).lineLimit(1)
-                    Text(change.ip).font(Theme.mono(11.5)).lineLimit(1).textSelection(.enabled)
-                    PolicyChip(policyPath: change.policyPath, maxWidth: .infinity)
-                    Text(EgressView.localizedReason(change.reason)).foregroundStyle(Theme.ink2).lineLimit(1)
+            // Up to 50 changes: only the rows scrolled into view are built.
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(changes) { change in
+                    AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
+                        Text(AnalyzeFormat.seen(change.changedAt, timeOnlyToday: true)).foregroundStyle(Theme.ink2).lineLimit(1)
+                        Text(change.ip).font(Theme.mono(11.5)).lineLimit(1).textSelection(.enabled)
+                        PolicyChip(policyPath: change.policyPath, maxWidth: .infinity)
+                        Text(EgressView.localizedReason(change.reason)).foregroundStyle(Theme.ink2).lineLimit(1)
+                    }
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 16)
+                    .frame(height: 32)
+                    .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
                 }
-                .font(.system(size: 12))
-                .padding(.horizontal, 16)
-                .frame(height: 32)
-                .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
             }
         }
     }
