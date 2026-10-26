@@ -126,8 +126,9 @@ enum InventoryPresentation {
 // MARK: - List
 
 /// The Domains & IPs table: a pinned header and lazily built rows in one scroll view, laid out like the native
-/// table it replaced (the inset style's header, row padding and alternating rounded rows, continued below the last
-/// row). Flat and grouped rows share the scroll view, so grouping only swaps the rows.
+/// table it replaced: the inset style's header, row padding and alternating rounded rows, continued below the last
+/// row; columns sized and resized as the native table sizes them, scrolling sideways when they do not fit. Flat and
+/// grouped rows share the scroll view, so grouping only swaps the rows.
 private struct InventoryList: View {
     let model: AppModel
     var entries: [InventoryEntry]
@@ -136,19 +137,30 @@ private struct InventoryList: View {
 
     @State private var position = ScrollPosition(edge: .top)
     @State private var scrolled = InventoryScrollGeometry()
+    /// The columns' widths once they differ from those a new table gives them at the list's width (after the window
+    /// was resized, or in a window too narrow for every column); nil until then.
+    @State private var widths: InventoryColumnWidths?
+
+    private var columns: [InventoryColumnsLayout.Column] {
+        groups == nil ? InventoryColumnsLayout.entryColumns : InventoryColumnsLayout.groupColumns
+    }
 
     var body: some View {
-        ScrollView {
+        let explicit = widths?.widths
+        let tableWidth = widths?.tableWidth ?? 0
+        // The native table rounds and insets its rows only while its columns fit the list.
+        let inset = !(widths?.overflows ?? false)
+        ScrollView([.vertical, .horizontal]) {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
                 if let groups {
                     Section {
                         InventoryTableMetrics.topInset
                         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-                            InventoryGroupRow(model: model, group: group, striped: index % 2 == 1)
+                            InventoryGroupRow(model: model, group: group, widths: explicit, striped: index % 2 == 1, insetStripe: inset)
                         }
-                        InventoryEmptyRows(first: groups.count)
+                        InventoryEmptyRows(first: groups.count, inset: inset)
                     } header: {
-                        InventoryHeaderRow(columns: InventoryColumnsLayout.groupColumns, titles: [
+                        InventoryHeaderRow(columns: InventoryColumnsLayout.groupColumns, widths: explicit, titles: [
                             (tr("Site or network", "Inventory"), .leading),
                             (tr("Seen by", "Inventory"), .leading),
                             (tr("Requests", "Inventory"), .trailing),
@@ -158,11 +170,11 @@ private struct InventoryList: View {
                     Section {
                         InventoryTableMetrics.topInset
                         ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                            InventoryEntryRow(model: model, entry: entry, striped: index % 2 == 1)
+                            InventoryEntryRow(model: model, entry: entry, widths: explicit, striped: index % 2 == 1, insetStripe: inset)
                         }
-                        InventoryEmptyRows(first: entries.count)
+                        InventoryEmptyRows(first: entries.count, inset: inset)
                     } header: {
-                        InventoryHeaderRow(columns: InventoryColumnsLayout.entryColumns, titles: [
+                        InventoryHeaderRow(columns: InventoryColumnsLayout.entryColumns, widths: explicit, titles: [
                             (tr("Name", "Inventory"), .leading),
                             (tr("Type", "Inventory"), .leading),
                             (tr("Seen by · process path", "Inventory"), .leading),
@@ -174,14 +186,23 @@ private struct InventoryList: View {
                 }
             }
             .padding(.bottom, InventoryTableMetrics.verticalInset)
+            // As wide as the list, or as the columns when they do not fit it (then the list scrolls sideways).
+            .containerRelativeFrame(.horizontal) { visible, _ in max(visible, tableWidth) }
         }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .scrollPosition($position)
         .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { _, geometry in
             scrolled.geometry = geometry
         }
+        .onScrollGeometryChange(for: CGFloat.self, of: { InventoryTableMetrics.visibleWidth($0) }) { _, new in
+            resized(to: new)
+        }
         .background(InventoryTableMetrics.background)
-        // A new table, like the one grouping used to build, starts at the top.
-        .onChange(of: groups == nil) { position.scrollTo(edge: .top) }
+        // A new table, like the one grouping used to build, starts at the top with its columns as a new table's.
+        .onChange(of: groups == nil) {
+            widths = scrolled.visibleWidth.flatMap { newTableWidths(visible: $0) }
+            position.scrollTo(edge: .top)
+        }
         // Like the native table, the list takes focus from Tab and a click, and Home, End, Page Up and Page Down
         // scroll it.
         .focusable(interactions: .edit)
@@ -189,6 +210,30 @@ private struct InventoryList: View {
         .onKeyPress(keys: [.home, .end, .pageUp, .pageDown]) { press in
             scroll(press.key)
         }
+    }
+
+    /// A new table's widths at the list's `visible` width when the rows cannot lay them out themselves (they do not
+    /// fit, so the table is wider than the list); nil otherwise.
+    private func newTableWidths(visible: CGFloat) -> InventoryColumnWidths? {
+        let created = InventoryColumnWidths(columns: columns, space: InventoryTableMetrics.columnSpace(visible, columns: columns.count))
+        return created.overflows ? created : nil
+    }
+
+    /// The list is `visible` points wide now: a new list takes a new table's widths, and a resized one fits its
+    /// columns to the new width as the native table does.
+    private func resized(to visible: CGFloat) {
+        guard visible > 0 else { return }
+        defer { scrolled.visibleWidth = visible }
+        guard let old = scrolled.visibleWidth, old != visible else {
+            if scrolled.visibleWidth == nil, let created = newTableWidths(visible: visible) { widths = created }
+            return
+        }
+        let space = InventoryTableMetrics.columnSpace(visible, columns: columns.count)
+        var resized = widths ?? InventoryColumnWidths(columns: columns, space: InventoryTableMetrics.columnSpace(old, columns: columns.count))
+        resized.resize(to: space)
+        // Columns a new table would have at this width are left to the rows.
+        let next: InventoryColumnWidths? = resized.widths == InventoryColumnWidths(columns: columns, space: space).widths && !resized.overflows ? nil : resized
+        if next != widths { widths = next }
     }
 
     private func scroll(_ key: KeyEquivalent) -> KeyPress.Result {
@@ -211,10 +256,12 @@ private struct InventoryList: View {
     }
 }
 
-/// The list's last scroll geometry, for the page keys; a reference, so scrolling does not update the view.
+/// The list's last scroll geometry and width, for the page keys and the column widths; a reference, so scrolling
+/// does not update the view.
 @MainActor
 private final class InventoryScrollGeometry {
     var geometry: ScrollGeometry?
+    var visibleWidth: CGFloat?
 }
 
 /// The native inset table's measurements and colors, which the list reproduces.
@@ -235,15 +282,31 @@ private enum InventoryTableMetrics {
 
     /// The space between the header and the first row.
     static var topInset: some View { Color.clear.frame(height: verticalInset) }
+
+    /// The width the list shows: its container's, which leaves out the scroll view's insets (such as the sidebar's).
+    static func visibleWidth(_ geometry: ScrollGeometry) -> CGFloat {
+        geometry.containerSize.width
+    }
+
+    /// The width `count` columns share in a list `width` points wide: less the padding and the gaps between them.
+    static func columnSpace(_ width: CGFloat, columns count: Int) -> CGFloat {
+        width - 2 * horizontalPadding - columnSpacing * CGFloat(max(0, count - 1))
+    }
+
+    /// The width of a table whose columns take `space`.
+    static func tableWidth(columnSpace space: CGFloat, columns count: Int) -> CGFloat {
+        space + 2 * horizontalPadding + columnSpacing * CGFloat(max(0, count - 1))
+    }
 }
 
 /// Column titles with the native header's separators and bottom line.
 private struct InventoryHeaderRow: View {
     var columns: [InventoryColumnsLayout.Column]
+    var widths: [CGFloat]?
     var titles: [(title: String, alignment: Alignment)]
 
     var body: some View {
-        InventoryColumnsLayout(columns: columns) {
+        InventoryColumnsLayout(columns: columns, widths: widths) {
             ForEach(Array(titles.enumerated()), id: \.offset) { index, column in
                 Group {
                     if column.alignment == .trailing {
@@ -280,13 +343,20 @@ private struct InventoryHeaderRow: View {
     }
 }
 
-/// The alternate rows' rounded background, inset like the native table's.
+/// The alternate rows' background: rounded and inset like the native table's, or, as the native table draws it
+/// while its columns are wider than the list, square across the whole row.
 private struct InventoryRowStripe: View {
+    var inset: Bool
+
     var body: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(InventoryTableMetrics.stripe)
-            .padding(.leading, 10)
-            .padding(.trailing, 10.5)
+        if inset {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(InventoryTableMetrics.stripe)
+                .padding(.leading, 10)
+                .padding(.trailing, 10.5)
+        } else {
+            Rectangle().fill(InventoryTableMetrics.stripe)
+        }
     }
 }
 
@@ -296,6 +366,8 @@ private struct InventoryRowStripe: View {
 private struct InventoryEmptyRows: View {
     /// The index the first empty row would have.
     var first: Int
+    /// Rounded and inset rows, as the rows' stripes are.
+    var inset: Bool
 
     var body: some View {
         Color.clear
@@ -305,9 +377,14 @@ private struct InventoryEmptyRows: View {
                     let pitch = InventoryTableMetrics.emptyRowHeight
                     var index = first % 2 == 1 ? 0 : 1
                     while CGFloat(index) * pitch < size.height {
-                        let rect = CGRect(x: 10, y: CGFloat(index) * pitch, width: max(0, size.width - 20.5), height: pitch)
-                        context.fill(RoundedRectangle(cornerRadius: 6, style: .continuous).path(in: rect),
-                                     with: .color(InventoryTableMetrics.stripe))
+                        let y = CGFloat(index) * pitch
+                        if inset {
+                            let rect = CGRect(x: 10, y: y, width: max(0, size.width - 20.5), height: pitch)
+                            context.fill(RoundedRectangle(cornerRadius: 6, style: .continuous).path(in: rect),
+                                         with: .color(InventoryTableMetrics.stripe))
+                        } else {
+                            context.fill(Path(CGRect(x: 0, y: y, width: size.width, height: pitch)), with: .color(InventoryTableMetrics.stripe))
+                        }
                         index += 2
                     }
                 }
@@ -322,10 +399,12 @@ private struct InventoryEmptyRows: View {
 private struct InventoryEntryRow: View {
     let model: AppModel
     var entry: InventoryEntry
+    var widths: [CGFloat]?
     var striped: Bool
+    var insetStripe: Bool
 
     var body: some View {
-        InventoryColumnsLayout(columns: InventoryColumnsLayout.entryColumns) {
+        InventoryColumnsLayout(columns: InventoryColumnsLayout.entryColumns, widths: widths) {
             Text(entry.value)
                 .font(entry.kind == .ip ? Theme.mono(12, weight: .medium) : .system(size: 12, weight: .medium))
                 .lineLimit(1)
@@ -342,7 +421,7 @@ private struct InventoryEntryRow: View {
         .font(.system(size: 12))
         .padding(.vertical, InventoryTableMetrics.rowPadding)
         .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
-        .background { if striped { InventoryRowStripe() } }
+        .background { if striped { InventoryRowStripe(inset: insetStripe) } }
         .accessibilityElement(children: .combine)
     }
 }
@@ -351,10 +430,12 @@ private struct InventoryEntryRow: View {
 private struct InventoryGroupRow: View {
     let model: AppModel
     var group: InventoryGroup
+    var widths: [CGFloat]?
     var striped: Bool
+    var insetStripe: Bool
 
     var body: some View {
-        InventoryColumnsLayout(columns: InventoryColumnsLayout.groupColumns) {
+        InventoryColumnsLayout(columns: InventoryColumnsLayout.groupColumns, widths: widths) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(group.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
@@ -385,20 +466,24 @@ private struct InventoryGroupRow: View {
         .font(.system(size: 12))
         .padding(.vertical, InventoryTableMetrics.rowPadding)
         .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
-        .background { if striped { InventoryRowStripe() } }
+        .background { if striped { InventoryRowStripe(inset: insetStripe) } }
         .accessibilityElement(children: .combine)
     }
 }
 
-/// Lays out a row of the Domains & IPs table as the native table did: columns that cap their width keep their
-/// minimum, and the others share the rest, each getting its ideal width plus an equal part of the space left over
-/// (or minus an equal part of what is missing, down to its minimum). Cells start at their column's leading edge
-/// and are centered vertically.
+/// Lays out a row of the Domains & IPs table in columns of the given widths or, without them, of the widths a new
+/// native table gives its columns in the row's width. Cells start at their column's leading edge and are centered
+/// vertically.
 struct InventoryColumnsLayout: Layout {
     struct Column: Hashable, Sendable {
         var ideal: CGFloat
         var min: CGFloat
         var max: CGFloat = .infinity
+
+        /// Whether its width can change (the Type column's cannot).
+        var isResizable: Bool { min < max }
+
+        func clamped(_ width: CGFloat) -> CGFloat { Swift.min(Swift.max(width, min), max) }
     }
 
     /// Name, Type, Seen by · process path, First seen, Last seen, Requests.
@@ -412,11 +497,16 @@ struct InventoryColumnsLayout: Layout {
     ]
 
     var columns: [Column]
+    var widths: [CGFloat]?
     var spacing: CGFloat = 17
 
+    private func resolved(_ total: CGFloat) -> [CGFloat] {
+        widths ?? Self.widths(for: columns, spacing: spacing, total: total)
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? columns.reduce(spacing * CGFloat(max(0, columns.count - 1))) { $0 + $1.ideal }
-        let widths = Self.widths(for: columns, spacing: spacing, total: width)
+        let width = proposal.width ?? (widths ?? columns.map(\.ideal)).reduce(spacing * CGFloat(max(0, columns.count - 1)), +)
+        let widths = resolved(width)
         var height: CGFloat = 0
         for (index, subview) in subviews.enumerated() where index < widths.count {
             height = max(height, subview.sizeThatFits(ProposedViewSize(width: widths[index], height: nil)).height)
@@ -425,7 +515,7 @@ struct InventoryColumnsLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let widths = Self.widths(for: columns, spacing: spacing, total: bounds.width)
+        let widths = resolved(bounds.width)
         var x = bounds.minX
         for (index, subview) in subviews.enumerated() {
             guard index < widths.count else {
@@ -437,20 +527,50 @@ struct InventoryColumnsLayout: Layout {
         }
     }
 
-    /// Column widths for a row `total` points wide.
+    /// The widths a new native table gives its columns in a row `total` points wide.
     static func widths(for columns: [Column], spacing: CGFloat, total: CGFloat) -> [CGFloat] {
+        InventoryColumnWidths.initial(columns, space: total - spacing * CGFloat(max(0, columns.count - 1)))
+    }
+}
+
+/// The widths of the Domains & IPs table's columns, kept as the native table kept them.
+///
+/// A new table caps the columns that have a maximum at their minimum and shares the rest between the others, each
+/// taking its ideal width plus an equal part of what is left (or less an equal part of what is missing, down to its
+/// minimum); too narrow for every minimum, it keeps the ideal widths and scrolls sideways. As the list is resized,
+/// columns that filled it share the difference equally, within their limits.
+struct InventoryColumnWidths: Equatable {
+    typealias Column = InventoryColumnsLayout.Column
+
+    let columns: [Column]
+    private(set) var widths: [CGFloat]
+    /// The width the columns share: the list's, less its padding and the gaps between the columns.
+    private(set) var space: CGFloat
+
+    /// A new table's widths in `space`.
+    init(columns: [Column], space: CGFloat) {
+        self.columns = columns
+        self.space = space
+        widths = Self.initial(columns, space: space)
+    }
+
+    /// The columns' total width.
+    var total: CGFloat { widths.reduce(0, +) }
+
+    /// Whether the columns are wider than the list, which then scrolls sideways.
+    var overflows: Bool { total > space + 0.5 }
+
+    /// The table's width: the list's, or the columns' when they are wider.
+    var tableWidth: CGFloat {
+        InventoryTableMetrics.tableWidth(columnSpace: max(space, total), columns: columns.count)
+    }
+
+    static func initial(_ columns: [Column], space: CGFloat) -> [CGFloat] {
+        guard columns.reduce(0, { $0 + $1.min }) <= space else { return columns.map(\.ideal) }
         var result = columns.map(\.min)
         let shared = columns.indices.filter { columns[$0].max == .infinity }
-        let available = total - spacing * CGFloat(max(0, columns.count - 1))
-            - columns.indices.filter { !shared.contains($0) }.reduce(CGFloat(0)) { $0 + columns[$1].min }
-        let minimums = shared.reduce(CGFloat(0)) { $0 + columns[$1].min }
-        guard available > minimums else {
-            // Too narrow for every minimum: the shared columns shrink in proportion.
-            for index in shared { result[index] = minimums > 0 ? max(0, available) * columns[index].min / minimums : 0 }
-            return result
-        }
         var pool = shared
-        var remaining = available
+        var remaining = space - columns.indices.filter { !shared.contains($0) }.reduce(CGFloat(0)) { $0 + columns[$1].min }
         while !pool.isEmpty {
             let delta = (remaining - pool.reduce(CGFloat(0)) { $0 + columns[$1].ideal }) / CGFloat(pool.count)
             let pinned = pool.filter { columns[$0].ideal + delta < columns[$0].min }
@@ -462,6 +582,35 @@ struct InventoryColumnsLayout: Layout {
             pool.removeAll { pinned.contains($0) }
         }
         return result
+    }
+
+    /// The list now gives the columns `newSpace`: they are fitted to it when they filled the old width, or when they
+    /// would otherwise cross the new edge (from scrolling sideways to leaving room, or the other way); otherwise
+    /// they keep their widths.
+    mutating func resize(to newSpace: CGFloat) {
+        let sum = total
+        let filled = abs(sum - space) < 0.5
+        let keeps = !filled && ((sum > space && sum > newSpace) || (sum < space && sum < newSpace))
+        space = newSpace
+        if !keeps { fit(newSpace) }
+    }
+
+    /// Shares the difference to `target` equally among the resizable columns, within their limits.
+    private mutating func fit(_ target: CGFloat) {
+        var pool = columns.indices.filter { columns[$0].isResizable }
+        var remaining = target - total
+        while abs(remaining) > 0.01, !pool.isEmpty {
+            let share = remaining / CGFloat(pool.count)
+            var open: [Int] = []
+            for index in pool {
+                let old = widths[index]
+                let width = columns[index].clamped(old + share)
+                remaining -= width - old
+                widths[index] = width
+                if width != (share > 0 ? columns[index].max : columns[index].min) { open.append(index) }
+            }
+            pool = open
+        }
     }
 }
 

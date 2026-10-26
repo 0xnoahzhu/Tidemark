@@ -520,13 +520,61 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(Layout.widths(for: Layout.groupColumns, spacing: 17, total: 955) == [751, 110, 60])
     }
 
-    @Test func keepsMinimumsThenShrinksInProportion() {
+    @Test func keepsAMinimumThenShrinksTheOtherColumn() {
         // Name reaches its minimum first; Seen by takes what is left.
         #expect(Layout.widths(for: Layout.entryColumns, spacing: 17, total: 85 + 334 + 420) == [150, 58, 270, 108, 108, 60])
-        // Too narrow for both minimums: they keep their 150 : 240 proportion and every column stays visible.
-        let narrow = Layout.widths(for: Layout.entryColumns, spacing: 17, total: 85 + 334 + 195)
-        #expect(narrow == [75, 58, 120, 108, 108, 60])
-        #expect(Layout.widths(for: Layout.entryColumns, spacing: 17, total: 100).allSatisfy { $0 >= 0 })
+    }
+
+    @Test func keepsTheIdealWidthsWhenTooNarrowForEveryMinimum() {
+        // A new table in the 1000 pt window (a 756 pt list): wider than the list, which scrolls sideways.
+        let narrow = InventoryColumnWidths(columns: Layout.entryColumns, space: 756 - 32 - 85)
+        #expect(narrow.widths == [270, 58, 480, 112, 112, 70])
+        #expect(narrow.overflows)
+        #expect(narrow.tableWidth == 1219)
+        #expect(Layout.widths(for: Layout.entryColumns, spacing: 17, total: 85 + 300) == [270, 58, 480, 112, 112, 70])
+    }
+}
+
+/// The Domains & IPs columns' widths as the window is resized, compared with the native table's in the same steps.
+@Suite @MainActor struct InventoryColumnWidthsTests {
+    typealias Layout = InventoryColumnsLayout
+
+    private func close(_ widths: [CGFloat], _ expected: [CGFloat]) -> Bool {
+        widths.count == expected.count && zip(widths, expected).allSatisfy { abs($0 - $1) < 0.01 }
+    }
+
+    /// The space a list `width` points wide gives `count` columns.
+    private func space(_ width: CGFloat, _ count: Int) -> CGFloat { width - 32 - 17 * CGFloat(count - 1) }
+
+    @Test func fitsColumnsThatFilledTheListAsItIsResized() {
+        var widths = InventoryColumnWidths(columns: Layout.entryColumns, space: space(1004, 6))
+        #expect(close(widths.widths, [171.5, 58, 381.5, 108, 108, 60]))
+        widths.resize(to: space(856, 6))
+        #expect(close(widths.widths, [150, 58, 255, 108, 108, 60]))
+        widths.resize(to: space(756, 6))
+        #expect(close(widths.widths, [150, 58, 240, 108, 108, 60]))
+        #expect(widths.tableWidth == 841)
+        widths.resize(to: space(1004, 6))
+        #expect(close(widths.widths, [207.5, 58, 297.5, 120, 120, 84]))
+        widths.resize(to: space(1256, 6))
+        #expect(close(widths.widths, [333.5, 58, 423.5, 120, 120, 84]))
+        widths.resize(to: space(1004, 6))
+        #expect(close(widths.widths, [231.5, 58, 321.5, 108, 108, 60]))
+
+        var grouped = InventoryColumnWidths(columns: Layout.groupColumns, space: space(756, 3))
+        #expect(close(grouped.widths, [520, 110, 60]))
+        grouped.resize(to: space(856, 3))
+        #expect(close(grouped.widths, [555, 145, 90]))
+        grouped.resize(to: space(1004, 3))
+        #expect(close(grouped.widths, [668, 180, 90]))
+    }
+
+    @Test func keepsColumnsWiderThanTheListUntilTheyFitAgain() {
+        var widths = InventoryColumnWidths(columns: Layout.entryColumns, space: space(756, 6))
+        widths.resize(to: space(856, 6))
+        widths.resize(to: space(1004, 6))
+        #expect(close(widths.widths, [270, 58, 480, 112, 112, 70]))
+        #expect(widths.tableWidth == 1219)
     }
 }
 
