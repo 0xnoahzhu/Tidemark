@@ -112,33 +112,41 @@ struct InventoryView: View {
 
     private func load(_ key: InventoryCache.Key) async {
         let cache = model.inventory
-        // Debounce typing in the search field (the first list loads at once).
-        if !key.search.isEmpty, cache.snapshot(for: key) != nil {
-            try? await Task.sleep(for: .milliseconds(300))
-            if Task.isCancelled { return }
+        if !key.search.isEmpty {
+            // Narrow the cached list at once; the database's answer, when one is needed, waits for the typing to stop.
+            cache.filterLocally(key, replacing: false)
+            cache.show(key)
+            if cache.snapshot(for: key) != nil {
+                try? await Task.sleep(for: .milliseconds(300))
+                if Task.isCancelled { return }
+            }
         }
-        if let age = cache.age(of: key), age < Self.revalidateAfter {
+        // A search the complete unsearched list answers refreshes that list instead of running a query of its own.
+        var source = cache.answersLocally(key) ? key.base : key
+        if let age = cache.age(of: source), age < Self.revalidateAfter {
             cache.show(key)
         } else {
-            await fetch(key)
+            await fetch(source, for: key)
         }
         while !Task.isCancelled {
-            try? await Task.sleep(for: Self.refreshInterval - min(cache.age(of: key) ?? .zero, Self.refreshInterval))
+            try? await Task.sleep(for: Self.refreshInterval - min(cache.age(of: source) ?? .zero, Self.refreshInterval))
             if Task.isCancelled { return }
-            await fetch(key)
+            source = cache.answersLocally(key) ? key.base : key
+            await fetch(source, for: key)
         }
     }
 
-    private func fetch(_ key: InventoryCache.Key) async {
+    private func fetch(_ source: InventoryCache.Key, for key: InventoryCache.Key) async {
         let cache = model.inventory
         do {
-            let fresh = try await model.database.inventory(kind: nil, search: key.search, scope: key.scope)
+            let fresh = try await model.database.inventory(kind: nil, search: source.search, scope: source.scope)
             if Task.isCancelled { return }
-            cache.store(fresh, for: key)
+            cache.store(fresh, for: source)
         } catch {
             if Task.isCancelled { return }
-            cache.storeFailure(for: key)
+            cache.storeFailure(for: source)
         }
+        if source != key { cache.filterLocally(key, replacing: true) }
         cache.show(key)
     }
 }

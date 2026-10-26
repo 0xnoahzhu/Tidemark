@@ -2,7 +2,8 @@ import Foundation
 import Observation
 
 /// The Domains & IPs page's lists, kept by `AppModel` while the app runs: coming back to the page shows the last
-/// list at once while the database is asked again in the background.
+/// list at once while the database is asked again in the background, and a search narrows the cached list as it is
+/// typed.
 @MainActor
 @Observable
 final class InventoryCache {
@@ -10,6 +11,9 @@ final class InventoryCache {
     struct Key: Hashable, Sendable {
         var search: String
         var scope: DeviceScope
+
+        /// The unsearched list of the same scope, which a search narrows.
+        var base: Key { Key(search: "", scope: scope) }
     }
 
     /// One list in the page's order (newest first seen first, then by name), with its domains and its IPs in the
@@ -18,14 +22,17 @@ final class InventoryCache {
         let all: [InventoryEntry]
         let domains: [InventoryEntry]
         let ips: [InventoryEntry]
+        /// The database returned as many entries as it ever does (`queryLimit`), so older ones may be missing.
+        let isTruncated: Bool
 
-        init(sorted entries: [InventoryEntry]) {
+        init(sorted entries: [InventoryEntry], isTruncated: Bool) {
             all = entries
             domains = entries.filter { $0.kind == .domain }
             ips = entries.filter { $0.kind == .ip }
+            self.isTruncated = isTruncated
         }
 
-        static let empty = Snapshot(sorted: [])
+        static let empty = Snapshot(sorted: [], isTruncated: false)
 
         /// The entries of `kind`, all of them when nil.
         func entries(_ kind: HostKind?) -> [InventoryEntry] {
@@ -39,10 +46,12 @@ final class InventoryCache {
         var domainCount: Int { domains.count }
 
         static func == (a: Snapshot, b: Snapshot) -> Bool {
-            a.all == b.all
+            a.isTruncated == b.isTruncated && a.all == b.all
         }
     }
 
+    /// The most entries one `TidemarkDatabase.inventory` query returns (the `LIMIT` of `PostgresDatabase.inventory`).
+    static let queryLimit = 2000
     /// Searches whose lists are kept besides the unsearched ones.
     static let keptSearches = 4
 
@@ -79,12 +88,33 @@ final class InventoryCache {
     /// answer redraws nothing.
     func store(_ fetched: [InventoryEntry], for key: Key) {
         fetchedAt[key] = .now
-        assign(Snapshot(sorted: InventoryPresentation.visible(fetched, kind: nil)), to: key)
+        assign(Snapshot(sorted: InventoryPresentation.visible(fetched, kind: nil), isTruncated: fetched.count >= Self.queryLimit), to: key)
     }
 
     /// A query that failed leaves a key without a list with an empty one, so the page stops waiting for it.
     func storeFailure(for key: Key) {
         if snapshots[key] == nil { assign(.empty, to: key) }
+    }
+
+    /// Whether the cached unsearched list holds every entry of the scope, so narrowing it answers `key`'s search
+    /// exactly and the database need not be asked.
+    func answersLocally(_ key: Key) -> Bool {
+        guard !key.search.isEmpty, let base = snapshots[key.base] else { return false }
+        return !base.isTruncated
+    }
+
+    /// Narrows the cached unsearched list to `key`'s search as the database does: the domains and IPs that contain
+    /// the text and those an app or probe whose name contains it reached. A key that has a list keeps it unless
+    /// `replacing` (the database's own answer is the better one when the cached list is incomplete).
+    func filterLocally(_ key: Key, replacing: Bool) {
+        guard !key.search.isEmpty, replacing || snapshots[key] == nil, let base = snapshots[key.base] else { return }
+        let term = key.search.lowercased()
+        let matches = base.all.filter { entry in
+            entry.value.lowercased().contains(term) || entry.sources.contains { $0.title.lowercased().contains(term) }
+        }
+        // Entries the cached list lacks may still match: no "nothing matches" before the database has answered.
+        if matches.isEmpty, base.isTruncated, !replacing { return }
+        assign(Snapshot(sorted: matches, isTruncated: base.isTruncated), to: key)
     }
 
     /// The site (domains) and network (IPs) groups of the entries of `kind` shown for `key`, computed once per list.

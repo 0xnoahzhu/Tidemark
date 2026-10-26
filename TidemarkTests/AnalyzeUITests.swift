@@ -570,6 +570,30 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(changed.raised)
     }
 
+    @Test func narrowsACompleteListAsTheDatabaseWould() throws {
+        let cache = InventoryCache()
+        cache.store(entries, for: all)
+        let search = InventoryCache.Key(search: "rAyC", scope: .all)
+        #expect(cache.answersLocally(search))
+        cache.filterLocally(search, replacing: false)
+        // The search matches the domains and IPs and the names of the apps that reached them, ignoring case.
+        #expect(try #require(cache.snapshot(for: search)).all.map(\.value) == ["104.18.19.125", "notion.so"])
+        let github = InventoryCache.Key(search: "github", scope: .all)
+        cache.filterLocally(github, replacing: false)
+        #expect(try #require(cache.snapshot(for: github)).all.map(\.value) == ["api.github.com"])
+    }
+
+    @Test func leavesATruncatedListsSearchToTheDatabase() {
+        let cache = InventoryCache()
+        let many = (0..<InventoryCache.queryLimit).map { entry("host\($0).example.com", minutesAgo: Double($0)) }
+        cache.store(many, for: all)
+        let search = InventoryCache.Key(search: "nowhere", scope: .all)
+        #expect(!cache.answersLocally(search))
+        // Older entries the list lacks may match: no empty answer before the database's.
+        cache.filterLocally(search, replacing: false)
+        #expect(cache.snapshot(for: search) == nil)
+    }
+
     @Test func showsTheLastListWhileAnotherHasNoneYet() throws {
         let cache = InventoryCache()
         cache.store(entries, for: all)
