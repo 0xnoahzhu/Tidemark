@@ -10,7 +10,7 @@ struct MainWindowView: View {
         @Bindable var nav = model.nav
         NavigationSplitView(columnVisibility: $columnVisibility) {
             ShellSidebar()
-                .navigationSplitViewColumnWidth(min: 220, ideal: 244, max: 320)
+                .navigationSplitViewColumnWidth(min: 220.px, ideal: 244.px, max: 320.px)
         } detail: {
             // Pages wrap text to their width; a minimum height that followed it would change while a column
             // resizes and send the split view into update-constraints passes until AppKit aborts.
@@ -18,7 +18,7 @@ struct MainWindowView: View {
                 .frame(minHeight: 0, maxHeight: .infinity)
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(minWidth: 1000, minHeight: 640)
+        .frame(minWidth: UIScale.minimumWindowSize.width, minHeight: UIScale.minimumWindowSize.height)
         .sheet(isPresented: $nav.showAddApp) {
             AddAppSheet()
         }
@@ -79,12 +79,13 @@ struct ShellRecordingConfirmation: ViewModifier {
                     model.capture.setRecording(!pausing)
                 }
             ) {
-                // The asset keeps the system icon margin; drawn at 72.5 pt its tile fills the page's 58 pt.
+                // The asset keeps the system icon margin; drawn a quarter larger, its tile fills the page's 58 px.
+                let tile = 58.px, drawn = tile * 1.25
                 Image("BrandIcon")
                     .resizable()
                     .interpolation(.high)
-                    .frame(width: 72.5, height: 72.5)
-                    .padding(-7.25)
+                    .frame(width: drawn, height: drawn)
+                    .padding(-(drawn - tile) / 2)
             }
         }
     }

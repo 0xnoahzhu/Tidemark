@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The sidebar's Mac menu: shows the current device scope and opens a searchable list of Macs.
 ///
-/// As in the page, the list drops down 6 pt under the picker at the picker's width, without an arrow, over the
+/// As in the page, the list drops down 6 px under the picker at the picker's width, without an arrow, over the
 /// rows below (the sidebar draws the picker above them). A click outside the picker and the list, or Escape,
 /// closes it.
 struct SidebarMacPicker: View {
@@ -16,36 +16,36 @@ struct SidebarMacPicker: View {
         Button {
             isPresented.toggle()
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 8.px) {
                 Circle()
                     .fill(current.color)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 8.px, height: 8.px)
                 Text(current.label)
-                    .font(.system(size: 12.5, weight: .semibold))
+                    .font(.design(12.5, .semibold))
                     .foregroundStyle(Theme.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Spacer(minLength: 4)
+                Spacer(minLength: 4.px)
                 Text(current.detail)
-                    .font(.system(size: 11))
+                    .font(.design(11))
                     .foregroundStyle(Theme.inkGlass)
                     .lineLimit(1)
                 Image(systemName: "arrowtriangle.down.fill")
-                    .font(.system(size: 6))
+                    .font(.design(6))
                     .foregroundStyle(Theme.inkGlass)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 10.px)
             .frame(height: Self.height)
-            .contentShape(.rect(cornerRadius: 9))
+            .contentShape(.rect(cornerRadius: 9.px))
         }
         .buttonStyle(.plain)
-        .background(isHovering || isPresented ? Theme.fill2 : Theme.fill, in: .rect(cornerRadius: 9, style: .continuous))
+        .background(isHovering || isPresented ? Theme.fill2 : Theme.fill, in: .rect(cornerRadius: 9.px, style: .continuous))
         .onHover { isHovering = $0 }
         .accessibilityLabel(tr("Mac", "Sidebar"))
         .accessibilityValue(current.label)
         .overlay(alignment: .top) {
             if isPresented {
-                VStack(spacing: 6) {
+                VStack(spacing: 6.px) {
                     // The picker's own area, so a click on it toggles the list instead of closing it first.
                     Color.clear
                         .frame(height: Self.height)
@@ -72,7 +72,7 @@ struct SidebarMacPicker: View {
         }
     }
 
-    static let height: CGFloat = 30
+    static let height = 30.px
 }
 
 /// The open Mac menu: a "Find a Mac" field, "All Macs" and every Mac whose name matches, on the page's menu
@@ -86,30 +86,26 @@ private struct SidebarMacMenu: View {
 
     var body: some View {
         let options = SidebarMacOption.options(in: model.devices, matching: query)
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 1.px) {
+            HStack(spacing: 6.px) {
                 Circle()
-                    .strokeBorder(Theme.ink3, lineWidth: 1.5)
-                    .frame(width: 8, height: 8)
+                    .strokeBorder(Theme.ink3, lineWidth: 1.5.px)
+                    .frame(width: 8.px, height: 8.px)
                 TextField(tr("Find a Mac", "Sidebar"), text: $query, prompt: Text(tr("Find a Mac", "Sidebar")))
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
                     .focused($searchFocused)
                     .onSubmit {
                         if let first = options.first(where: { $0.scope != .all }) ?? options.first { pick(first) }
                     }
             }
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .background(Theme.fill, in: .rect(cornerRadius: 6, style: .continuous))
-            .padding(.bottom, 4)
+            .designField(height: 26, cornerRadius: 6, horizontalPadding: 8)
+            .padding(.bottom, 4.px)
             ForEach(options) { option in
                 SidebarMacMenuRow(option: option, isSelected: option.scope == model.devices.scope) {
                     pick(option)
                 }
             }
         }
-        .padding(5)
+        .padding(5.px)
         .frame(maxWidth: .infinity)
         .background(GlassSurface.menu.tint(preference: model.preferences.glass), in: Self.shape)
         .glassEffect(.regular, in: Self.shape)
@@ -118,7 +114,7 @@ private struct SidebarMacMenu: View {
         .onAppear { searchFocused = true }
     }
 
-    private static let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+    private static let shape = RoundedRectangle(cornerRadius: 10.px, style: .continuous)
 
     private func pick(_ option: SidebarMacOption) {
         if model.devices.scope != option.scope {
@@ -138,29 +134,29 @@ private struct SidebarMacMenuRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 7) {
+            HStack(spacing: 7.px) {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .frame(width: 12)
+                    .font(.design(10, .bold))
+                    .frame(width: 12.px)
                     .opacity(isSelected ? 1 : 0)
                 Circle()
                     .fill(option.color)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 8.px, height: 8.px)
                 Text(option.label)
-                    .font(.system(size: 12.5))
+                    .font(.design(12.5))
                     .foregroundStyle(Theme.ink)
                     .lineLimit(1)
-                Spacer(minLength: 6)
+                Spacer(minLength: 6.px)
                 Text(option.detail)
-                    .font(.system(size: 10.5))
+                    .font(.design(10.5))
                     .foregroundStyle(Theme.ink2)
             }
-            .padding(.horizontal, 8)
-            .frame(height: 28)
-            .contentShape(.rect(cornerRadius: 6))
+            .padding(.horizontal, 8.px)
+            .frame(height: 28.px)
+            .contentShape(.rect(cornerRadius: 6.px))
         }
         .buttonStyle(.plain)
-        .background(isHovering ? Theme.accentTint : .clear, in: .rect(cornerRadius: 6, style: .continuous))
+        .background(isHovering ? Theme.accentTint : .clear, in: .rect(cornerRadius: 6.px, style: .continuous))
         .onHover { isHovering = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }

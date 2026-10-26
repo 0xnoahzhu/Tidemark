@@ -3,7 +3,7 @@ import SwiftUI
 /// The main window's Liquid Glass sidebar: Mac menu, Capture and Analyze destinations, monitored and
 /// archived apps, and the Surge / PostgreSQL status footer.
 ///
-/// Laid out like the page rather than as a system sidebar list: 30 pt rows one point apart, and the selected
+/// Laid out like the page rather than as a system sidebar list: 30 px rows 1 px apart, and the selected
 /// row on the accent wash with its text in ink. The Mac menu and the footer stay put while the rows scroll.
 ///
 /// The column itself is the system's: nothing is painted behind the rows, so the split view's own sidebar glass,
@@ -16,17 +16,17 @@ struct ShellSidebar: View {
     var body: some View {
         VStack(spacing: 0) {
             SidebarMacPicker()
-                .padding(.horizontal, 10)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 10.px)
+                .padding(.bottom, 8.px)
                 // The open Mac menu lies over the rows below.
                 .zIndex(1)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 1.px) {
                     rows
                 }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
+                .padding(.horizontal, 10.px)
+                .padding(.bottom, 10.px)
             }
             // No line or fade at either end: the page draws only the footer's own top border.
             .scrollEdgeEffectHidden(true, for: .all)
@@ -43,7 +43,7 @@ struct ShellSidebar: View {
 
     @ViewBuilder
     private var rows: some View {
-        SidebarSectionHeader(title: tr("Capture", "Sidebar"), top: 4)
+        SidebarSectionHeader(title: tr("Capture", "Sidebar"), top: 4.px)
         SidebarRow(page: .requests) {
             SidebarGlyph(symbol: "line.3.horizontal", tint: Theme.tileRequests, scale: 0.5)
             SidebarRowTitle(tr("Requests", "Sidebar"))
@@ -101,16 +101,16 @@ private struct SidebarRequestsRate: View {
     }
 }
 
-/// Section title in the page's sidebar style (11 pt semibold, glass ink), 14 pt below the rows above it.
+/// Section title in the page's sidebar style (11 px semibold, glass ink), 14 px below the rows above it.
 private struct SidebarSectionHeader: View {
     var title: String
-    var top: CGFloat = 14
+    var top: CGFloat = 14.px
 
     var body: some View {
         Text(title)
             .font(Theme.sectionLabel)
             .foregroundStyle(Theme.inkGlass)
-            .padding(EdgeInsets(top: top, leading: 8, bottom: 4, trailing: 8))
+            .padding(EdgeInsets(top: top, leading: 8.px, bottom: 4.px, trailing: 8.px))
             .accessibilityAddTraits(.isHeader)
     }
 }
@@ -131,18 +131,18 @@ private struct SidebarMonitoredHeader: View {
                 model.nav.openAddApp()
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.design(12, .semibold))
                     .foregroundStyle(Theme.inkGlass)
-                    .frame(width: 20, height: 20)
-                    .background(isHovering ? Theme.fill2 : .clear, in: .rect(cornerRadius: 6, style: .continuous))
-                    .contentShape(.rect(cornerRadius: 6))
+                    .frame(width: 20.px, height: 20.px)
+                    .background(isHovering ? Theme.fill2 : .clear, in: .rect(cornerRadius: 6.px, style: .continuous))
+                    .contentShape(.rect(cornerRadius: 6.px))
             }
             .buttonStyle(.plain)
             .onHover { isHovering = $0 }
             .help(tr("Monitor an App…", "Sidebar"))
             .accessibilityLabel(tr("Monitor an App…", "Sidebar"))
         }
-        .padding(EdgeInsets(top: 14, leading: 8, bottom: 4, trailing: 2))
+        .padding(EdgeInsets(top: 14.px, leading: 8.px, bottom: 4.px, trailing: 2.px))
     }
 }
 
@@ -155,18 +155,18 @@ private struct SidebarArchivedHeader: View {
         Button {
             withAnimation(.smooth(duration: 0.2)) { isExpanded.toggle() }
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 6.px) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.design(8, .bold))
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .frame(width: 8)
+                    .frame(width: 8.px)
                 Text(tr("Archived", "Sidebar"))
                     .font(Theme.sectionLabel)
                 Text(String(count))
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.design(11, .medium))
             }
             .foregroundStyle(Theme.inkGlass)
-            .padding(EdgeInsets(top: 12, leading: 8, bottom: 4, trailing: 8))
+            .padding(EdgeInsets(top: 12.px, leading: 8.px, bottom: 4.px, trailing: 8.px))
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
         }
@@ -174,7 +174,7 @@ private struct SidebarArchivedHeader: View {
     }
 }
 
-/// One destination: a 30 pt row that opens `page`, on the accent wash while it is the page shown.
+/// One destination: a 30 px row that opens `page`, on the accent wash while it is the page shown.
 private struct SidebarRow<Content: View>: View {
     @Environment(AppModel.self) private var model
     var page: Page
@@ -185,14 +185,14 @@ private struct SidebarRow<Content: View>: View {
         Button {
             model.nav.page = page
         } label: {
-            HStack(spacing: 9) {
+            HStack(spacing: 9.px) {
                 content
             }
-            .font(.system(size: 13))
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .leading)
-            .background(selected ? Theme.accentTint : .clear, in: .rect(cornerRadius: 8, style: .continuous))
-            .contentShape(.rect(cornerRadius: 8))
+            .font(.design(13))
+            .padding(.horizontal, 8.px)
+            .frame(maxWidth: .infinity, minHeight: 30.px, maxHeight: 30.px, alignment: .leading)
+            .background(selected ? Theme.accentTint : .clear, in: .rect(cornerRadius: 8.px, style: .continuous))
+            .contentShape(.rect(cornerRadius: 8.px))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -220,12 +220,12 @@ private struct SidebarGlyph: View {
     var scale: CGFloat
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
+        RoundedRectangle(cornerRadius: 6.px, style: .continuous)
             .fill(tint)
-            .frame(width: 20, height: 20)
+            .frame(width: 20.px, height: 20.px)
             .overlay {
                 Image(systemName: symbol)
-                    .font(.system(size: 20 * scale, weight: .bold))
+                    .font(.design(20 * scale, .bold))
                     .foregroundStyle(.white)
             }
             .accessibilityHidden(true)
@@ -243,12 +243,12 @@ private struct SidebarAppRow: View {
         let absent = model.catalog.isInstalled(app.id, on: context) == false
         let newCount = model.catalog.stats[app.id]?.newIn24h ?? 0
         SidebarRow(page: .app(app.id)) {
-            AppTile(app: app, size: 20)
+            AppTile(app: app, size: 20.px)
                 .saturation(absent ? 0 : 1)
             SidebarRowTitle(app.name)
             if absent {
                 Text(absentShortLabel(context: context))
-                    .font(.system(size: 10.5))
+                    .font(.design(10.5))
                     .foregroundStyle(Theme.inkGlass)
                     .lineLimit(1)
                     .fixedSize()
@@ -278,7 +278,7 @@ private struct SidebarArchivedRow: View {
 
     var body: some View {
         SidebarRow(page: .app(app.id)) {
-            AppTile(app: app, size: 20, dimmed: true)
+            AppTile(app: app, size: 20.px, dimmed: true)
             SidebarRowTitle(app.name)
                 .foregroundStyle(Theme.inkGlass)
         }

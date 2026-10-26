@@ -6,8 +6,8 @@ struct SidebarFooter: View {
 
     var body: some View {
         let live = model.live
-        HStack(alignment: .bottom, spacing: 8) {
-            VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .bottom, spacing: 8.px) {
+            VStack(alignment: .leading, spacing: 5.px) {
                 SidebarStatusLine(
                     name: "Surge",
                     status: live.surge,
@@ -25,17 +25,17 @@ struct SidebarFooter: View {
 
             SettingsLink {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.design(13, .medium))
                     .foregroundStyle(Theme.inkGlass)
-                    .frame(width: 26, height: 26)
-                    .contentShape(.rect(cornerRadius: 7))
+                    .frame(width: 26.px, height: 26.px)
+                    .contentShape(.rect(cornerRadius: 7.px))
             }
             .buttonStyle(.borderless)
             .help(tr("Settings…", "Sidebar"))
             .accessibilityLabel(tr("Settings…", "Sidebar"))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12.px)
+        .padding(.vertical, 10.px)
     }
 }
 
@@ -48,13 +48,13 @@ private struct SidebarStatusLine: View {
     var monospacedDetail: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
-            StatusDot(color: SidebarStatusText.color(status), size: 6, pulsing: status == .connecting)
+        HStack(spacing: 6.px) {
+            StatusDot(color: SidebarStatusText.color(status), size: 6.px, pulsing: status == .connecting)
             Text(name)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.design(11, .semibold))
                 .foregroundStyle(Theme.ink)
             Text(detail)
-                .font(monospacedDetail ? Theme.mono(11) : .system(size: 11))
+                .font(monospacedDetail ? Theme.mono(11) : .design(11))
                 .foregroundStyle(Theme.inkGlass)
                 .lineLimit(1)
                 .truncationMode(.tail)
