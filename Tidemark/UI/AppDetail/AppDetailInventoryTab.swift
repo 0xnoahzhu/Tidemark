@@ -207,8 +207,8 @@ struct AppDetailInventoryTab: View {
                 .foregroundStyle(Theme.ink3)
                 .fixedSize()
         }
-        // Compact, as the pane is too narrow for the regular size. The counts are those of the list's group headers.
-        let filter = DesignSegmentedControl(tr("Show", "AppDetail"), selection: $nav.appIPFilter, size: .compact(), segments: [
+        // The counts are those of the list's group headers. A pane too narrow for the switch drops them, then its icons.
+        let filter = DesignSegmentedControl(tr("Show", "AppDetail"), selection: $nav.appIPFilter, segments: [
             .init(.all, tr("All", "AppDetail"), systemImage: "list.bullet", count: summary.directIPs.count + summary.resolvedIPs.count),
             .init(.direct, tr("Direct", "AppDetail"), systemImage: "number", count: summary.directIPs.count),
             .init(.resolved, tr("From domains", "AppDetail"), systemImage: "globe", count: summary.resolvedIPs.count),
