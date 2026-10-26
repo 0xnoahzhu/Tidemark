@@ -8,13 +8,23 @@ struct AppTile: View {
     /// Greys the tile out (archived app, or not installed on the selected Mac).
     var dimmed = false
 
+    /// The share of an app icon's canvas that its body fills when it is drawn for a `size` pt tile. An icon keeps a
+    /// margin for its shadow around the body. Tiles below 20 pt are drawn from its 16 pt image, whose body is 14 pt;
+    /// larger ones from images on the 1024 px grid, whose 824 px body measures 0.815 of the canvas on screen.
+    static func iconBody(forTile size: CGFloat) -> CGFloat {
+        size < 20 ? 14.0 / 16 : 0.815
+    }
+
     var body: some View {
         Group {
             if let icon = AppIconCache.shared.icon(for: identity.bundlePath) {
+                // Drawn larger than the tile, so the icon's body, not its canvas, fills the design's tile.
+                let drawn = size / Self.iconBody(forTile: size)
                 Image(nsImage: icon)
                     .resizable()
                     .interpolation(.high)
-                    .frame(width: size, height: size)
+                    .frame(width: drawn, height: drawn)
+                    .padding(-(drawn - size) / 2)
             } else {
                 LetterTile(letter: identity.letter, color: Theme.tileColor(hue: identity.hue), size: size)
             }
