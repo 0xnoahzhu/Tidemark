@@ -136,8 +136,14 @@ struct UIScaleWindowTests {
 /// The design's sizes as the views draw them.
 @MainActor
 struct UIScaleDrawingTests {
+    /// The height a hosting view outside a window fits `view` in, which it rounds up to whole points.
     private static func fittingHeight(_ view: some View) -> CGFloat {
         NSHostingView(rootView: view).fittingSize.height
+    }
+
+    /// `px` design px as `fittingHeight` reports a view drawn that tall: rounded up to whole points.
+    private static func fitted(_ px: CGFloat) -> CGFloat {
+        UIScale.length(px).rounded(.up)
     }
 
     /// `line-height: 1.35` is a multiple of the font's size, as in CSS, so a single line is taller than SF's own
@@ -154,12 +160,12 @@ struct UIScaleDrawingTests {
     /// Buttons and fields keep the design's heights whatever the line height around them.
     @Test func controlsHaveTheDesignsHeights() {
         let button = Button("Copy as JSON") {}.buttonStyle(DesignButtonStyle())
-        #expect(Self.fittingHeight(button) == 28.px)
-        #expect(Self.fittingHeight(button.lineHeight(Theme.lineHeight)) == 28.px)
-        #expect(Self.fittingHeight(Button("Pause") {}.buttonStyle(DesignButtonStyle(kind: .destructive, height: 30))) == 30.px)
+        #expect(Self.fittingHeight(button) == Self.fitted(28))
+        #expect(Self.fittingHeight(button.lineHeight(Theme.lineHeight)) == Self.fitted(28))
+        #expect(Self.fittingHeight(Button("Pause") {}.buttonStyle(DesignButtonStyle(kind: .destructive, height: 30))) == Self.fitted(30))
         let field = TextField("Find a Mac", text: .constant("")).designField(height: 26).lineHeight(Theme.lineHeight)
-        #expect(Self.fittingHeight(field) == 26.px)
-        #expect(Self.fittingHeight(FilterField(prompt: "Search", text: .constant(""), width: 190)) == 28.px)
+        #expect(Self.fittingHeight(field) == Self.fitted(26))
+        #expect(Self.fittingHeight(FilterField(prompt: "Search", text: .constant(""), width: 190)) == Self.fitted(28))
     }
 
     /// The title block is no taller than a toolbar item, which does not grow with the UI scale, at every factor: it
