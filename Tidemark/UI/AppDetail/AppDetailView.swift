@@ -8,9 +8,9 @@ import SwiftUI
 /// `Navigation.confirmDeleteApp` names this app; the main window asks before monitoring stops or restarts.
 ///
 /// The page stays when another app is opened, so the window's toolbar items are updated rather than rebuilt;
-/// the tab below the header starts afresh for every app. Its body reads nothing that changes while the page is
-/// shown (counters, the Macs' activity, the selected tab): the views that show those read them, so a change
-/// doesn't make the toolbar re-evaluate.
+/// the stats strip, the Installed on row and the tab below them start afresh for every app. Its body reads
+/// nothing that changes while the page is shown (counters, the Macs' activity, the selected tab): the views that
+/// show those read them, so a change doesn't make the toolbar re-evaluate.
 struct AppDetailView: View {
     @Environment(AppModel.self) private var model
     var appID: AppID
@@ -40,7 +40,9 @@ struct AppDetailView: View {
 
         VStack(spacing: 0) {
             if absent { AppDetailAbsentBanner(app: app) }
+            // A new strip for every app, so its Monitoring switch doesn't slide from one app's state to the next's.
             AppDetailStatsStrip(app: app, absent: absent, counters: counters, perform: perform)
+                .id(app.id)
             AppDetailInstallsRow(app: app)
                 .id(app.id)
             AppDetailTabContent(app: app, absent: absent, counters: counters, cache: cache)
