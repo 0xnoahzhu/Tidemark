@@ -152,21 +152,28 @@ private struct RequestsInspectorHeader: View {
     }
 }
 
-/// `Tunnel` in green, `Failed` in red.
+/// `Tunnel` in green; `Failed` and an ending with an error (`Connection reset`, Surge's words as its help) in red.
 private struct RequestsStatusChip: View {
     var status: RequestsPresentation.Status
 
     var body: some View {
-        let (label, colors): (String, (Color, Color)) = switch status {
-        case .tunnel: (tr("Tunnel", "Requests"), Theme.tint(150))
-        case .failed: (tr("Failed", "Requests"), Theme.tint(27))
+        let colors = switch status {
+        case .tunnel: Theme.tint(150)
+        case .failed, .ended: Theme.tint(27)
         }
-        Text(label)
+        Text(RequestsPresentation.label(of: status))
             .font(.design(10.5, .semibold))
+            .lineLimit(1)
             .padding(.horizontal, 7.px)
             .padding(.vertical, 2.px)
-            .background(colors.0, in: .rect(cornerRadius: 5.px, style: .continuous))
-            .foregroundStyle(colors.1)
+            .background(colors.background, in: .rect(cornerRadius: 5.px, style: .continuous))
+            .foregroundStyle(colors.foreground)
+            .help(help)
+    }
+
+    private var help: String {
+        if case .ended(let reason) = status { return reason }
+        return ""
     }
 }
 

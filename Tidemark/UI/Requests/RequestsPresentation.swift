@@ -66,19 +66,25 @@ enum RequestsPresentation {
     // MARK: Status
 
     /// The inspector's status chip. As in the design, a request Surge failed or rejected reads "Failed" and a
-    /// tunnel reads "Tunnel" whether or not it is still open.
+    /// tunnel reads "Tunnel" whether or not it is still open. A connection that ended with an error reads how it
+    /// ended, as the journey's Ended stage and History's "Ended with an error" tell it, though Surge marked it
+    /// completed (as it marks resets and broken pipes).
     enum Status: Equatable {
         case tunnel
         case failed
+        /// Surge's words for the error the connection ended with.
+        case ended(String)
     }
 
     /// Nil for any other request: the design's chip reads its HTTP status (`200 OK`), which Surge does not
     /// report, so no chip is shown rather than a wording the design does not have.
     static func status(of record: RequestRecord) -> Status? {
         switch record.state {
-        case .failed, .rejected: .failed
-        case _ where record.isTunnel: .tunnel
-        case .active, .completed: nil
+        case .failed, .rejected:
+            return .failed
+        case .active, .completed:
+            if let reason = RequestsJourney.endReason(of: record), RequestEndReason.isError(reason) { return .ended(reason) }
+            return record.isTunnel ? .tunnel : nil
         }
     }
 
@@ -125,6 +131,16 @@ extension RequestsPresentation {
     /// Shown for the app and the process of a request that nothing identifies.
     @MainActor
     static var unknownProcessLabel: String { tr("Unknown process", "Requests") }
+
+    /// The status chip's text: `Tunnel`, `Failed`, or the ending in the journey's words (`Connection reset`).
+    @MainActor
+    static func label(of status: Status) -> String {
+        switch status {
+        case .tunnel: tr("Tunnel", "Requests")
+        case .failed: tr("Failed", "Requests")
+        case .ended(let reason): RequestsJourneyLabels.endReason(reason)
+        }
+    }
 }
 
 extension AppModel {

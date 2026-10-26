@@ -84,6 +84,36 @@ struct RequestsPresentationTests {
         #expect(RequestsPresentation.status(of: F.record(id: 1, state: .rejected)) == .failed)
     }
 
+    /// A connection that ended with an error reads how it ended, though Surge marked it completed; one that closed
+    /// normally keeps its chip.
+    @Test func mapsAnEndingWithAnErrorToItsStatus() {
+        func ended(_ reason: String, method: String = "HTTPS", state: RequestState = .completed) -> RequestsPresentation.Status? {
+            var record = F.record(id: 1, method: method, state: state)
+            record.endReason = reason
+            return RequestsPresentation.status(of: record)
+        }
+        for reason in ["Closed by remote", "Closed by client", "Connection closed", "Closed for inactivity"] {
+            #expect(ended(reason) == .tunnel, "\(reason)")
+            #expect(ended(reason, method: "GET") == nil, "\(reason)")
+        }
+        for reason in ["TCP error: Connection reset", "Broken pipe (POSIX:32)", "ICMP closed", "Something new"] {
+            #expect(ended(reason) == .ended(reason), "\(reason)")
+            #expect(ended(reason, method: "GET") == .ended(reason), "\(reason)")
+        }
+        // Surge's own failure says more than how the connection closed.
+        #expect(ended("TCP error: Connection reset", state: .failed) == .failed)
+
+        // A request stored before its ending was says it in its notes, which the journey reads too.
+        var older = F.record(id: 2)
+        older.notes = ["02:42:21.917266 [Connection] Disconnect: TCP error: Connection reset."]
+        #expect(RequestsPresentation.status(of: older) == .ended("TCP error: Connection reset"))
+        guard case .end(let end)? = RequestsJourney(record: older).stages.last else {
+            Issue.record("no Ended stage")
+            return
+        }
+        #expect(end.reason == "TCP error: Connection reset" && end.isError)
+    }
+
     @Test func describesAttribution() {
         let rolled = F.record(id: 1, chain: F.cursorChain, appID: F.cursor.id)
         #expect(RequestsPresentation.attribution(for: rolled, app: F.cursor, displayName: "Cursor") == .rolledUp(app: "Cursor", parents: 2))

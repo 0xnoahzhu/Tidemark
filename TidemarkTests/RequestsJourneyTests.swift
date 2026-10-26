@@ -501,6 +501,29 @@ struct RequestsJourneyLabelTests {
         }
     }
 
+    /// The inspector's status chip names an ending with an error as the journey's Ended stage does.
+    @Test func labelsTheStatusChipForEachEnding() {
+        func chip(_ reason: String) -> String? {
+            var record = RequestsJourneyFixtures.globalModeReset()
+            record.endReason = reason
+            return RequestsPresentation.status(of: record).map(RequestsPresentation.label)
+        }
+        withLanguage("en") {
+            #expect(["Closed by remote", "Closed by client", "Connection closed", "Closed for inactivity"].map(chip) == Array(repeating: "Tunnel", count: 4))
+            #expect(["TCP error: Connection reset", "Broken pipe (POSIX:32)", "ICMP closed", "Something new"].map(chip) == [
+                "Connection reset", "Broken pipe", "Destination unreachable (ICMP)", "Something new",
+            ])
+            #expect(chip("TCP error: Connection reset") == RequestsJourneyLabels.endReason("TCP error: Connection reset"))
+            #expect(RequestsPresentation.label(of: .failed) == "Failed")
+        }
+        withLanguage("zh-Hans") {
+            guard Localizer.shared.bundle != nil else { return }
+            #expect(chip("Closed by remote") == "隧道")
+            #expect(chip("TCP error: Connection reset") == "连接被重置")
+            #expect(RequestsPresentation.label(of: .failed) == "失败")
+        }
+    }
+
     @Test func spellsSpansOfTime() {
         withLanguage("en") {
             #expect(RequestsJourneyLabels.relative(-180) == "3 min before the request")

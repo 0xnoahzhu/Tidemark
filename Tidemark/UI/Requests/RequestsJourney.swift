@@ -203,7 +203,7 @@ struct RequestsJourney: Equatable {
         if record.completedAt != nil || record.state == .failed || record.state == .rejected {
             stages.append(.end(End(
                 offset: record.completedAt.map { max(0, $0.timeIntervalSince(record.startedAt)) },
-                reason: record.endReason ?? CaptureRecordMapper.endReason(notes: record.notes),
+                reason: Self.endReason(of: record),
                 state: record.state,
                 proxyError: Self.proxyError(of: record, related: related),
                 duration: record.duration,
@@ -215,6 +215,12 @@ struct RequestsJourney: Equatable {
     }
 
     // MARK: Stages
+
+    /// How the request ended, in Surge's words: the reason stored since schema v4, else the one its notes tell, so a
+    /// request recorded before still says it.
+    static func endReason(of record: RequestRecord) -> String? {
+        record.endReason ?? CaptureRecordMapper.endReason(notes: record.notes)
+    }
 
     /// Nil for an IP literal (nothing to resolve) and when nothing tells about the host's DNS. The answer joined by
     /// host and time is the request's own only when its notes record a lookup (rule mode); otherwise it was made
