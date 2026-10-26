@@ -3,7 +3,7 @@ import os
 import ServiceManagement
 import SwiftUI
 
-/// Settings › General: where Tidemark shows up, appearance, Liquid Glass, language and login item.
+/// Settings › General: appearance, Liquid Glass, language and login item.
 struct SettingsGeneralPane: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
@@ -14,7 +14,6 @@ struct SettingsGeneralPane: View {
         SettingsPage {
             brandHeader
             SettingsCard {
-                SettingsRow(title: tr("Show in", "Settings"), verticalPadding: 9) { showInPicker }
                 SettingsRow(title: tr("Appearance", "Settings"), verticalPadding: 9) { appearancePicker }
                 SettingsRow(title: tr("Liquid Glass", "Settings"),
                             note: tr("Follows System Settings › Appearance until you move it here.", "Settings"),
@@ -64,21 +63,6 @@ struct SettingsGeneralPane: View {
     }
 
     // MARK: Rows
-
-    private var showInPicker: some View {
-        DesignSegmentedControl(tr("Show in", "Settings"), selection: Binding(
-            get: { model.preferences.showIn },
-            set: { value in
-                model.preferences.showIn = value
-                AppBootstrap.applyActivationPolicy(value)
-                // Changing the activation policy can deactivate the app; keep Settings in front.
-                Task { @MainActor in NSApp.activate() }
-            }
-        ), size: .regular(horizontalPadding: 10), segments: [
-            (.menuBarAndDock, tr("Menu Bar & Dock", "Settings")),
-            (.menuBarOnly, tr("Menu Bar Only", "Settings")),
-        ])
-    }
 
     private var appearancePicker: some View {
         DesignSegmentedControl(tr("Appearance", "Settings"), selection: Binding(

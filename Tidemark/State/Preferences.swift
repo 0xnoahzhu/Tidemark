@@ -5,7 +5,6 @@ import Observation
 @MainActor
 @Observable
 final class Preferences {
-    enum ShowIn: String, CaseIterable, Sendable { case menuBarAndDock, menuBarOnly }
     enum Appearance: String, CaseIterable, Sendable { case system, light, dark }
     enum Language: String, CaseIterable, Sendable { case system, english, chinese }
 
@@ -39,7 +38,6 @@ final class Preferences {
     var spoolLimit: Int { didSet { set(spoolLimit, "db.spoolLimit") } }
 
     // MARK: General
-    var showIn: ShowIn { didSet { set(showIn.rawValue, "general.showIn") } }
     var appearance: Appearance { didSet { set(appearance.rawValue, "general.appearance") } }
     /// Liquid Glass amount, 0 (clear) … 100 (tinted).
     var glass: Double { didSet { set(glass, "general.glass") } }
@@ -68,7 +66,6 @@ final class Preferences {
         batchInterval = defaults.object(forKey: "db.batchInterval") as? Double ?? 1
         spoolLimit = defaults.object(forKey: "db.spoolLimit") as? Int ?? 500_000
 
-        showIn = defaults.string(forKey: "general.showIn").flatMap(ShowIn.init(rawValue:)) ?? .menuBarAndDock
         appearance = defaults.string(forKey: "general.appearance").flatMap(Appearance.init(rawValue:)) ?? .system
         glass = defaults.object(forKey: "general.glass") as? Double ?? 40
         language = defaults.string(forKey: "general.language").flatMap(Language.init(rawValue:)) ?? .system

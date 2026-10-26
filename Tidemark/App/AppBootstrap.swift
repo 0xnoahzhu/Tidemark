@@ -11,7 +11,6 @@ enum AppBootstrap {
     static func start(_ model: AppModel) {
         Localizer.shared.preference = model.preferences.language
         applyAppearance(model.preferences.appearance)
-        applyActivationPolicy(model.preferences.showIn)
 
         let classifier = PublicSuffixClassifier()
         let processes = LibProcInspector()
@@ -40,7 +39,6 @@ enum AppBootstrap {
         self.probe = probe
 
         StatusItemController.install(model: model)
-        DockIconUpdater.start(model: model)
 
         engine.start()
         egress.start()
@@ -56,7 +54,6 @@ enum AppBootstrap {
     /// stopped (a second more at most, for one that ignores SIGTERM), so none outlives Tidemark.
     static func stop(_ model: AppModel, timeout: Duration = .seconds(6)) async {
         StatusItemController.uninstall()
-        DockIconUpdater.stop()
         await shutDown(probe: probe, egress: egress, engine: engine, timeout: timeout)
         // Lookups nobody cancelled may still be running, and a child that ignored SIGTERM would get its SIGKILL
         // only after Tidemark exited.
@@ -84,9 +81,5 @@ enum AppBootstrap {
         case .light: NSApp.appearance = NSAppearance(named: .aqua)
         case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
         }
-    }
-
-    static func applyActivationPolicy(_ showIn: Preferences.ShowIn) {
-        NSApp.setActivationPolicy(showIn == .menuBarAndDock ? .regular : .accessory)
     }
 }

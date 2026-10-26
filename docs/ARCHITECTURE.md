@@ -288,6 +288,12 @@ reused for an hour.
 
 ## UI
 
+Tidemark lives in the menu bar (`StatusItemController`). It is an agent app from launch (`LSUIElement`, set through
+`INFOPLIST_KEY_LSUIElement`): it never shows a Dock icon and is not in the app switcher, also while its windows are
+open, and no setting changes that. The main window opens at launch. With no Dock icon or app switcher entry to bring
+it forward, every way into a window activates Tidemark first: the menu bar panel's Open Window, Settings… and alerts,
+a notification's View, the App Intents (`TidemarkIntents.showMainWindow`) and the menu commands.
+
 The window follows the "Three-pane · Native" direction of the design: a Liquid Glass sidebar (Mac menu,
 Capture, Analyze, Monitored Apps, Archived, Surge/PostgreSQL status footer), a content column per page,
 and an inspector beside the Requests page's live table (History has none). Native controls are preferred

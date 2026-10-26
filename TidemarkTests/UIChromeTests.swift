@@ -55,40 +55,6 @@ struct UIChromeTests {
         return total
     }
 
-    // MARK: Dock
-
-    @Test func dockBadgeLabel() {
-        #expect(DockIconUpdater.badgeLabel(unread: 0) == nil)
-        #expect(DockIconUpdater.badgeLabel(unread: -1) == nil)
-        #expect(DockIconUpdater.badgeLabel(unread: 7) == "7")
-        #expect(DockIconUpdater.badgeLabel(unread: 1000) == "999+")
-    }
-
-    @Test func brandIconVariantsDiffer() throws {
-        let light = try #require(DockIconUpdater.brandIcon(dark: false, pixels: 64))
-        let dark = try #require(DockIconUpdater.brandIcon(dark: true, pixels: 64))
-        let lightRep = try #require(light.representations.first as? NSBitmapImageRep)
-        let darkRep = try #require(dark.representations.first as? NSBitmapImageRep)
-        // Upper middle of the icon: the sky is light in one variant and dark in the other.
-        let a = try #require(lightRep.colorAt(x: 32, y: 18)?.usingColorSpace(.deviceRGB))
-        let b = try #require(darkRep.colorAt(x: 32, y: 18)?.usingColorSpace(.deviceRGB))
-        #expect(a.brightnessComponent > b.brightnessComponent + 0.2)
-        #expect(DockIconUpdater.isDark(try #require(NSAppearance(named: .darkAqua))))
-        #expect(!DockIconUpdater.isDark(try #require(NSAppearance(named: .aqua))))
-    }
-
-    /// The Dock follows the system: the app's effective appearance while it follows the system too, the
-    /// global interface style while Settings › Appearance forces Light or Dark.
-    @Test func dockIconFollowsTheSystemAppearance() throws {
-        let light = try #require(NSAppearance(named: .aqua))
-        let dark = try #require(NSAppearance(named: .darkAqua))
-        #expect(DockIconUpdater.systemIsDark(appOverride: nil, effective: dark, interfaceStyle: nil))
-        #expect(!DockIconUpdater.systemIsDark(appOverride: nil, effective: light, interfaceStyle: "Dark"))
-        // Forced Dark inside Tidemark on a light system keeps the light Dock icon, and the reverse.
-        #expect(!DockIconUpdater.systemIsDark(appOverride: dark, effective: dark, interfaceStyle: nil))
-        #expect(DockIconUpdater.systemIsDark(appOverride: light, effective: light, interfaceStyle: "Dark"))
-    }
-
     // MARK: Menu bar panel
 
     @Test func menuBarPanelMatchesTheDesignWidth() {

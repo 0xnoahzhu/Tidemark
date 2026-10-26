@@ -223,16 +223,15 @@ Status: Typechecked. Shield semantics are Runtime-checked: inside the shield `is
 - Surge endpoint or database URL changes → reconnect.
 - Batch preset changes → `WriteBuffer` configuration.
 - `openAtLogin` → `SMAppService` (4.13).
-- `showIn` → activation policy. `appearance` → `NSApp.appearance`. `language` → `Localizer`.
-- Unread count → Dock badge.
+- `appearance` → `NSApp.appearance`. `language` → `Localizer`.
+- Unread count → the menu bar glyph (`StatusItemController` observes it this way). Tidemark has no Dock tile to badge.
 
-**Why.** `Preferences` persists in `didSet`. The side effects belong in one place. They cannot live in a view's `.onChange`, because that runs only while the view exists, and Tidemark is often running with only the menu bar. `withContinuousObservation` re-arms itself, runs on the caller's actor, tracks exactly the properties its closure reads, and delivers changes made in the same turn as one event. The token stops it. This replaces hand-written `withObservationTracking` re-arm loops and Combine.
+**Why.** `Preferences` persists in `didSet`. The side effects belong in one place. They cannot live in a view's `.onChange`, because that runs only while the view exists, and Tidemark often runs with no window open, only its menu bar item. `withContinuousObservation` re-arms itself, runs on the caller's actor, tracks exactly the properties its closure reads, and delivers changes made in the same turn as one event. The token stops it. This replaces hand-written `withObservationTracking` re-arm loops and Combine.
 
 ```swift
 @MainActor
 final class ServiceWiring {
     private var connection: ObservationTracking.Token?
-    private var badge: ObservationTracking.Token?
     private var pendingReconnect: Task<Void, Never>?
 
     func start(_ model: AppModel) {
@@ -250,15 +249,10 @@ final class ServiceWiring {
                 model.capture.reconnect()
             }
         }
-        badge = withContinuousObservation(options: [.didSet]) { _ in
-            let unread = model.alerts.unreadCount
-            NSApp.dockTile.badgeLabel = unread == 0 ? nil : unread.formatted()
-        }
     }
 
     func stop() {
         connection.take()?.cancel()   // Token is ~Copyable: `connection?.cancel()` does not compile
-        badge.take()?.cancel()
         pendingReconnect?.cancel()
     }
 }
@@ -1123,6 +1117,6 @@ These findings are uncertain, or their signatures typecheck but their behaviour 
     - For large exports, check whether returning `FileWrapper(url:)` for a temporary file written incrementally avoids reading it all into memory, or whether a custom `DocumentWriter` with `Destination == URL` can stream.
     - Remember that the survey's `@MainActor` version does not compile.
 12. **FoundationModels at runtime (4.8).** No longer applies: host insights were removed.
-13. **`NSStatusItemExpandedInterfaceDelegate` (5.1).** It is compiled only. Panel positioning on multiple displays, focus behaviour and how it interacts with `NSApp.setActivationPolicy(.accessory)` are unverified.
+13. **`NSStatusItemExpandedInterfaceDelegate` (5.1).** It is compiled only. Panel positioning on multiple displays, focus behaviour and how it interacts with Tidemark running as an agent app (`LSUIElement`, no Dock icon) are unverified.
 14. **Localisation with generated symbols (section 3.1).** Before switching `tr()` to generated `LocalizedStringResource` symbols, confirm that resolving a resource with `resource.locale = Localizer.shared.locale` picks the `zh-Hans` table even when the system language is English.
 15. **The 27 SDK writes `anyAppleOS` availability.** When checking whether an API exists on macOS, grep for both `anyAppleOS 27` and `macOS 27`. Otherwise you will wrongly conclude many APIs are missing.
