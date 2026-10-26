@@ -490,11 +490,12 @@ struct UIChromeTests {
         #expect(Localizer.language(for: []) == "en")
     }
 
-    /// The app bundle holds every UI language, so macOS offers them as Tidemark's own language, and its menus and
-    /// alerts read in the same language as Tidemark's views.
-    @Test func theBundleDeclaresEveryUILanguage() {
-        #expect(Set(Bundle.main.localizations).isSuperset(of: Localizer.supported))
+    /// The app bundle holds exactly the UI languages, so macOS offers them as Tidemark's own language, and the
+    /// localization it picks at launch, which its menus and alerts read in, is always one Tidemark's views have.
+    @Test func theBundleHoldsExactlyTheUILanguages() {
+        #expect(Set(Bundle.main.localizations) == Set(Localizer.supported))
         #expect(Bundle.main.developmentLocalization == "en")
+        #expect(Localizer.language(for: Bundle.main.preferredLocalizations) == Bundle.main.preferredLocalizations.first)
     }
 
     /// Every `tr`/`trf`/`trn` key used by the menu bar, settings, sheets and commands has a zh-Hans translation.

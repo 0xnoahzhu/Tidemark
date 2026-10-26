@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// The UI language on top of String Catalogs: the first of the system's preferred languages that Tidemark has a
-/// translation for, else English.
+/// translation for, else English, as macOS picked it for the app at launch.
 ///
 /// Each UI area keeps its strings in its own catalog table (`Sidebar.xcstrings`, `Requests.xcstrings`, …)
 /// with English keys and `zh-Hans` translations. `tr` looks keys up in the bundle of the language in use;
@@ -27,30 +27,24 @@ final class Localizer {
     private(set) var bundle: Bundle?
     private(set) var locale = Locale(identifier: "en")
 
-    @ObservationIgnored private var localeChange: NotificationCenter.ObservationToken?
+    private init() { resolve() }
 
-    private init() {
-        resolve()
-        // The preferred languages can change while Tidemark runs (System Settings › General › Language & Region).
-        localeChange = NotificationCenter.default.addObserver(of: Locale.self, for: .currentLocaleDidChange) { [weak self] _ in
-            self?.resolve()
-        }
-    }
-
-    /// The language Tidemark shows for `preferred`, the user's languages most wanted first (`Locale.preferredLanguages`,
-    /// which holds a language chosen for Tidemark alone in System Settings): matched against `supported` the way macOS
-    /// picks an app's localization (so `zh-Hans-CN` gives `zh-Hans`), and English when none of them has a translation.
+    /// The language Tidemark shows for `preferred`, languages most wanted first: matched against `supported` the way
+    /// macOS picks an app's localization (so `zh-Hans-CN` gives `zh-Hans`), and English when none of them has a
+    /// translation.
     nonisolated static func language(for preferred: [String]) -> String {
         Bundle.preferredLocalizations(from: supported, forPreferences: preferred).first ?? "en"
     }
 
     private func resolve() {
-        var code = Self.language(for: Locale.preferredLanguages)
+        // The app bundle's localization, which macOS picked at launch from the user's preferred languages (a language
+        // chosen for Tidemark alone in System Settings › General › Language & Region comes first). AppKit's menus
+        // and alerts keep it until Tidemark quits, so a new language list reaches them and Tidemark's views together
+        // at the next launch.
+        var code = Self.language(for: Bundle.main.preferredLocalizations)
         #if DEBUG
         if let override { code = override }
         #endif
-        // The notification also comes for region and format changes, which leave the language as it is.
-        guard code != languageCode else { return }
         languageCode = code
         locale = Locale(identifier: code)
         bundle = code == "en" ? nil : Bundle.main.path(forResource: code, ofType: "lproj").flatMap(Bundle.init(path:))
