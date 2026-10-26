@@ -87,6 +87,50 @@ struct UIScaleWindowTests {
         // A screen smaller than the unscaled window gets a window as large as the screen.
         #expect(UIScale.minimumWindowSize(factor: 1, visibleSize: CGSize(width: 900, height: 600)) == CGSize(width: 900, height: 548))
     }
+
+    @Test func savedFrameIsReplacedOnlyAfterTheFactorChanged() {
+        // Versions before the UI scale stored nothing and drew at 1.0.
+        #expect(!MainWindowFrame.needsReset(stored: nil, factor: 1))
+        #expect(MainWindowFrame.needsReset(stored: nil, factor: 1.3))
+        #expect(!MainWindowFrame.needsReset(stored: 1.3, factor: 1.3))
+        #expect(MainWindowFrame.needsReset(stored: 1.3, factor: 1.2))
+        #expect(MainWindowFrame.needsReset(stored: 1, factor: 1.4))
+    }
+
+    @Test func defaultSizeIsTheDesignsWindowWithinTheScreen() {
+        let size = MainWindowFrame.defaultSize
+        #expect(size.width == min(1248.px, UIScale.launchScreenSize?.width ?? .infinity))
+        #expect(size.height == min(812.px, UIScale.launchScreenSize?.height ?? .infinity))
+    }
+
+    @Test func savedLayoutKeysAreTheMainWindows() {
+        #expect(MainWindowFrame.isSavedLayout("NSWindow Frame main"))
+        #expect(MainWindowFrame.isSavedLayout("NSSplitView Subview Frames main, SidebarNavigationSplitView"))
+        #expect(!MainWindowFrame.isSavedLayout("NSWindow Frame probe-browser"))
+        #expect(!MainWindowFrame.isSavedLayout("NSWindow Frame com_apple_SwiftUI_Settings_window"))
+        #expect(!MainWindowFrame.isSavedLayout("window.mainScale"))
+    }
+
+    /// A layout saved at another factor is forgotten once; the next one is kept.
+    @Test func savedLayoutIsForgottenOnceAfterTheFactorChanged() {
+        let defaults = TestDefaults()
+        let suite = defaults.make()
+        let frame = "40 80 1564 812 0 0 2560 1410 "
+        suite.set(frame, forKey: "NSWindow Frame main")
+        suite.set(["0, 0, 244, 812, NO, NO"], forKey: "NSSplitView Subview Frames main, SidebarNavigationSplitView")
+        suite.set(frame, forKey: "NSWindow Frame probe-browser")
+        suite.set(Double(UIScale.factor) + 0.3, forKey: MainWindowFrame.defaultsKey)
+
+        MainWindowFrame.resetIfScaleChanged(defaults: suite)
+        #expect(suite.object(forKey: "NSWindow Frame main") == nil)
+        #expect(suite.object(forKey: "NSSplitView Subview Frames main, SidebarNavigationSplitView") == nil)
+        #expect(suite.string(forKey: "NSWindow Frame probe-browser") == frame)
+        #expect(suite.double(forKey: MainWindowFrame.defaultsKey) == Double(UIScale.factor))
+
+        suite.set(frame, forKey: "NSWindow Frame main")
+        MainWindowFrame.resetIfScaleChanged(defaults: suite)
+        #expect(suite.string(forKey: "NSWindow Frame main") == frame)
+    }
 }
 
 /// The design's sizes as the views draw them.

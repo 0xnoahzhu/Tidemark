@@ -7,6 +7,8 @@ struct TidemarkApp: App {
     init() {
         TableRowHeightDefaults.register()
         UIScale.resolveAtLaunch()
+        // The unit tests run inside the app, whose defaults are the real app's.
+        if !AppDelegate.isTestHost { MainWindowFrame.resetIfScaleChanged() }
     }
 
     var body: some Scene {
@@ -20,7 +22,7 @@ struct TidemarkApp: App {
                 .environment(Localizer.shared)
                 .modifier(TidemarkIntentsWindowBridge())
         }
-        .defaultSize(width: 1248, height: 812)
+        .defaultSize(MainWindowFrame.defaultSize)
         .windowToolbarStyle(.unified)
         .commands { TidemarkCommands(model: model) }
 
