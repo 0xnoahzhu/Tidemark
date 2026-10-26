@@ -154,9 +154,10 @@ struct AnalyzePill: View {
 // MARK: - Requests
 
 /// A row's Requests count that opens those requests in History, on Domains & IPs and an app's Domains & IPs tab. It
-/// reads as the count until the pointer is over its cell, then takes the accent and an underline like a link; the whole
-/// cell takes the click, so a one-digit count is no narrower a target. One host opens at once; a site's or a network's
-/// hosts pop up a menu of them. A button or a menu, so Full Keyboard Access reaches it.
+/// reads as the count until the pointer is over its cell or it has keyboard focus, then takes the accent and an
+/// underline like a link; the whole cell takes the click, so a one-digit count is no narrower a target. One host opens
+/// at once; a site's or a network's hosts pop up a menu of them. A button or a menu, so Full Keyboard Access reaches
+/// it.
 struct AnalyzeRequestsCount: View {
     var count: Int64
     var font: Font
@@ -167,6 +168,7 @@ struct AnalyzeRequestsCount: View {
     var open: (String) -> Void
 
     @State private var hovering = false
+    @FocusState private var focused: Bool
 
     var body: some View {
         Group {
@@ -185,15 +187,20 @@ struct AnalyzeRequestsCount: View {
         .buttonStyle(.plain)
         .disabled(hosts.isEmpty)
         .help(help)
+        .focused($focused)
+        // Domains & IPs hides the focus ring of its list, which takes focus itself, and with it every ring inside (an
+        // outer `focusEffectDisabled` wins over an inner one); a count draws its own.
+        .environment(\.isFocusEffectEnabled, true)
         .onHover { hovering = $0 }
         .pointerStyle(.link)
     }
 
     private var label: some View {
-        Text(Fmt.count(count))
+        let lit = hovering || focused
+        return Text(Fmt.count(count))
             .font(font)
-            .underline(hovering)
-            .foregroundStyle(hovering ? Theme.accentInk : Theme.ink)
+            .underline(lit)
+            .foregroundStyle(lit ? Theme.accentInk : Theme.ink)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.vertical, 3.px)
