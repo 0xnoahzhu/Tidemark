@@ -19,7 +19,10 @@ final class AppModel {
     let requestsHistory = RequestsHistoryModel()
 
     // Services. Replaced by the real implementations in `AppBootstrap`.
-    @ObservationIgnored var database: any TidemarkDatabase
+    @ObservationIgnored var database: any TidemarkDatabase {
+        // History results read from the previous database are not shown again.
+        didSet { requestsHistory.databaseChanged() }
+    }
     @ObservationIgnored var surge: any SurgeClient
     @ObservationIgnored var classifier: any SiteClassifying
     /// Live process table of this Mac (Running / Exited in process trees).

@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SwiftUI
+import Synchronization
 import Testing
 @testable import Tidemark
 
@@ -717,7 +718,7 @@ struct RequestsHistoryModelTests {
     }
 
     /// History shown again with the same filters keeps the results it has instead of querying PostgreSQL again;
-    /// other filters, a failed histogram and `load` itself query.
+    /// other filters, a failed histogram, another database and `load` itself query.
     @Test func showsKeptResultsWithoutQueryingAgain() async {
         let rows = (0..<50).map { F.record(id: Int64($0)) }
         let queries = RequestsQueryCounter()
@@ -733,16 +734,25 @@ struct RequestsHistoryModelTests {
         query.range = .all
 
         await history.show(query, database: database)
+        #expect(history.keeps(query))
         await history.show(query, database: database)
         #expect(await queries.count == 1)
         #expect(history.rows.count == 50)
         #expect(history.histogram != nil)
 
         query.status = .failed
+        #expect(!history.keeps(query))
         await history.show(query, database: database)
         #expect(await queries.count == 2)
         await history.load(query, database: database)
         #expect(await queries.count == 3)
+
+        // Results read from a database that has since been replaced are not kept.
+        history.databaseChanged()
+        #expect(!history.keeps(query))
+        await history.show(query, database: database)
+        #expect(await queries.count == 4)
+        #expect(history.keeps(query))
 
         // Results whose histogram failed are not kept.
         let chartless = RequestsStubDatabase(
@@ -754,13 +764,138 @@ struct RequestsHistoryModelTests {
         )
         await history.load(query, database: chartless)
         #expect(history.histogramError != nil)
+        #expect(!history.keeps(query))
         await history.show(query, database: chartless)
-        #expect(await queries.count == 5)
+        #expect(await queries.count == 6)
+    }
+
+    /// Replacing `AppModel.database` (a new URL in Settings) ends the reuse of History results.
+    @Test func anotherDatabaseEndsTheReuse() async {
+        let defaults = TestDefaults()
+        defer { defaults.removeAll() }
+        let model = AppModel(preferences: Preferences(defaults: defaults.make()))
+        let rows = (0..<5).map { F.record(id: Int64($0)) }
+        model.database = ShellDemoDatabase(rows: rows)
+        var query = RequestQuery()
+        query.range = .all
+        await model.requestsHistory.show(query, database: model.database)
+        #expect(model.requestsHistory.keeps(query))
+
+        model.database = ShellDemoDatabase(rows: [])
+        #expect(!model.requestsHistory.keeps(query))
+    }
+
+    /// Kept results older than `refreshInterval` stay up while they are queried again: nothing shows a loading
+    /// state, an unchanged answer changes nothing, and a changed one replaces the rows and the total.
+    @Test func refreshesKeptResultsInTheBackground() async {
+        let store = RequestsStore((0..<20).map { F.record(id: Int64($0)) })
+        let gate = RequestsGate()
+        let gated = RequestsGateSwitch()
+        let queries = RequestsQueryCounter()
+        let database = RequestsStubDatabase(
+            query: { query in
+                await queries.add()
+                if gated.isOn { await gate.wait() }
+                return try await ShellDemoDatabase(rows: store.rows).queryRequests(query)
+            },
+            buckets: { _, _ in Self.newChart }
+        )
+        let history = RequestsHistoryModel(refreshInterval: .zero)
+        var query = RequestQuery()
+        query.range = .all
+        await history.show(query, database: database)
+        #expect(history.rows.count == 20)
+
+        let unchanged = await Self.changes(of: history) {
+            await history.show(query, database: database)
+        }
+        #expect(await queries.count == 2)
+        #expect(!unchanged, "an unchanged answer redraws nothing")
+
+        store.rows += (20..<25).map { F.record(id: Int64($0)) }
+        gated.isOn = true
+        let loadingState = await Self.changes(of: history, reading: { _ = $0.isLoading; _ = $0.isLoadingHistogram }) {
+            let refresh = Task { await history.show(query, database: database) }
+            #expect(await eventually { await queries.count == 3 })
+            #expect(history.rows.count == 20, "the kept rows stay up while they are queried again")
+            await gate.open()
+            await refresh.value
+        }
+        #expect(!loadingState)
+        #expect(history.rows.count == 25)
+        #expect(history.totalCount == 25)
+        #expect(history.keeps(query))
+    }
+
+    /// The policy list is queried again for another range or database, or once it is older than `refreshInterval`.
+    @Test func keepsPoliciesPerRangeAndDatabase() async {
+        let asked = RequestsQueryCounter()
+        let database = RequestsStubDatabase(policies: { _ in
+            await asked.add()
+            return ["Proxy", "DIRECT"]
+        })
+        let history = RequestsHistoryModel()
+        await history.loadPolicies(for: .last24Hours, database: database)
+        await history.loadPolicies(for: .last24Hours, database: database)
+        #expect(await asked.count == 1)
+        #expect(history.policies == ["DIRECT", "Proxy"])
+        await history.loadPolicies(for: .all, database: database)
+        #expect(await asked.count == 2)
+        history.databaseChanged()
+        await history.loadPolicies(for: .all, database: database)
+        #expect(await asked.count == 3)
+
+        let eager = RequestsHistoryModel(refreshInterval: .zero)
+        await eager.loadPolicies(for: .all, database: database)
+        await eager.loadPolicies(for: .all, database: database)
+        #expect(await asked.count == 5)
+    }
+
+    /// Whether `history` sets any of the properties `reading` reads (by default everything the History view
+    /// draws) while `work` runs.
+    private static func changes(
+        of history: RequestsHistoryModel,
+        reading: @escaping @MainActor (RequestsHistoryModel) -> Void = {
+            _ = ($0.rows, $0.totalCount, $0.elapsed, $0.histogram, $0.histogramError, $0.errorMessage, $0.isLoading, $0.isLoadingHistogram)
+        },
+        during work: () async -> Void
+    ) async -> Bool {
+        let changed = RequestsChangeFlag()
+        withObservationTracking { reading(history) } onChange: { changed.value.withLock { $0 = true } }
+        await work()
+        return changed.value.withLock { $0 }
     }
 
     @Test func labelsQueryTime() {
         #expect(RequestsHistoryLabels.milliseconds(.milliseconds(38)) == "38 ms")
         #expect(RequestsHistoryLabels.milliseconds(.seconds(1.5)) == "1500 ms")
+    }
+}
+
+/// Set once an observed property changes.
+private final class RequestsChangeFlag: Sendable {
+    let value = Mutex(false)
+}
+
+/// Rows a stub database answers from, changed by the test.
+private final class RequestsStore: Sendable {
+    private let value: Mutex<[RequestRecord]>
+
+    init(_ rows: [RequestRecord]) { value = Mutex(rows) }
+
+    var rows: [RequestRecord] {
+        get { value.withLock { $0 } }
+        set { value.withLock { $0 = newValue } }
+    }
+}
+
+/// Makes a stub database wait for its gate from the next query on.
+private final class RequestsGateSwitch: Sendable {
+    private let value = Mutex(false)
+
+    var isOn: Bool {
+        get { value.withLock { $0 } }
+        set { value.withLock { $0 = newValue } }
     }
 }
 
@@ -796,6 +931,7 @@ private actor RequestsGate {
 private struct RequestsStubDatabase: TidemarkDatabase {
     var query: @Sendable (RequestQuery) async throws -> RequestPage = { _ in throw DatabaseError.unreachable("connection refused") }
     var buckets: @Sendable (RequestQuery, Int) async throws -> Histogram = { _, _ in throw DatabaseError.unreachable("connection refused") }
+    var policies: @Sendable (Date?) async throws -> [String] = { _ in [] }
 
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage { try await self.query(query) }
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram { try await self.buckets(query, buckets) }
@@ -822,7 +958,7 @@ private struct RequestsStubDatabase: TidemarkDatabase {
     func upsertRequests(_ rows: [RequestRecord]) async throws -> [RequestKey: Int64] { [:] }
     func requestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] { [] }
     func requestWritePosition() async throws -> RequestWriteCursor { .start }
-    func distinctPolicies(since: Date?) async throws -> [String] { [] }
+    func distinctPolicies(since: Date?) async throws -> [String] { try await policies(since) }
     func countRequests(since: Date, scope: DeviceScope) async throws -> Int64 { 0 }
     func estimatedRequestCount() async throws -> Int64 { 0 }
     func upsertProcessChain(deviceID: DeviceID, chain: [ProcessLink], appID: AppID?) async throws -> Int64? { nil }
