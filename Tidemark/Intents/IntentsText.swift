@@ -1,6 +1,6 @@
 import Foundation
 
-/// Dialog text of Tidemark's intents, in the language chosen in Settings.
+/// Dialog text of Tidemark's intents, in the language Tidemark shows.
 @MainActor
 enum IntentsText {
     static func recordingDialog(isOn: Bool) -> String {

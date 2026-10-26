@@ -82,8 +82,7 @@ struct InventoryView: View {
                            title: tr("No domains or IPs yet", "Inventory"),
                            message: tr("Every domain and IP that Surge sees shows up here once, whichever app or probe reached it.", "Inventory"))
             } else {
-                // Not `ContentUnavailableView.search`, whose text follows the system language rather than
-                // Settings › Language.
+                // Not `ContentUnavailableView.search`: the message says what the search looks at.
                 EmptyState(systemImage: "magnifyingglass",
                            title: trf("No domains or IPs match “%@”", "Inventory", key.search),
                            message: tr("The search looks at each domain or IP and the apps and probes that reached it.", "Inventory"))

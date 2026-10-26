@@ -21,7 +21,7 @@ struct TidemarkApp: App {
         .windowToolbarStyle(.unified)
         .commands { TidemarkCommands(model: model) }
 
-        Window("Site Probe", id: WindowID.probeBrowser) {
+        Window(Text(verbatim: tr("Site Probe", "SiteProbe")), id: WindowID.probeBrowser) {
             ProbeBrowserWindow()
                 .environment(model)
                 .environment(Localizer.shared)
