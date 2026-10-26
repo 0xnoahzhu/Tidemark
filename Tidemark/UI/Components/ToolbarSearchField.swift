@@ -4,11 +4,13 @@ import SwiftUI
 /// A search field for a `ToolbarItem`, for pages whose design puts the field between other toolbar items.
 ///
 /// `searchable` always adds the window's search field after every other item on macOS 27, even with a
-/// `DefaultToolbarItem(kind: .search)` in between. This is an `NSSearchField` without its own bezel, so it sits
-/// on the toolbar item's glass like the system field and keeps its clear button, Escape to clear, the keyboard
-/// focus ring and the search field role for VoiceOver. ⌘F focuses it while its window is key. Its toolbar item
-/// should outlast the page's other items when the window narrows (`visibilityPriority`): a custom view has no
-/// usable form in the toolbar's overflow menu.
+/// `DefaultToolbarItem(kind: .search)` in between. This is an `NSSearchField` with its standard bezel, which draws
+/// no fill of its own on the toolbar item's glass: it fills the glass capsule and lays out like the system field
+/// (magnifier, text and clear button), with a focus ring around the capsule, Escape to clear and the search field
+/// role for VoiceOver. Without the bezel the cell would put the field editor over its whole frame, under the
+/// magnifier, and draw a rectangular focus ring inside the capsule. ⌘F focuses it while its window is key. Its
+/// toolbar item should outlast the page's other items when the window narrows (`visibilityPriority`): a custom
+/// view has no usable form in the toolbar's overflow menu.
 struct ToolbarSearchField: NSViewRepresentable {
     @Binding var text: String
     var prompt: String
@@ -17,9 +19,9 @@ struct ToolbarSearchField: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSSearchField {
         let field = NSSearchField()
-        field.isBezeled = false
-        field.isBordered = false
-        field.drawsBackground = false
+        // Long text scrolls, as in the system field. A field made in code keeps it clipped at its start, so the caret
+        // and the end of the text would go out of sight.
+        field.cell?.isScrollable = true
         field.sendsSearchStringImmediately = true
         field.target = context.coordinator
         field.action = #selector(Coordinator.searchChanged(_:))
