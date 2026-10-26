@@ -71,6 +71,8 @@ final class InventoryCache {
     /// The key the page last showed: its list stays on screen while a new search or scope has none yet.
     @ObservationIgnored private var shown: Key?
     @ObservationIgnored private var groupCache: [GroupKey: [InventoryGroup]] = [:]
+    /// Bumped by `databaseChanged`, so an answer from the database read before is dropped.
+    @ObservationIgnored private var generation = 0
 
     private struct GroupKey: Hashable {
         var key: Key
@@ -165,14 +167,27 @@ final class InventoryCache {
         }
     }
 
+    /// Forgets every list, because they came from a database Tidemark no longer reads; the page fetches again. An
+    /// answer still on its way from that database is dropped.
+    func databaseChanged() {
+        generation &+= 1
+        snapshots = [:]
+        fetchedAt = [:]
+        attemptedAt = [:]
+        searches = []
+        shown = nil
+        groupCache = [:]
+    }
+
     /// Fetches `source`'s list for the page showing `key` (the same key, or the unsearched list that answers it).
     private func refresh(_ source: Key, for key: Key, fetch: (Key) async throws -> [InventoryEntry]) async {
+        let generation = self.generation
         do {
             let fresh = try await fetch(source)
-            if Task.isCancelled { return }
+            if Task.isCancelled || generation != self.generation { return }
             store(fresh, for: source)
         } catch {
-            if Task.isCancelled { return }
+            if Task.isCancelled || generation != self.generation { return }
             storeFailure(for: source)
         }
         if source != key { filterLocally(key, replacing: true) }

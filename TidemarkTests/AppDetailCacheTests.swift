@@ -76,4 +76,15 @@ import Testing
         #expect(made.resolvedIPs == direct.resolvedIPs)
         #expect(made.headline == direct.headline)
     }
+
+    @Test func aNewDatabaseEmptiesEveryKeptList() {
+        let scratch = TestDefaults()
+        let model = AppModel(preferences: Preferences(defaults: scratch.make()))
+        let key = AppDetailCache.Key(appID: UUID(), scope: .all)
+        model.appPages.setTree([Self.node("a")], for: key)
+        model.appPages.setInventory(AppDetailCache.Inventory(hosts: [], summary: AppDetailInventorySummary()), for: key)
+        model.database = OfflineDatabase()
+        #expect(model.appPages.tree(key) == nil)
+        #expect(model.appPages.inventory(key) == nil)
+    }
 }

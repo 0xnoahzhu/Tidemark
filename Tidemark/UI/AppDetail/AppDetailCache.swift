@@ -1,9 +1,9 @@
 import Foundation
 
-/// What the app pages' Domains & IPs and Process Tree tabs showed last, per app and scope. The main window keeps
-/// it, so a tab shows its last list right after its first frame and refreshes it in the background, rather than
-/// staying empty while it waits for the database. It is not observable: each tab keeps its own state and only
-/// starts from here.
+/// What the app pages' Domains & IPs and Process Tree tabs showed last, per app and scope. `AppModel` keeps it
+/// (and empties it when the database changes), so a tab shows its last list right after its first frame and
+/// refreshes it in the background, rather than staying empty while it waits for the database. It is not
+/// observable: each tab keeps its own state and only starts from here.
 @MainActor
 final class AppDetailCache {
     struct Key: Hashable {
@@ -41,6 +41,12 @@ final class AppDetailCache {
     func tree(_ key: Key) -> [ProcessNode]? { trees[key] }
 
     func setTree(_ nodes: [ProcessNode], for key: Key) { trees[key] = nodes }
+
+    /// Forgets every list, e.g. when they came from a database Tidemark no longer reads.
+    func removeAll() {
+        inventories = Recent(limit: inventories.limit)
+        trees = Recent(limit: trees.limit)
+    }
 
     /// A dictionary that keeps only the `limit` most recently read or written values.
     private struct Recent<Value> {

@@ -651,6 +651,33 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(cache.age(of: all) != nil)
     }
 
+    @Test func forgetsTheListsOfADatabaseNoLongerRead() async {
+        let cache = InventoryCache()
+        cache.store(entries, for: all)
+        cache.show(all)
+        cache.databaseChanged()
+        #expect(cache.snapshot(for: all) == nil)
+        #expect(cache.age(of: all) == nil)
+
+        // An answer the previous database gives after the switch is dropped.
+        let started = AsyncStream<Void>.makeStream()
+        let release = AsyncStream<Void>.makeStream()
+        let entries = self.entries
+        let refresh = Task { @MainActor in
+            await cache.keepCurrent(all) { _ in
+                started.continuation.yield()
+                for await _ in release.stream { break }
+                return entries
+            }
+        }
+        for await _ in started.stream { break }
+        cache.databaseChanged()
+        release.continuation.yield()
+        try? await Task.sleep(for: .milliseconds(50))
+        refresh.cancel()
+        #expect(cache.snapshot(for: all) == nil)
+    }
+
     @Test func redrawsOnlyWhenTheDatabaseAnswersSomethingNew() {
         final class Flag: @unchecked Sendable { var raised = false }
         let cache = InventoryCache()

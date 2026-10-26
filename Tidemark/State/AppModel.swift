@@ -17,11 +17,17 @@ final class AppModel {
     let inventory: InventoryCache
     /// The Requests page's History results, kept while the page is not shown.
     let requestsHistory = RequestsHistoryModel()
+    /// What the app pages' tabs showed last, so an app's page opens with it.
+    let appPages = AppDetailCache()
 
     // Services. Replaced by the real implementations in `AppBootstrap`.
     @ObservationIgnored var database: any TidemarkDatabase {
-        // History results read from the previous database are not shown again.
-        didSet { requestsHistory.databaseChanged() }
+        // Nothing read from the previous database is shown again.
+        didSet {
+            requestsHistory.databaseChanged()
+            inventory.databaseChanged()
+            appPages.removeAll()
+        }
     }
     @ObservationIgnored var surge: any SurgeClient
     @ObservationIgnored var classifier: any SiteClassifying

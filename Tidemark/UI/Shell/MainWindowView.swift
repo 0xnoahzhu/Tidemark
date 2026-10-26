@@ -32,9 +32,8 @@ struct MainWindowView: View {
 
 /// The detail column for the selected sidebar destination.
 private struct ShellDetail: View {
+    @Environment(AppModel.self) private var model
     var page: Page
-    /// What the app pages' tabs showed last, so an app's page opens with it.
-    @State private var appPages = AppDetailCache()
 
     var body: some View {
         switch page {
@@ -49,7 +48,7 @@ private struct ShellDetail: View {
         case .egress:
             EgressView()
         case .app(let id):
-            AppDetailView(appID: id, cache: appPages)
+            AppDetailView(appID: id, cache: model.appPages)
         }
     }
 }
