@@ -285,15 +285,15 @@ reused for an hour.
 The window follows the "Three-pane · Native" direction of the design: a Liquid Glass sidebar (Mac menu,
 Capture, Analyze, Monitored Apps, Archived, Surge/PostgreSQL status footer), a content column per page,
 and an inspector beside the Requests page's live table (History has none). Native controls are preferred
-(switches, `Table`, search fields, sheets); the pause / resume and Stop monitoring confirmations are the design's
-glass dialogs (`GlassDialog`), laid over the whole window. Every segmented choice is the design's own
-`DesignSegmentedControl` (a raised white or grey segment on the fill track, no dividers), never the system's; in a
-toolbar it sits outside the glass bubble, and VoiceOver and the overflow menu see a picker. Colors come from `Theme` (exact OKLCH conversions of
-the design tokens); app tiles use the real app icon when the bundle exists locally. The sidebar, its Mac menu, the
-menu bar panel and the dialogs lay the design's glass color over the system glass at an opacity of their own
-(`GlassSurface`: at least .42 for the sidebar, .88 for the Mac menu, .85 for the panel, .6 for the pause dialog
-and .85 for the monitoring one, more as Settings › General › Liquid Glass moves toward Tinted), so their text
-stays legible over any background.
+for switches, tables (`Table`), search fields and sheets; every segmented choice, though, is the design's own
+`DesignSegmentedControl` (a raised white or grey segment on the fill track, no dividers), never the system's:
+in a toolbar it sits outside the glass bubble, and VoiceOver and the overflow menu see a picker. The pause /
+resume and Stop monitoring confirmations are the design's glass dialogs (`GlassDialog`), laid over the whole
+window. Colors come from `Theme` (exact OKLCH conversions of the design tokens); app tiles use the real app
+icon when the bundle exists locally. The sidebar, its Mac menu, the menu bar panel and the dialogs lay the
+design's glass color over the system glass at an opacity of their own (`GlassSurface`: at least .42 for the
+sidebar, .88 for the Mac menu, .85 for the panel, .6 for the pause dialog and .85 for the monitoring one, more
+as Settings › General › Liquid Glass moves toward Tinted), so their text stays legible over any background.
 History runs its page query and its histogram side by side: the rows appear as soon as the page arrives, a
 histogram that fails leaves them in place (the chart area says it is unavailable and why), and a newer query
 cancels the older one's histogram.
