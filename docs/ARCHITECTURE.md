@@ -404,8 +404,12 @@ requests that ended with an error, which Surge marks completed; it reads the end
 finds no request recorded before, which its empty state says. It can also filter on an app and replace the time range:
 Domains & IPs and an app's Domains & IPs tab open a row's host over all time, as their counts span it, and the app's tab
 only that app's requests. There a row's Requests count is the link (a button, or for a site or a network a menu of its
-hosts) and its context menu has "Show Requests"; an IP's count also takes in the requests to the domains that resolved
-to it, which History finds under those domains, and its empty state for an IP says so.
+hosts, which draws its focus ring though the Domains & IPs list hides its own) and its context menu has "Show
+Requests". An IP counts every request whose remote IP it was, the requests to the domains that resolved to it included,
+so an IP opens `Navigation.openRequests(reaching:)` (`RequestQuery.remoteIP`, an `IP` chip, served by
+`requests_remote_ip_started_idx`) rather than the host filter. An app's tab counts every Mac's requests (the inventory
+is shared) while History keeps the sidebar's Mac, so with one Mac selected there the count's help says that History
+lists only that Mac's requests.
 
 The Domains & IPs page draws its table itself, as the native inset table looks and behaves (header and separators,
 rounded alternate rows continued below the last one, each row one VoiceOver element naming its columns), in one
