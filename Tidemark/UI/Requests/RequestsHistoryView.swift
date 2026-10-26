@@ -169,12 +169,12 @@ private struct RequestsHistoryFilterBar: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .controlSize(.regular)
     }
 }
 
-/// A filter menu whose button hugs its current choice. (A `.menu` picker sizes itself to its longest
-/// option, so one long policy name would stretch "All policies".)
+/// A filter menu drawn as the design's pill (`Last 24 hours ▾` on the fill, 26 px tall), hugging its current
+/// choice. (A `.menu` picker sizes itself to its longest option, so one long policy name would stretch
+/// "All policies".)
 private struct RequestsFilterMenu<Value: Hashable, Options: View>: View {
     var title: String
     var label: String
@@ -189,9 +189,22 @@ private struct RequestsFilterMenu<Value: Hashable, Options: View>: View {
             .pickerStyle(.inline)
             .labelsHidden()
         } label: {
-            Text(label)
-                .lineLimit(1)
+            HStack(spacing: 5.px) {
+                Text(label)
+                Text(verbatim: "▾")
+                    .foregroundStyle(Theme.ink2)
+            }
+            .font(.design(12))
+            .foregroundStyle(Theme.ink)
+            .lineLimit(1)
+            .padding(.horizontal, 10.px)
+            .frame(height: 26.px)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 7.px, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 7.px, style: .continuous))
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .fixedSize()
         .help(title)
         .accessibilityLabel(title)

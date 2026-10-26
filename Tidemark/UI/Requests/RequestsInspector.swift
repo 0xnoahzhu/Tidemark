@@ -270,7 +270,7 @@ private struct RequestsInspectorStored: View {
     }
 }
 
-/// "Open Cursor" / "Monitor Spotify" and "Copy as JSON".
+/// "Open Cursor" / "Monitor Spotify" and "Copy as JSON": the design's 28 px buttons on a fill, Monitor on the accent.
 private struct RequestsInspectorActions: View {
     @Environment(AppModel.self) private var model
     var record: RequestRecord
@@ -282,19 +282,19 @@ private struct RequestsInspectorActions: View {
                 Button(trf("Open %@", "Requests", identity.name)) {
                     model.nav.open(.app(appID), tab: RequestsPresentation.openAppTab)
                 }
+                .buttonStyle(DesignButtonStyle())
             } else if let bundle = record.bundlePath, !bundle.isEmpty {
                 Button(trf("Monitor %@", "Requests", identity.name)) {
                     model.nav.openAddApp(preselect: bundle)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(DesignButtonStyle(kind: .accent, horizontalPadding: 12))
             }
             Button(tr("Copy as JSON", "Requests")) {
                 RequestsPasteboard.copy(RequestsPresentation.json(for: record))
             }
+            .buttonStyle(DesignButtonStyle())
             Spacer(minLength: 0)
         }
-        .controlSize(.regular)
-        .lineLimit(1)
         .padding(.horizontal, 16.px)
         .padding(.vertical, 12.px)
     }
