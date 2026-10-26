@@ -4,7 +4,8 @@ import UniformTypeIdentifiers
 /// Global Domains & IPs page, deduplicated across every app and probe.
 ///
 /// A table lists each domain and IP once, newest first, with the processes (and probes) that reached it;
-/// "Group by site" folds domains into their registrable domain and IPs into their network.
+/// "Group by site" folds domains into their registrable domain and IPs into their network. The rows are built as
+/// they scroll into view, so switching between All, Domains and IPs and grouping only lay out the rows on screen.
 struct InventoryView: View {
     @Environment(AppModel.self) private var model
 
@@ -90,10 +91,8 @@ struct InventoryView: View {
                            title: trf("No domains or IPs match “%@”", "Inventory", search),
                            message: tr("The search looks at each domain or IP and the apps and probes that reached it.", "Inventory"))
             }
-        } else if model.nav.inventoryGrouped {
-            groupedTable
         } else {
-            flatTable
+            InventoryList(model: model, entries: visible, groups: model.nav.inventoryGrouped ? groups : nil)
         }
     }
 
@@ -109,104 +108,13 @@ struct InventoryView: View {
         var language: String
     }
 
-    /// Filters, orders and groups `entries` for the tables.
+    /// Filters, orders and groups `entries` for the list.
     private func recompute() {
         visible = InventoryPresentation.visible(entries, kind: model.nav.inventoryKind)
         groups = model.nav.inventoryGrouped
             ? InventoryGroup.make(visible, site: { model.classifier.site(for: $0) }, unknownNetwork: tr("Unknown network", "Inventory"))
             : []
         domainCount = entries.reduce(0) { $0 + ($1.kind == .domain ? 1 : 0) }
-    }
-
-    // MARK: Flat table
-
-    private var flatTable: some View {
-        // As in the design, the headers do not sort: the rows keep the newest first.
-        Table(visible) {
-            TableColumn(tr("Name", "Inventory")) { entry in
-                Text(entry.value)
-                    .font(entry.kind == .ip ? Theme.mono(12, weight: .medium) : .system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(entry.geo?.display ?? entry.value)
-            }
-            .width(min: 150, ideal: 270)
-
-            TableColumn(tr("Type", "Inventory")) { entry in
-                InventoryKindChip(kind: entry.kind)
-            }
-            .width(58)
-
-            // The path column takes the spare width (2fr in the design); the date and count columns are capped
-            // so the table's uniform column resizing cannot widen them instead.
-            TableColumn(tr("Seen by · process path", "Inventory")) { entry in
-                InventorySourcesList(model: model, sources: entry.sources)
-            }
-            .width(min: 240, ideal: 480)
-
-            TableColumn(tr("First seen", "Inventory")) { entry in
-                Text(AnalyzeFormat.seen(entry.firstSeen)).foregroundStyle(Theme.ink2)
-            }
-            .width(min: 108, ideal: 112, max: 120)
-
-            TableColumn(tr("Last seen", "Inventory")) { entry in
-                Text(AnalyzeFormat.seen(entry.lastSeen, timeOnlyToday: true)).foregroundStyle(Theme.ink2)
-            }
-            .width(min: 108, ideal: 112, max: 120)
-
-            TableColumn(tr("Requests", "Inventory")) { entry in
-                Text(Fmt.count(entry.requestCount))
-                    .font(Theme.mono(11))
-            }
-            .width(min: 60, ideal: 70, max: 84)
-            .alignment(.trailing)
-        }
-        .font(.system(size: 12))
-    }
-
-    // MARK: Grouped table
-
-    private var groupedTable: some View {
-        Table(groups) {
-            TableColumn(tr("Site or network", "Inventory")) { group in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(group.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
-                        Text(group.kind == .ip
-                             ? trn("%lld IP", "%lld IPs", group.names.count, "Inventory")
-                             : trn("%lld host", "%lld hosts", group.names.count, "Inventory"))
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.ink2)
-                    }
-                    Text(group.preview)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.ink3)
-                        .lineLimit(1)
-                }
-                .padding(.vertical, 4)
-            }
-            .width(min: 260, ideal: 560)
-
-            TableColumn(tr("Seen by", "Inventory")) { group in
-                HStack(spacing: -4) {
-                    ForEach(Array(group.sources.prefix(5).enumerated()), id: \.offset) { _, source in
-                        InventorySourceTile(model: model, source: source, size: 18)
-                            .padding(1.5)
-                            .background(Theme.bg, in: RoundedRectangle(cornerRadius: 6.5, style: .continuous))
-                            .help(InventorySourcesList.displayTitle(source))
-                    }
-                }
-            }
-            .width(min: 110, ideal: 140, max: 180)
-
-            TableColumn(tr("Requests", "Inventory")) { group in
-                Text(Fmt.count(group.requests))
-                    .font(Theme.mono(11))
-            }
-            .width(min: 60, ideal: 70, max: 90)
-            .alignment(.trailing)
-        }
-        .font(.system(size: 12))
     }
 
     // MARK: Loading
@@ -244,6 +152,316 @@ enum InventoryPresentation {
     }
 }
 
+// MARK: - List
+
+/// The Domains & IPs table: a pinned header and lazily built rows in one scroll view, laid out like the native
+/// table it replaced (the inset style's header, row padding and alternating rounded rows). Flat and grouped
+/// rows share the scroll view, so grouping only swaps the rows.
+private struct InventoryList: View {
+    let model: AppModel
+    var entries: [InventoryEntry]
+    /// The site and network groups when grouped by site; nil for the flat list.
+    var groups: [InventoryGroup]?
+
+    @State private var position = ScrollPosition(edge: .top)
+    @State private var scrolled = InventoryScrollGeometry()
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
+                if let groups {
+                    Section {
+                        InventoryTableMetrics.topInset
+                        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                            InventoryGroupRow(model: model, group: group, striped: index % 2 == 1)
+                        }
+                    } header: {
+                        InventoryHeaderRow(columns: InventoryColumnsLayout.groupColumns, titles: [
+                            (tr("Site or network", "Inventory"), .leading),
+                            (tr("Seen by", "Inventory"), .leading),
+                            (tr("Requests", "Inventory"), .trailing),
+                        ])
+                    }
+                } else {
+                    Section {
+                        InventoryTableMetrics.topInset
+                        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                            InventoryEntryRow(model: model, entry: entry, striped: index % 2 == 1)
+                        }
+                    } header: {
+                        InventoryHeaderRow(columns: InventoryColumnsLayout.entryColumns, titles: [
+                            (tr("Name", "Inventory"), .leading),
+                            (tr("Type", "Inventory"), .leading),
+                            (tr("Seen by · process path", "Inventory"), .leading),
+                            (tr("First seen", "Inventory"), .leading),
+                            (tr("Last seen", "Inventory"), .leading),
+                            (tr("Requests", "Inventory"), .trailing),
+                        ])
+                    }
+                }
+            }
+            .padding(.bottom, InventoryTableMetrics.verticalInset)
+        }
+        .scrollPosition($position)
+        .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { _, geometry in
+            scrolled.geometry = geometry
+        }
+        .background(InventoryTableMetrics.background)
+        // A new table, like the one grouping used to build, starts at the top.
+        .onChange(of: groups == nil) { position.scrollTo(edge: .top) }
+        // Like the native table, the list takes focus from Tab and a click, and Home, End, Page Up and Page Down
+        // scroll it.
+        .focusable(interactions: .edit)
+        .focusEffectDisabled()
+        .onKeyPress(keys: [.home, .end, .pageUp, .pageDown]) { press in
+            scroll(press.key)
+        }
+    }
+
+    private func scroll(_ key: KeyEquivalent) -> KeyPress.Result {
+        switch key {
+        case .home:
+            position.scrollTo(edge: .top)
+        case .end:
+            position.scrollTo(edge: .bottom)
+        default:
+            guard let geometry = scrolled.geometry else { return .ignored }
+            // The container is what shows between the toolbar and the bottom edge; a page is what of it shows below
+            // the header, less a little, which stays in view.
+            let visible = geometry.containerSize.height
+            let page = max(0, visible - InventoryTableMetrics.headerHeight - 10)
+            let top = geometry.contentOffset.y + geometry.contentInsets.top
+            let target = top + (key == .pageDown ? page : -page)
+            position.scrollTo(y: min(max(0, target), max(0, geometry.contentSize.height - visible)))
+        }
+        return .handled
+    }
+}
+
+/// The list's last scroll geometry, for the page keys; a reference, so scrolling does not update the view.
+@MainActor
+private final class InventoryScrollGeometry {
+    var geometry: ScrollGeometry?
+}
+
+/// The native inset table's measurements and colors, which the list reproduces.
+private enum InventoryTableMetrics {
+    static let columnSpacing: CGFloat = 17
+    static let horizontalPadding: CGFloat = 16
+    static let verticalInset: CGFloat = 5
+    static let headerHeight: CGFloat = 28
+    static let rowPadding: CGFloat = 4
+
+    static let background = Color(nsColor: .controlBackgroundColor)
+    static let headerText = Color(nsColor: .headerTextColor)
+    static let stripe = Color(nsColor: NSColor.alternatingContentBackgroundColors[1])
+    static let headerSeparator = Color.dynamic(light: .black(0.1), dark: .white(0.16))
+    static let headerLine = Color.dynamic(light: .black(0.1), dark: .white(0.115))
+
+    /// The space between the header and the first row.
+    static var topInset: some View { Color.clear.frame(height: verticalInset) }
+}
+
+/// Column titles with the native header's separators and bottom line.
+private struct InventoryHeaderRow: View {
+    var columns: [InventoryColumnsLayout.Column]
+    var titles: [(title: String, alignment: Alignment)]
+
+    var body: some View {
+        InventoryColumnsLayout(columns: columns) {
+            ForEach(Array(titles.enumerated()), id: \.offset) { index, column in
+                Group {
+                    if column.alignment == .trailing {
+                        // Whole, as the native header draws a right-aligned title in a narrow column.
+                        Text(column.title).fixedSize().padding(.trailing, 6)
+                    } else {
+                        Text(column.title).lineLimit(1).padding(.leading, 2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: column.alignment)
+                .overlay(alignment: .trailing) {
+                    // Between the columns, not after the last one.
+                    if index < titles.count - 1 {
+                        Rectangle()
+                            .fill(InventoryTableMetrics.headerSeparator)
+                            .frame(width: 1, height: 15)
+                            .offset(x: InventoryTableMetrics.columnSpacing / 2 + 0.5)
+                    }
+                }
+            }
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(InventoryTableMetrics.headerText)
+        .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
+        // The titles are centered above the bottom line, which the native header draws from 27 pt down.
+        .frame(height: InventoryTableMetrics.headerHeight - 1)
+        .padding(.bottom, 1)
+        .background(InventoryTableMetrics.background)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(InventoryTableMetrics.headerLine).frame(height: 1.5).offset(y: 0.5)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// The alternate rows' rounded background, inset like the native table's.
+private struct InventoryRowStripe: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(InventoryTableMetrics.stripe)
+            .padding(.leading, 10)
+            .padding(.trailing, 10.5)
+    }
+}
+
+/// A domain or IP of the flat list.
+private struct InventoryEntryRow: View {
+    let model: AppModel
+    var entry: InventoryEntry
+    var striped: Bool
+
+    var body: some View {
+        InventoryColumnsLayout(columns: InventoryColumnsLayout.entryColumns) {
+            Text(entry.value)
+                .font(entry.kind == .ip ? Theme.mono(12, weight: .medium) : .system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(entry.geo?.display ?? entry.value)
+            InventoryKindChip(kind: entry.kind)
+            InventorySourcesList(model: model, sources: entry.sources)
+            Text(AnalyzeFormat.seen(entry.firstSeen)).foregroundStyle(Theme.ink2)
+            Text(AnalyzeFormat.seen(entry.lastSeen, timeOnlyToday: true)).foregroundStyle(Theme.ink2)
+            Text(Fmt.count(entry.requestCount))
+                .font(Theme.mono(11))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .font(.system(size: 12))
+        .padding(.vertical, InventoryTableMetrics.rowPadding)
+        .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
+        .background { if striped { InventoryRowStripe() } }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A site or network of the grouped list.
+private struct InventoryGroupRow: View {
+    let model: AppModel
+    var group: InventoryGroup
+    var striped: Bool
+
+    var body: some View {
+        InventoryColumnsLayout(columns: InventoryColumnsLayout.groupColumns) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(group.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                    Text(group.kind == .ip
+                         ? trn("%lld IP", "%lld IPs", group.names.count, "Inventory")
+                         : trn("%lld host", "%lld hosts", group.names.count, "Inventory"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.ink2)
+                }
+                Text(group.preview)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.ink3)
+                    .lineLimit(1)
+            }
+            .padding(.vertical, 4)
+            HStack(spacing: -4) {
+                ForEach(Array(group.sources.prefix(5).enumerated()), id: \.offset) { _, source in
+                    InventorySourceTile(model: model, source: source, size: 18)
+                        .padding(1.5)
+                        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 6.5, style: .continuous))
+                        .help(InventorySourcesList.displayTitle(source))
+                }
+            }
+            Text(Fmt.count(group.requests))
+                .font(Theme.mono(11))
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .font(.system(size: 12))
+        .padding(.vertical, InventoryTableMetrics.rowPadding)
+        .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
+        .background { if striped { InventoryRowStripe() } }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Lays out a row of the Domains & IPs table as the native table did: columns that cap their width keep their
+/// minimum, and the others share the rest, each getting its ideal width plus an equal part of the space left over
+/// (or minus an equal part of what is missing, down to its minimum). Cells start at their column's leading edge
+/// and are centered vertically.
+struct InventoryColumnsLayout: Layout {
+    struct Column: Hashable, Sendable {
+        var ideal: CGFloat
+        var min: CGFloat
+        var max: CGFloat = .infinity
+    }
+
+    /// Name, Type, Seen by · process path, First seen, Last seen, Requests.
+    static let entryColumns: [Column] = [
+        Column(ideal: 270, min: 150), Column(ideal: 58, min: 58, max: 58), Column(ideal: 480, min: 240),
+        Column(ideal: 112, min: 108, max: 120), Column(ideal: 112, min: 108, max: 120), Column(ideal: 70, min: 60, max: 84),
+    ]
+    /// Site or network, Seen by, Requests.
+    static let groupColumns: [Column] = [
+        Column(ideal: 560, min: 260), Column(ideal: 140, min: 110, max: 180), Column(ideal: 70, min: 60, max: 90),
+    ]
+
+    var columns: [Column]
+    var spacing: CGFloat = 17
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? columns.reduce(spacing * CGFloat(max(0, columns.count - 1))) { $0 + $1.ideal }
+        let widths = Self.widths(for: columns, spacing: spacing, total: width)
+        var height: CGFloat = 0
+        for (index, subview) in subviews.enumerated() where index < widths.count {
+            height = max(height, subview.sizeThatFits(ProposedViewSize(width: widths[index], height: nil)).height)
+        }
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let widths = Self.widths(for: columns, spacing: spacing, total: bounds.width)
+        var x = bounds.minX
+        for (index, subview) in subviews.enumerated() {
+            guard index < widths.count else {
+                subview.place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .leading, proposal: .zero)
+                continue
+            }
+            subview.place(at: CGPoint(x: x, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(width: widths[index], height: nil))
+            x += widths[index] + spacing
+        }
+    }
+
+    /// Column widths for a row `total` points wide.
+    static func widths(for columns: [Column], spacing: CGFloat, total: CGFloat) -> [CGFloat] {
+        var result = columns.map(\.min)
+        let shared = columns.indices.filter { columns[$0].max == .infinity }
+        let available = total - spacing * CGFloat(max(0, columns.count - 1))
+            - columns.indices.filter { !shared.contains($0) }.reduce(CGFloat(0)) { $0 + columns[$1].min }
+        let minimums = shared.reduce(CGFloat(0)) { $0 + columns[$1].min }
+        guard available > minimums else {
+            // Too narrow for every minimum: the shared columns shrink in proportion.
+            for index in shared { result[index] = minimums > 0 ? max(0, available) * columns[index].min / minimums : 0 }
+            return result
+        }
+        var pool = shared
+        var remaining = available
+        while !pool.isEmpty {
+            let delta = (remaining - pool.reduce(CGFloat(0)) { $0 + columns[$1].ideal }) / CGFloat(pool.count)
+            let pinned = pool.filter { columns[$0].ideal + delta < columns[$0].min }
+            if pinned.isEmpty {
+                for index in pool { result[index] = columns[index].ideal + delta }
+                break
+            }
+            for index in pinned { remaining -= columns[index].min }
+            pool.removeAll { pinned.contains($0) }
+        }
+        return result
+    }
+}
+
 /// `Domain` (grey) or `IP` (tinted) type chip.
 struct InventoryKindChip: View {
     var kind: HostKind
@@ -262,8 +480,6 @@ struct InventoryKindChip: View {
 
 /// The first six "seen by" rows, as in the design: a tile (app icon, letter, or the purple probe tile) and the
 /// process path.
-/// Rendered inside `Table` cells, which do not receive custom environment objects on macOS 27, so the
-/// model is passed explicitly.
 struct InventorySourcesList: View {
     let model: AppModel
     var sources: [InventorySource]

@@ -507,6 +507,28 @@ private final class SlowStopProbeActions: ProbeActions {
     }
 }
 
+/// The Domains & IPs list gives its columns the widths the native table gave them.
+@Suite @MainActor struct InventoryColumnsLayoutTests {
+    typealias Layout = InventoryColumnsLayout
+
+    @Test func sharesTheRestLikeTheNativeTable() {
+        // The table's columns in the default 1248 pt window (987 pt wide, less 16 pt padding on each side) and in a
+        // 1500 pt one: the capped columns at their minimum, Name and Seen by sharing the rest equally.
+        #expect(Layout.widths(for: Layout.entryColumns, spacing: 17, total: 955) == [163, 58, 373, 108, 108, 60])
+        #expect(Layout.widths(for: Layout.entryColumns, spacing: 17, total: 1207) == [289, 58, 499, 108, 108, 60])
+        #expect(Layout.widths(for: Layout.groupColumns, spacing: 17, total: 955) == [751, 110, 60])
+    }
+
+    @Test func keepsMinimumsThenShrinksInProportion() {
+        // Name reaches its minimum first; Seen by takes what is left.
+        #expect(Layout.widths(for: Layout.entryColumns, spacing: 17, total: 85 + 334 + 420) == [150, 58, 270, 108, 108, 60])
+        // Too narrow for both minimums: they keep their 150 : 240 proportion and every column stays visible.
+        let narrow = Layout.widths(for: Layout.entryColumns, spacing: 17, total: 85 + 334 + 195)
+        #expect(narrow == [75, 58, 120, 108, 108, 60])
+        #expect(Layout.widths(for: Layout.entryColumns, spacing: 17, total: 100).allSatisfy { $0 >= 0 })
+    }
+}
+
 @Suite @MainActor struct EgressOrderingTests {
     @Test func putsTheCurrentEgressFirst() {
         func sample(_ policy: String, current: Bool) -> EgressSample {
