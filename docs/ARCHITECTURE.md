@@ -309,6 +309,14 @@ History runs its page query and its histogram side by side: the rows appear as s
 histogram that fails leaves them in place (the chart area says it is unavailable and why), and a newer query
 cancels the older one's histogram.
 
+The Domains & IPs page draws its table itself, as the native inset table looks (header and separators, column
+widths, rounded alternate rows), in one scroll view whose rows are built as they scroll into view: a `Table` builds
+and measures every row it shows again on each switch between All, Domains and IPs and on grouping. Its lists stay in
+`AppModel.inventory` (`InventoryCache`) between visits, sorted once, with their domains and IPs apart: a visit shows
+the last list at once and asks PostgreSQL again when it is more than 5 s old, redrawing only when the answer changed,
+and a search narrows the cached list as it is typed. The database is asked for a search only when the cached list
+may lack matches (it holds the query's limit, 2,000 entries).
+
 Strings use `tr("English key", "Table")` with one String Catalog per UI area (`Resources/Localization/*.xcstrings`)
 holding the `zh-Hans` translations; Settings › Language switches at runtime.
 
