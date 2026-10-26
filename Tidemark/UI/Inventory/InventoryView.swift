@@ -22,6 +22,8 @@ struct InventoryView: View {
 
         content(snapshot: snapshot, visible: visible, key: key)
             .pageToolbar(tr("Domains & IPs", "Inventory"), subtitle: subtitle(snapshot)) {
+                // The switches keep the standard priority, the page title's: above it, the toolbar would drop the title
+                // in a narrow window instead of shortening it.
                 ToolbarItem(placement: .primaryAction) {
                     // No counts: the subtitle beside it gives them, and at the default window width they would cut it.
                     DesignSegmentedControl(tr("Kind", "Inventory"), selection: $nav.inventoryKind, size: .compact(), segments: [
@@ -33,26 +35,33 @@ struct InventoryView: View {
                 .sharedBackgroundVisibility(.hidden)
                 ToolbarSpacer(.fixed, placement: .primaryAction)
                 ToolbarItem(placement: .primaryAction) {
-                    Toggle(tr("Group by site", "Inventory"), isOn: $nav.inventoryGrouped)
-                        .toggleStyle(.button)
-                        .help(tr("Fold domains into their site and IPs into their network", "Inventory"))
+                    Toggle(isOn: $nav.inventoryGrouped) {
+                        Text(tr("Group by site", "Inventory")).font(.design(12, .medium))
+                    }
+                    .toggleStyle(.button)
+                    .help(tr("Fold domains into their site and IPs into their network", "Inventory"))
                 }
                 ToolbarSpacer(.fixed, placement: .primaryAction)
                 // The design's order: the search field before Export CSV (`searchable` would put it last).
                 ToolbarItem(placement: .primaryAction) {
                     ToolbarSearchField(text: $nav.inventorySearch, prompt: tr("Search", "Inventory"))
-                        .frame(width: 170)
+                        .frame(width: 170.px)
                 }
                 // The last item to overflow: the field has no usable form in the overflow menu.
-                .visibilityPriority(.high)
+                .visibilityPriority(Self.searchPriority)
                 ToolbarSpacer(.fixed, placement: .primaryAction)
+                // The first item to overflow, before the switches that change what the page shows: the overflow menu's
+                // item exports as the button does.
                 ToolbarItem(placement: .primaryAction) {
-                    Button(tr("Export CSV", "Inventory")) {
+                    Button {
                         exportDocument = AnalyzeCSVDocument(text: AnalyzeCSV.inventory(visible))
                         isExporting = true
+                    } label: {
+                        Text(tr("Export CSV", "Inventory")).font(.design(12, .medium))
                     }
                     .disabled(visible.isEmpty)
                 }
+                .visibilityPriority(.low)
             }
             .fileExporter(isPresented: $isExporting, document: exportDocument, contentType: .commaSeparatedText,
                           defaultFilename: tr("Domains and IPs", "Inventory"),
@@ -93,6 +102,8 @@ struct InventoryView: View {
             InventoryList(model: model, entries: visible, groups: groups)
         }
     }
+
+    private static let searchPriority = ToolbarItemVisibilityPriority(higherThan: .high)
 
     private func subtitle(_ snapshot: InventoryCache.Snapshot?) -> String {
         let domains = snapshot?.domainCount ?? 0
@@ -154,11 +165,10 @@ private struct InventoryList: View {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
                 if let groups {
                     Section {
-                        InventoryTableMetrics.topInset
                         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
                             InventoryGroupRow(model: model, group: group, widths: explicit, striped: index % 2 == 1, insetStripe: inset)
                         }
-                        InventoryEmptyRows(first: groups.count, inset: inset)
+                        InventoryEmptyRows(first: groups.count, pitch: InventoryTableMetrics.groupRowHeight, inset: inset)
                     } header: {
                         InventoryHeaderRow(columns: InventoryColumnsLayout.groupColumns, widths: explicit, leavesRoom: leavesRoom, titles: [
                             (tr("Site or network", "Inventory"), .leading),
@@ -168,11 +178,10 @@ private struct InventoryList: View {
                     }
                 } else {
                     Section {
-                        InventoryTableMetrics.topInset
                         ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                             InventoryEntryRow(model: model, entry: entry, widths: explicit, striped: index % 2 == 1, insetStripe: inset)
                         }
-                        InventoryEmptyRows(first: entries.count, inset: inset)
+                        InventoryEmptyRows(first: entries.count, pitch: InventoryTableMetrics.rowHeight, inset: inset)
                     } header: {
                         InventoryHeaderRow(columns: InventoryColumnsLayout.entryColumns, widths: explicit, leavesRoom: leavesRoom, titles: [
                             (tr("Name", "Inventory"), .leading),
@@ -185,7 +194,6 @@ private struct InventoryList: View {
                     }
                 }
             }
-            .padding(.bottom, InventoryTableMetrics.verticalInset)
             // As wide as the list, or as the columns when they do not fit it (then the list scrolls sideways).
             .containerRelativeFrame(.horizontal) { visible, _ in max(visible - scrollerWidth, tableWidth) }
         }
@@ -277,7 +285,7 @@ private struct InventoryList: View {
             // The container is what shows between the toolbar and the bottom edge; a page is what of it shows below
             // the header, less a little, which stays in view.
             let visible = geometry.containerSize.height
-            let page = max(0, visible - InventoryTableMetrics.headerHeight - 10)
+            let page = max(0, visible - InventoryTableMetrics.headerHeight - 10.px)
             let top = geometry.contentOffset.y + geometry.contentInsets.top
             let target = top + (key == .pageDown ? page : -page)
             // Where the list is scrolled sideways stays as it is.
@@ -297,24 +305,29 @@ private final class InventoryScrollGeometry {
     var dragStart: InventoryColumnWidths?
 }
 
-/// The native inset table's measurements and colors, which the list reproduces.
+/// The table's measurements, the design's in px, with the native inset table's colors and rounded stripes, which the
+/// list reproduces.
 private enum InventoryTableMetrics {
-    static let columnSpacing: CGFloat = 17
-    static let horizontalPadding: CGFloat = 16
-    static let verticalInset: CGFloat = 5
-    static let headerHeight: CGFloat = 28
-    static let rowPadding: CGFloat = 4
-    /// The height of the empty rows below the last one.
-    static let emptyRowHeight: CGFloat = 24
+    static let columnSpacing = columnSpacing(factor: UIScale.factor)
+    static let horizontalPadding = horizontalPadding(factor: UIScale.factor)
+    static let headerHeight = 28.px
+    static let rowPadding = 4.px
+    /// A single-line row's height, the design's minimum; the empty rows below a flat list's last one are as tall.
+    static let rowHeight = 30.px
+    /// A site or network row's height: its two lines and the padding around them (the design's 49.7 px); the empty
+    /// rows below the grouped list's last one are as tall.
+    static let groupRowHeight = 50.px
+    /// The alternate rows' rounded stripe: its insets from the list's leading and trailing edges, which keep the text
+    /// 6 and 5.5 px inside it as the native table's rows do, and its radius.
+    static let stripeLeadingInset = 8.px
+    static let stripeTrailingInset = 8.5.px
+    static let stripeRadius = 6.px
 
     static let background = Color(nsColor: .controlBackgroundColor)
     static let headerText = Color(nsColor: .headerTextColor)
     static let stripe = Color(nsColor: NSColor.alternatingContentBackgroundColors[1])
     static let headerSeparator = Color.dynamic(light: .black(0.1), dark: .white(0.16))
     static let headerLine = Color.dynamic(light: .black(0.1), dark: .white(0.115))
-
-    /// The space between the header and the first row.
-    static var topInset: some View { Color.clear.frame(height: verticalInset) }
 
     /// The list's width: its container's, which leaves out the scroll view's insets (such as the sidebar's) but not
     /// a legacy vertical scroller, and the part of it that scroller takes.
@@ -340,14 +353,18 @@ private enum InventoryTableMetrics {
         return NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
     }
 
+    // The gap between the columns and the padding at the list's sides at any UI scale: the design's 12 and 14 px.
+    static func columnSpacing(factor: CGFloat) -> CGFloat { UIScale.length(12, factor: factor) }
+    static func horizontalPadding(factor: CGFloat) -> CGFloat { UIScale.length(14, factor: factor) }
+
     /// The width `count` columns share in a list `width` points wide: less the padding and the gaps between them.
     static func columnSpace(_ width: CGFloat, columns count: Int) -> CGFloat {
         width - 2 * horizontalPadding - columnSpacing * CGFloat(max(0, count - 1))
     }
 
-    /// The width of a table whose columns take `space`.
-    static func tableWidth(columnSpace space: CGFloat, columns count: Int) -> CGFloat {
-        space + 2 * horizontalPadding + columnSpacing * CGFloat(max(0, count - 1))
+    /// The width of a table whose columns take `space`, at the UI scale `factor`.
+    static func tableWidth(columnSpace space: CGFloat, columns count: Int, factor: CGFloat) -> CGFloat {
+        space + 2 * horizontalPadding(factor: factor) + columnSpacing(factor: factor) * CGFloat(max(0, count - 1))
     }
 }
 
@@ -369,9 +386,9 @@ private struct InventoryHeaderRow: View {
                 Group {
                     if column.alignment == .trailing {
                         // Whole, as the native header draws a right-aligned title in a narrow column.
-                        Text(column.title).fixedSize().padding(.trailing, 2)
+                        Text(column.title).fixedSize().padding(.trailing, 2.px)
                     } else {
-                        Text(column.title).lineLimit(1).padding(.leading, 2)
+                        Text(column.title).lineLimit(1).padding(.leading, 2.px)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: column.alignment)
@@ -380,7 +397,7 @@ private struct InventoryHeaderRow: View {
                     if index < titles.count - 1 || leavesRoom {
                         Rectangle()
                             .fill(InventoryTableMetrics.headerSeparator)
-                            .frame(width: 1, height: 15)
+                            .frame(width: 1, height: 15.px)
                             .offset(x: InventoryTableMetrics.columnSpacing / 2 + 0.5)
                     }
                 }
@@ -391,10 +408,10 @@ private struct InventoryHeaderRow: View {
                 }
             }
         }
-        .font(.system(size: 12))
+        .font(.design(12))
         .foregroundStyle(InventoryTableMetrics.headerText)
         .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
-        // The titles are centered above the bottom line, which the native header draws from 27 pt down.
+        // The titles are centered above the bottom line, which the native header draws 1 pt above its bottom.
         .frame(height: InventoryTableMetrics.headerHeight - 1)
         .padding(.bottom, 1)
         .background(InventoryTableMetrics.background)
@@ -408,10 +425,10 @@ private struct InventoryHeaderRow: View {
     /// The area around the divider after `column` that resizes it.
     private func divider(after column: Int) -> some View {
         Color.clear
-            .frame(width: 8, height: InventoryTableMetrics.headerHeight)
+            .frame(width: 8.px, height: InventoryTableMetrics.headerHeight)
             .contentShape(Rectangle())
             // Centered on the separator, in the gap between the columns.
-            .offset(x: InventoryTableMetrics.columnSpacing / 2 + 4)
+            .offset(x: InventoryTableMetrics.columnSpacing / 2 + 8.px / 2)
             .pointerStyle(.columnResize)
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)
@@ -429,10 +446,10 @@ private struct InventoryRowStripe: View {
 
     var body: some View {
         if inset {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: InventoryTableMetrics.stripeRadius, style: .continuous)
                 .fill(InventoryTableMetrics.stripe)
-                .padding(.leading, 10)
-                .padding(.trailing, 10.5)
+                .padding(.leading, InventoryTableMetrics.stripeLeadingInset)
+                .padding(.trailing, InventoryTableMetrics.stripeTrailingInset)
         } else {
             Rectangle().fill(InventoryTableMetrics.stripe)
         }
@@ -440,11 +457,13 @@ private struct InventoryRowStripe: View {
 }
 
 /// The empty rows the native table draws below its last one, down to the bottom of the window: alternate rounded
-/// rows on a 24 pt pitch whose parity continues the rows'. They hang below the list's end, so they take no room
-/// and a long list never scrolls to them.
+/// rows as tall as the list's rows, whose parity continues the rows'. They hang below the list's end, so they take no
+/// room and a long list never scrolls to them.
 private struct InventoryEmptyRows: View {
     /// The index the first empty row would have.
     var first: Int
+    /// The rows' height.
+    var pitch: CGFloat
     /// Rounded and inset rows, as the rows' stripes are.
     var inset: Bool
 
@@ -453,13 +472,14 @@ private struct InventoryEmptyRows: View {
             .frame(height: 0)
             .overlay(alignment: .top) {
                 Canvas { context, size in
-                    let pitch = InventoryTableMetrics.emptyRowHeight
                     var index = first % 2 == 1 ? 0 : 1
                     while CGFloat(index) * pitch < size.height {
                         let y = CGFloat(index) * pitch
                         if inset {
-                            let rect = CGRect(x: 10, y: y, width: max(0, size.width - 20.5), height: pitch)
-                            context.fill(RoundedRectangle(cornerRadius: 6, style: .continuous).path(in: rect),
+                            let leading = InventoryTableMetrics.stripeLeadingInset
+                            let width = size.width - leading - InventoryTableMetrics.stripeTrailingInset
+                            let rect = CGRect(x: leading, y: y, width: max(0, width), height: pitch)
+                            context.fill(RoundedRectangle(cornerRadius: InventoryTableMetrics.stripeRadius, style: .continuous).path(in: rect),
                                          with: .color(InventoryTableMetrics.stripe))
                         } else {
                             context.fill(Path(CGRect(x: 0, y: y, width: size.width, height: pitch)), with: .color(InventoryTableMetrics.stripe))
@@ -485,7 +505,7 @@ private struct InventoryEntryRow: View {
     var body: some View {
         InventoryColumnsLayout(columns: InventoryColumnsLayout.entryColumns, widths: widths) {
             Text(entry.value)
-                .font(entry.kind == .ip ? Theme.mono(12, weight: .medium) : .system(size: 12, weight: .medium))
+                .font(entry.kind == .ip ? Theme.mono(12, weight: .medium) : .design(12, .medium))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .help(entry.geo?.display ?? entry.value)
@@ -497,8 +517,9 @@ private struct InventoryEntryRow: View {
                 .font(Theme.mono(11))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .font(.system(size: 12))
+        .font(.design(12))
         .padding(.vertical, InventoryTableMetrics.rowPadding)
+        .frame(minHeight: InventoryTableMetrics.rowHeight)
         .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
         .background { if striped { InventoryRowStripe(inset: insetStripe) } }
         // One element per row that names each column, as VoiceOver reads a table's row; the name's tooltip (an
@@ -528,26 +549,26 @@ private struct InventoryGroupRow: View {
 
     var body: some View {
         InventoryColumnsLayout(columns: InventoryColumnsLayout.groupColumns, widths: widths) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(group.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+            VStack(alignment: .leading, spacing: 2.px) {
+                HStack(alignment: .firstTextBaseline, spacing: 8.px) {
+                    Text(group.name).font(.design(12.5, .semibold)).lineLimit(1)
                     Text(group.kind == .ip
                          ? trn("%lld IP", "%lld IPs", group.names.count, "Inventory")
                          : trn("%lld host", "%lld hosts", group.names.count, "Inventory"))
-                        .font(.system(size: 11))
+                        .font(.design(11))
                         .foregroundStyle(Theme.ink2)
                 }
                 Text(group.preview)
-                    .font(.system(size: 11))
+                    .font(.design(11))
                     .foregroundStyle(Theme.ink3)
                     .lineLimit(1)
             }
-            .padding(.vertical, 4)
-            HStack(spacing: -4) {
+            .padding(.vertical, 4.px)
+            HStack(spacing: -4.px) {
                 ForEach(Array(group.sources.prefix(5).enumerated()), id: \.offset) { _, source in
                     InventorySourceTile(model: model, source: source, size: 18.px)
-                        .padding(1.5)
-                        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 6.5, style: .continuous))
+                        .padding(1.5.px)
+                        .background(Theme.bg, in: RoundedRectangle(cornerRadius: 6.5.px, style: .continuous))
                         .help(InventorySourcesList.displayTitle(source))
                 }
             }
@@ -555,8 +576,9 @@ private struct InventoryGroupRow: View {
                 .font(Theme.mono(11))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .font(.system(size: 12))
+        .font(.design(12))
         .padding(.vertical, InventoryTableMetrics.rowPadding)
+        .frame(minHeight: InventoryTableMetrics.groupRowHeight)
         .padding(.horizontal, InventoryTableMetrics.horizontalPadding)
         .background { if striped { InventoryRowStripe(inset: insetStripe) } }
         .accessibilityElement(children: .ignore)
@@ -592,18 +614,30 @@ struct InventoryColumnsLayout: Layout {
     }
 
     /// Name, Type, Seen by · process path, First seen, Last seen, Requests.
-    static let entryColumns: [Column] = [
-        Column(ideal: 270, min: 150), Column(ideal: 58, min: 58, max: 58), Column(ideal: 480, min: 240),
-        Column(ideal: 112, min: 108, max: 120), Column(ideal: 112, min: 108, max: 120), Column(ideal: 70, min: 60, max: 84),
-    ]
+    static let entryColumns = entryColumns(factor: UIScale.factor)
     /// Site or network, Seen by, Requests.
-    static let groupColumns: [Column] = [
-        Column(ideal: 560, min: 260), Column(ideal: 140, min: 110, max: 180), Column(ideal: 70, min: 60, max: 90),
-    ]
+    static let groupColumns = groupColumns(factor: UIScale.factor)
+
+    // The columns above at any UI scale, in design px. Text grows with the scale, and SF a little less than its size,
+    // so a width that fits its text in px fits it at every factor: Type its chip, First and Last seen
+    // `Yesterday 23:59`, Requests a count of eight digits in 11 px SF Mono, Seen by five tiles.
+    static func entryColumns(factor: CGFloat) -> [Column] {
+        let px = { UIScale.length($0, factor: factor) }
+        return [
+            Column(ideal: px(270), min: px(150)), Column(ideal: px(58), min: px(58), max: px(58)), Column(ideal: px(480), min: px(240)),
+            Column(ideal: px(112), min: px(108), max: px(120)), Column(ideal: px(112), min: px(108), max: px(120)),
+            Column(ideal: px(70), min: px(70), max: px(84)),
+        ]
+    }
+
+    static func groupColumns(factor: CGFloat) -> [Column] {
+        let px = { UIScale.length($0, factor: factor) }
+        return [Column(ideal: px(560), min: px(260)), Column(ideal: px(140), min: px(110), max: px(180)), Column(ideal: px(70), min: px(70), max: px(90))]
+    }
 
     var columns: [Column]
     var widths: [CGFloat]?
-    var spacing: CGFloat = 17
+    var spacing: CGFloat = InventoryTableMetrics.columnSpacing
 
     private func resolved(_ total: CGFloat) -> [CGFloat] {
         widths ?? Self.widths(for: columns, spacing: spacing, total: total)
@@ -652,11 +686,14 @@ struct InventoryColumnWidths: Equatable {
     private(set) var widths: [CGFloat]
     /// The width the columns share: the list's, less its padding and the gaps between the columns.
     private(set) var space: CGFloat
+    /// The UI scale the table's padding and gaps are drawn at.
+    let factor: CGFloat
 
     /// A new table's widths in `space`.
-    init(columns: [Column], space: CGFloat) {
+    init(columns: [Column], space: CGFloat, factor: CGFloat = UIScale.factor) {
         self.columns = columns
         self.space = space
+        self.factor = factor
         widths = Self.initial(columns, space: space)
     }
 
@@ -671,7 +708,7 @@ struct InventoryColumnWidths: Equatable {
 
     /// The table's width: the list's, or the columns' when they are wider.
     var tableWidth: CGFloat {
-        InventoryTableMetrics.tableWidth(columnSpace: max(space, total), columns: columns.count)
+        InventoryTableMetrics.tableWidth(columnSpace: max(space, total), columns: columns.count, factor: factor)
     }
 
     static func initial(_ columns: [Column], space: CGFloat) -> [CGFloat] {
@@ -746,10 +783,10 @@ struct InventoryKindChip: View {
     var body: some View {
         let tint = Theme.tint(200)
         Text(kind == .ip ? tr("IP", "Inventory") : tr("Domain", "Inventory"))
-            .font(.system(size: 10.5, weight: .semibold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(kind == .ip ? tint.background : Theme.fill, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .font(.design(10.5, .semibold))
+            .padding(.horizontal, 6.px)
+            .padding(.vertical, 1.px)
+            .background(kind == .ip ? tint.background : Theme.fill, in: RoundedRectangle(cornerRadius: 4.px, style: .continuous))
             .foregroundStyle(kind == .ip ? tint.foreground : Theme.ink2)
             .fixedSize()
     }
@@ -762,23 +799,25 @@ struct InventorySourcesList: View {
     var sources: [InventorySource]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 3.px) {
             ForEach(Array(sources.prefix(6).enumerated()), id: \.offset) { _, source in
-                HStack(alignment: .top, spacing: 6) {
+                HStack(alignment: .top, spacing: 6.px) {
                     InventorySourceTile(model: model, source: source, size: 14.px)
-                        .padding(.top, 1)
+                        .padding(.top, 1.px)
                     Text(Self.wrappable(Self.displayPath(source)))
                         .font(Theme.mono(10.5))
                         .foregroundStyle(Theme.ink2)
-                        .lineSpacing(1)
+                        .lineHeight(Self.pathLineHeight)
                         .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
                         .help(Self.displayPath(source))
                 }
             }
         }
-        .padding(.vertical, 3)
     }
+
+    /// The design's `line-height: 1.4` for the paths, a little looser than the page's.
+    static let pathLineHeight = AttributedString.LineHeight.multiple(factor: 1.4)
 
     static let probePrefix = "Site probe · "
 
