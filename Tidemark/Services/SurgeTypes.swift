@@ -147,6 +147,28 @@ struct SurgeDNSLookup: Decodable, Sendable, Hashable {
     var addresses: [String] { (v4Addresses ?? []) + (v6Addresses ?? []) }
 }
 
+/// One entry of `surge-cli --raw dump dns`: an answer in Surge's DNS cache (`dnsCache`), or a static mapping of its
+/// profile (`local`). Surge keeps expired answers listed for hours, so `expires` decides whether one still holds.
+struct SurgeDNSRecord: Sendable, Hashable {
+    /// Lowercased, without a trailing dot.
+    var domain: String
+    /// IP addresses only (a static mapping may name another host instead, and then has none).
+    var addresses: [String]
+    /// e.g. `https://cloudflare-dns.com/dns-query`
+    var server: String? = nil
+    var interface: String? = nil
+    /// The CNAME chain, e.g. `www.qualcomm.cn -> www.qualcomm.cn.cdn.cloudflare.net -> 172.64.144.37, 104.18.43.219`.
+    var path: String? = nil
+    /// e.g. `160.59ms Receive an A answer from https://cloudflare-dns.com/dns-query`
+    var logs: [String] = []
+    /// Seconds the lookup took (`timeCost`).
+    var timeCost: Double? = nil
+    /// When the answer expires (`expiresTime`); nil for a static mapping, which never does.
+    var expires: Date? = nil
+    /// A static mapping of the profile, not a lookup.
+    var isLocal = false
+}
+
 /// `surge-cli --raw geoip <ip>`
 struct SurgeGeoIP: Decodable, Sendable, Hashable {
     var address: String?

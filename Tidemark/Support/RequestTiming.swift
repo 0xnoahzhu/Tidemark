@@ -41,6 +41,13 @@ enum RequestTiming {
         return Note(secondsOfDay: h * 3600 + m * 60 + s, tag: tag, text: text)
     }
 
+    /// The date of a note of a request that started at `start`: its time of day on the day the request started,
+    /// or on the next day when the clock passed midnight since.
+    static func date(of note: Note, near start: Date) -> Date {
+        let date = Calendar.current.startOfDay(for: start).addingTimeInterval(note.secondsOfDay)
+        return date < start.addingTimeInterval(-60) ? date.addingTimeInterval(86400) : date
+    }
+
     /// The rule decides which outbound connection Surge opens, so its notes start the Connect phase (the
     /// design has no Rule phase).
     static func kind(forTag tag: String) -> TimingPhase.Kind? {
@@ -54,7 +61,6 @@ enum RequestTiming {
 
     static func phases(for record: RequestRecord, now: Date = .now) -> [TimingPhase] {
         let start = record.startedAt
-        let startOfDay = Calendar.current.startOfDay(for: start)
         let setupEnd = record.setupCompletedAt ?? start
         let end = record.completedAt ?? (record.state == .active ? now : setupEnd)
 
@@ -63,10 +69,8 @@ enum RequestTiming {
         var seen = Set<TimingPhase.Kind>()
         for raw in record.notes {
             guard let note = parse(note: raw), let kind = kind(forTag: note.tag), !seen.contains(kind) else { continue }
-            var date = startOfDay.addingTimeInterval(note.secondsOfDay)
-            if date < start.addingTimeInterval(-60) { date = date.addingTimeInterval(86400) } // crossed midnight
             seen.insert(kind)
-            marks.append((kind, max(start, min(date, setupEnd))))
+            marks.append((kind, max(start, min(date(of: note, near: start), setupEnd))))
         }
         marks.sort { $0.1 < $1.1 }
 

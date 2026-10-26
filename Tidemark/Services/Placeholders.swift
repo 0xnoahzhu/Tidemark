@@ -79,7 +79,7 @@ struct UnavailableSurgeClient: SurgeClient {
     func recentRequests() async throws -> [SurgeRequest] { throw error }
     func activeRequests() async throws -> [SurgeRequest] { throw error }
     func dnsLookup(_ domain: String) async throws -> SurgeDNSLookup { throw error }
-    func dnsCache() async throws -> [String: [String]] { throw error }
+    func dnsCache() async throws -> [SurgeDNSRecord] { throw error }
     func geoIP(_ ip: String) async throws -> SurgeGeoIP { throw error }
     func ruleMatch(host: String, processPath: String?) async throws -> SurgeRuleMatch { throw error }
     func httpProbe(url: String, policy: String?) async throws -> SurgeHTTPProbe { throw error }

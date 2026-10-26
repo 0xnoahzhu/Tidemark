@@ -117,7 +117,7 @@ struct CaptureFakeClassifier: SiteClassifying {
 final class CaptureFakeSurge: SurgeClient {
     struct State {
         var dns: [String: [String]] = [:]
-        var dnsCache: [String: [String]] = [:]
+        var dnsCache: [SurgeDNSRecord] = []
         var geo: [String: SurgeGeoIP] = [:]
         var externalIPs: [String: String] = [:]
         var latencies: [String: Int] = [:]
@@ -182,7 +182,7 @@ final class CaptureFakeSurge: SurgeClient {
         return SurgeDNSLookup(domain: domain, server: nil, path: nil, v4Addresses: ips.filter(HostName.isIPv4),
                               v6Addresses: ips.filter { !HostName.isIPv4($0) }, durationMs: 1, expiresIn: 0)
     }
-    func dnsCache() async throws -> [String: [String]] { snapshot.dnsCache }
+    func dnsCache() async throws -> [SurgeDNSRecord] { snapshot.dnsCache }
     func geoIP(_ ip: String) async throws -> SurgeGeoIP {
         guard let geo = snapshot.geo[ip] else { throw SurgeError.commandFailed(command: "geoip", message: "unknown") }
         return geo

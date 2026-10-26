@@ -89,6 +89,15 @@ actor CapturePipeline {
         var ipSourceRecorded = false
     }
 
+    /// Addresses of a hostname that requests may use until `expires`, and where they came from.
+    struct ResolvedHost: Equatable, Sendable {
+        var ips: [String]
+        var expires: Date
+        var source: RemoteIPSource
+        /// When they were resolved (`RequestRecord.remoteIPResolvedAt`); nil for a static mapping of Surge's profile.
+        var resolvedAt: Date?
+    }
+
     /// Closing of `deviceID`'s rows left active by Surge sessions before `before`.
     struct SessionClose: Equatable, Sendable {
         var before: Int64
@@ -218,7 +227,7 @@ actor CapturePipeline {
     var hostOrigins: [String: RequestKey] = [:]
 
     // Lookups
-    var dnsCache: [String: (ips: [String], expires: Date)] = [:]
+    var dnsCache: [String: ResolvedHost] = [:]
     var dnsFailures: [String: Date] = [:]
     var dnsQueue: [String] = []
     var dnsInFlight: Set<String> = []
@@ -684,9 +693,14 @@ actor CapturePipeline {
         entry.lastSeen = now
 
         let hadIP = record.remoteIP != nil
-        if let ip = mapped.remoteIP, ip != record.remoteIP {
+        // What Surge's record tells beats what Tidemark resolved: the address of a DIRECT connection replaces a
+        // cached one, even when they are the same.
+        if let ip = mapped.remoteIP,
+           ip != record.remoteIP || mapped.remoteIPSource != record.remoteIPSource || mapped.remoteIPResolvedAt != record.remoteIPResolvedAt {
+            if ip != record.remoteIP { record.geo = geoCache[ip] }
             record.remoteIP = ip
-            record.geo = geoCache[ip]
+            record.remoteIPSource = mapped.remoteIPSource
+            record.remoteIPResolvedAt = mapped.remoteIPResolvedAt
         }
         entry.record = record
         // The process may only be known now, or the monitored apps changed.

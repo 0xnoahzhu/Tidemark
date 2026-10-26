@@ -50,7 +50,7 @@ final class EgressFakeSurge: SurgeClientDetails {
     func recentRequests() async throws -> [SurgeRequest] { [] }
     func activeRequests() async throws -> [SurgeRequest] { [] }
     func dnsLookup(_ domain: String) async throws -> SurgeDNSLookup { throw SurgeError.commandFailed(command: "dns lookup", message: "NXDOMAIN") }
-    func dnsCache() async throws -> [String: [String]] { [:] }
+    func dnsCache() async throws -> [SurgeDNSRecord] { [] }
     func geoIP(_ ip: String) async throws -> SurgeGeoIP {
         guard let geo = snapshot.geo[ip] else { throw SurgeError.commandFailed(command: "geoip", message: "unknown") }
         return geo

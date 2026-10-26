@@ -76,8 +76,12 @@ delete it in Keychain Access. A stream that ends or fails is always restarted, w
   `[Rule] Policy decision path: AI -> AT&T-RackNerd-Hysteria2` → `policyPath = ["AI", "AT&T-RackNerd-Hysteria2"]`.
   In rule mode notes also name the matched rule; in global-proxy mode the rule is `Global · <policy>`.
 * **Remote IP** — `remoteAddress` is the real destination for DIRECT, but `"<proxy-ip> (Proxy)"` for proxied
-  connections. For hostnames we resolve through Surge (`dns lookup <host>`, cached by TTL, plus a periodic
-  `dump dns` cache read). IP-literal hosts (`149.154.175.60:443`) are *direct* IPs ("by IP, no hostname").
+  connections. In rule mode the notes name the address Surge resolved to match IP rules (`[Rule] DNS completed, IPv4
+  address for matching: …`). Other hostnames are resolved through Surge (`dns lookup <host>`, cached by TTL, plus a
+  `dump dns` cache read every 30 s whose answers count only until Surge's own `expiresTime`: Surge keeps expired
+  answers listed for hours). A proxy resolves the host again on its side, out of sight, so every request records
+  where its address came from and when (`remote_ip_source`: `literal`, `surge`, `rule-dns`, `tidemark-lookup`,
+  `surge-cache`). IP-literal hosts (`149.154.175.60:443`) are *direct* IPs ("by IP, no hostname").
 * **GeoIP** — `geoip <ip>` → `{country, asn, organization}`; cached in `ip_info`.
 * **Policies** — `policy-group list` / `dump policy-group-sub-policies` give options with a `lineHash`
   (`POLICY::…`). Policies that come from a policy-path subscription are **not** addressable by name:

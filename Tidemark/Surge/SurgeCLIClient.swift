@@ -69,7 +69,7 @@ struct SurgeCLIClient: SurgeClientDetails {
         try await run(["dns", "lookup", domain], decoding: SurgeDNSLookup.self)
     }
 
-    func dnsCache() async throws -> [String: [String]] {
+    func dnsCache() async throws -> [SurgeDNSRecord] {
         try await run(["dump", "dns"]) { try SurgeOutputParser.dnsCache(from: $0, command: $1) }
     }
 

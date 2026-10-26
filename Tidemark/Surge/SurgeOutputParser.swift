@@ -113,20 +113,40 @@ enum SurgeOutputParser {
 
     // MARK: - DNS
 
-    /// `dump dns` → `{"dnsCache":[{"domain":…,"data":["1.2.3.4"]}…],"local":[{"domain":…,"data":"1.2.3.4"}…]}`.
-    /// Domains are lowercased; only IP addresses are kept (local mappings may point at other names).
-    static func dnsCache(from data: Data, command: String) throws(SurgeError) -> [String: [String]] {
+    /// `dump dns` → `{"dnsCache":[{"domain":…,"server":…,"interface":"","data":["1.2.3.4"],"logs":[…],"path":…,
+    /// "timeCost":0.16,"expiresTime":1793009456.27}…],"local":[{"domain":…,"data":"1.2.3.4"}…]}`: the cached answers,
+    /// then the static mappings. Domains are lowercased; only IP addresses are kept (local mappings may point at
+    /// other names), and entries without one are skipped.
+    static func dnsCache(from data: Data, command: String) throws(SurgeError) -> [SurgeDNSRecord] {
         let dump = try decode(DNSDump.self, from: data, command: command)
-        var result: [String: [String]] = [:]
-        for entry in (dump.dnsCache ?? []) + (dump.local ?? []) {
-            guard var domain = entry.domain?.lowercased(), !domain.isEmpty else { continue }
-            while domain.hasSuffix(".") { domain.removeLast() }
-            let values = entry.data?.arrayValue?.compactMap(\.stringValue) ?? entry.data?.stringValue.map { [$0] } ?? []
-            for address in values where HostName.isIPAddress(address) {
-                if !(result[domain]?.contains(address) ?? false) { result[domain, default: []].append(address) }
+        var records: [SurgeDNSRecord] = []
+        for (entry, isLocal) in (dump.dnsCache ?? []).map({ ($0, false) }) + (dump.local ?? []).map({ ($0, true) }) {
+            guard let domain = entry.domain.map(dnsDomain), !domain.isEmpty else { continue }
+            var addresses: [String] = []
+            for address in entry.data?.arrayValue?.compactMap(\.stringValue) ?? entry.data?.stringValue.map({ [$0] }) ?? []
+            where HostName.isIPAddress(address) && !addresses.contains(address) {
+                addresses.append(address)
             }
+            guard !addresses.isEmpty else { continue }
+            records.append(SurgeDNSRecord(
+                domain: domain, addresses: addresses, server: nonEmpty(entry.server), interface: nonEmpty(entry.interface),
+                path: nonEmpty(entry.path), logs: entry.logs ?? [], timeCost: entry.timeCost,
+                expires: isLocal ? nil : entry.expiresTime.flatMap { $0 > 0 ? Date(timeIntervalSince1970: $0) : nil }, isLocal: isLocal
+            ))
         }
-        return result
+        return records
+    }
+
+    /// A domain as Surge's DNS reports it, lowercased and without a trailing dot.
+    static func dnsDomain(_ name: String) -> String {
+        var domain = name.trimmingCharacters(in: .whitespaces).lowercased()
+        while domain.hasSuffix(".") { domain.removeLast() }
+        return domain
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty else { return nil }
+        return value
     }
 
     // MARK: - Policies
@@ -276,6 +296,29 @@ enum SurgeOutputParser {
         struct Entry: Decodable {
             var domain: String?
             var data: SurgeJSONValue?
+            var server: String?
+            var interface: String?
+            var path: String?
+            var logs: [String]?
+            var timeCost: Double?
+            var expiresTime: Double?
+
+            enum CodingKeys: String, CodingKey {
+                case domain, data, server, interface, path, logs, timeCost, expiresTime
+            }
+
+            /// A detail of an unexpected type is dropped rather than failing the whole dump.
+            init(from decoder: any Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                domain = try container.decodeIfPresent(String.self, forKey: .domain)
+                data = try container.decodeIfPresent(SurgeJSONValue.self, forKey: .data)
+                server = try? container.decodeIfPresent(String.self, forKey: .server)
+                interface = try? container.decodeIfPresent(String.self, forKey: .interface)
+                path = try? container.decodeIfPresent(String.self, forKey: .path)
+                logs = try? container.decodeIfPresent([String].self, forKey: .logs)
+                timeCost = try? container.decodeIfPresent(Double.self, forKey: .timeCost)
+                expiresTime = try? container.decodeIfPresent(Double.self, forKey: .expiresTime)
+            }
         }
         var dnsCache: [Entry]?
         var local: [Entry]?

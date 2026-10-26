@@ -169,6 +169,39 @@ struct CaptureMappingTests {
         #expect(idle.endReason == "Closed for inactivity" && !idle.endedWithError)
     }
 
+    @Test func tellsWhereRemoteIPsComeFrom() throws {
+        let literal = CaptureRecordMapper.record(from: try CaptureFixtures.decode(CaptureFixtures.wechatDirectIP), deviceID: device, session: 1)
+        #expect(literal.remoteIP == "157.148.69.80" && literal.remoteIPSource == .literal && literal.remoteIPResolvedAt == nil)
+
+        let proxied = CaptureRecordMapper.record(from: try CaptureFixtures.decode(CaptureFixtures.cursorProxied), deviceID: device, session: 1)
+        #expect(proxied.remoteIP == nil && proxied.remoteIPSource == nil, "global-proxy mode: the proxy resolves it, out of sight")
+
+        var request = CaptureFixtures.request(id: 1, host: "api.github.com", processPath: nil, remoteAddress: "140.82.112.6", policy: "DIRECT")
+        request.setupCompletedDate = 1_792_871_000.2
+        let direct = CaptureRecordMapper.record(from: request, deviceID: device, session: 1)
+        #expect(direct.remoteIP == "140.82.112.6" && direct.remoteIPSource == .surge)
+        #expect(direct.remoteIPResolvedAt == Date(timeIntervalSince1970: 1_792_871_000.2))
+
+        // Rule mode: the address Surge resolved to match IP rules, though the request went through a proxy.
+        let ruleMode = CaptureRecordMapper.record(from: try #require(try Self.recorded()[1006]), deviceID: device, session: 1)
+        #expect(ruleMode.remoteIP == "172.64.155.209" && ruleMode.remoteIPSource == .ruleDNS && ruleMode.remoteIPResolvedAt != nil)
+        #expect(ruleMode.remoteAddress == "203.0.113.10 (Proxy)")
+
+        // The note's time of day (this Mac's clock) dates the answer; IPv6 when there is no IPv4 address.
+        let start = Date(timeIntervalSince1970: 1_792_921_812.910121)
+        let clock = DateFormatter()
+        clock.locale = Locale(identifier: "en_US_POSIX")
+        clock.dateFormat = "HH:mm:ss.SSSSSS"
+        let note = clock.string(from: start.addingTimeInterval(0.3197))
+            + " [Rule] DNS completed, IPv4 address for matching: N/A, IPv6 address for matching: 2606:4700::6810:9bd1"
+        let match = try #require(CaptureRecordMapper.remoteAddress(remoteAddress: "203.0.113.10 (Proxy)", host: "codex.example", notes: [note],
+                                                                   startedAt: start, setupCompletedAt: nil))
+        #expect(match.ip == "2606:4700::6810:9bd1" && match.source == .ruleDNS)
+        let resolvedAt = try #require(match.resolvedAt)
+        #expect(abs(resolvedAt.timeIntervalSince(start) - 0.3197) < 0.002)
+        #expect(CaptureRecordMapper.ruleDNSAddress(notes: ["10:00:00.000001 [Rule] DNS completed, IPv4 address for matching: N/A, IPv6 address for matching: N/A"]) == nil)
+    }
+
     @Test func parsesEndReasonsDefensively() {
         let reason = CaptureRecordMapper.endReason(notes:)
         #expect(reason(["10:00:00.000001 [Connection] Client closed sending stream"]) == nil, "half-closed is not the end")

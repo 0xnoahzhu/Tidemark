@@ -213,12 +213,68 @@ struct CapturePipelineTests {
     @Test func usesSurgesDNSCache() async {
         let temp = CaptureTempDirectory()
         let surge = CaptureFakeSurge()
-        surge.update { $0.dnsCache["registry.npmjs.org"] = ["104.16.27.34"] }
+        surge.update { $0.dnsCache = [SurgeDNSRecord(domain: "registry.npmjs.org", addresses: ["104.16.27.34"], expires: base.addingTimeInterval(300))] }
         let pipeline = makePipeline(database: CaptureFakeDatabase(), surge: surge, spoolDirectory: temp.url)
         await pipeline.refreshDNSCache(now: base)
         await pipeline.ingest(CaptureFixtures.request(id: 1, host: "registry.npmjs.org", processPath: "/usr/local/bin/node", remoteAddress: "1.2.3.4 (Proxy)"), now: base)
-        #expect(await pipeline.drainUpdate().records.first?.remoteIP == "104.16.27.34")
+        let record = await pipeline.drainUpdate().records.first
+        #expect(record?.remoteIP == "104.16.27.34")
+        #expect(record?.remoteIPSource == .surgeCache && record?.remoteIPResolvedAt == base, "first seen in Surge's cache now")
         #expect(surge.snapshot.dnsLookups.isEmpty)
+    }
+
+    @Test func neverUsesAnAnswerSurgesCacheHoldsPastItsExpiry() async throws {
+        let temp = CaptureTempDirectory()
+        let surge = CaptureFakeSurge()
+        surge.update {
+            $0.dnsCache = [
+                // Expired an hour ago: Surge still lists it.
+                SurgeDNSRecord(domain: "api.github.com", addresses: ["140.82.112.5"], expires: base.addingTimeInterval(-3_600)),
+                SurgeDNSRecord(domain: "proxy.example.net", addresses: ["203.0.113.40"], isLocal: true),
+                SurgeDNSRecord(domain: "github.com", addresses: ["140.82.112.3"], expires: base.addingTimeInterval(20)),
+            ]
+            $0.dns["api.github.com"] = ["140.82.112.6"]
+            $0.dns["github.com"] = ["140.82.112.4"]
+        }
+        let pipeline = makePipeline(database: CaptureFakeDatabase(), surge: surge, spoolDirectory: temp.url)
+        await pipeline.refreshDNSCache(now: base)
+        func request(_ id: Int64, _ host: String) -> SurgeRequest {
+            CaptureFixtures.request(id: id, host: host, processPath: "/usr/bin/git", remoteAddress: "203.0.113.10 (Proxy)")
+        }
+
+        // The expired answer is looked up afresh, and the request says so.
+        await pipeline.ingest(request(1, "api.github.com"), now: base)
+        var latest: [Int64: RequestRecord] = [:]
+        #expect(await eventually {
+            for record in await pipeline.drainUpdate().records { latest[record.key.surgeID] = record }
+            return latest[1]?.remoteIP != nil
+        })
+        #expect(latest[1]?.remoteIP == "140.82.112.6" && latest[1]?.remoteIPSource == .tidemarkLookup)
+        #expect(latest[1]?.remoteIPResolvedAt != nil)
+        #expect(surge.snapshot.dnsLookups == ["api.github.com"])
+
+        // A static mapping of Surge's profile has no resolution time and never expires.
+        await pipeline.ingest(request(2, "proxy.example.net"), now: base.addingTimeInterval(86_400))
+        // A cached answer is used until its expiry, not after.
+        await pipeline.ingest(request(3, "github.com"), now: base.addingTimeInterval(10))
+        for record in await pipeline.drainUpdate().records { latest[record.key.surgeID] = record }
+        #expect(latest[2]?.remoteIP == "203.0.113.40" && latest[2]?.remoteIPSource == .surgeCache && latest[2]?.remoteIPResolvedAt == nil)
+        #expect(latest[3]?.remoteIP == "140.82.112.3" && latest[3]?.remoteIPSource == .surgeCache)
+        await pipeline.ingest(request(4, "github.com"), now: base.addingTimeInterval(21))
+        #expect(await eventually {
+            for record in await pipeline.drainUpdate().records { latest[record.key.surgeID] = record }
+            return latest[4]?.remoteIP != nil
+        })
+        #expect(latest[4]?.remoteIP == "140.82.112.4" && latest[4]?.remoteIPSource == .tidemarkLookup)
+
+        // Surge's record beats what Tidemark resolved: the address of a DIRECT connection, reported once it is set up.
+        var direct = request(1, "api.github.com")
+        direct.remoteAddress = "140.82.112.6"
+        direct.setupCompletedDate = 1_792_871_000.25
+        await pipeline.ingest(direct, now: base.addingTimeInterval(1))
+        let updated = try #require(await pipeline.drainUpdate().records.first { $0.key.surgeID == 1 })
+        #expect(updated.remoteIP == "140.82.112.6" && updated.remoteIPSource == .surge)
+        #expect(updated.remoteIPResolvedAt == Date(timeIntervalSince1970: 1_792_871_000.25))
     }
 
     @Test func keepsSurgesDetailsAcrossEventsAndWritesThem() async throws {

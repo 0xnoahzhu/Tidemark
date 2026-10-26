@@ -1,17 +1,31 @@
 import Foundation
 
 /// Remote IPs of proxied hostnames (through Surge's DNS) and GeoIP data for every remote IP.
+///
+/// A request's address records where it came from (`RemoteIPSource`): Surge's cache is used only while Surge's own
+/// expiry says its answer holds, and every other hostname is looked up (`dns lookup`), so no request is given an
+/// address that expired hours ago.
 extension CapturePipeline {
-    /// Reads Surge's DNS cache (`dump dns`) and fills waiting requests.
+    /// Reads Surge's DNS cache (`dump dns`) and fills waiting requests. An answer counts until Surge's `expiresTime`
+    /// (Surge keeps expired answers listed for hours); a static mapping of its profile never expires. An answer of
+    /// Tidemark's own lookup keeps its label while Surge reports the same addresses, and a cached answer keeps the time
+    /// Tidemark first saw it until Surge resolves it again (a new expiry).
     func refreshDNSCache(now: Date = .now) async {
-        guard let cache = try? await surge.dnsCache() else { return }
-        for (domain, ips) in cache where !ips.isEmpty {
-            dnsCache[domain.lowercased()] = (ips, now.addingTimeInterval(60))
+        guard let records = try? await surge.dnsCache() else { return }
+        for record in records {
+            let expires = record.expires ?? .distantFuture
+            guard expires > now else { continue }
+            if let current = dnsCache[record.domain], current.expires > now, Set(current.ips) == Set(record.addresses),
+               current.source != .surgeCache || abs(current.expires.timeIntervalSince(expires)) < 1 {
+                continue
+            }
+            dnsCache[record.domain] = ResolvedHost(ips: record.addresses, expires: expires, source: .surgeCache,
+                                                  resolvedAt: record.isLocal ? nil : now)
         }
+        dnsCache = dnsCache.filter { $0.value.expires > now }
         for host in Array(waitingForHost.keys) {
-            if let ips = dnsCache[host]?.ips { applyResolved(host: host, ips: ips, now: now) }
+            if let resolved = dnsCache[host] { applyResolved(host: host, resolved, now: now) }
         }
-        if dnsCache.count > 50_000 { dnsCache = dnsCache.filter { $0.value.expires > now } }
     }
 
     func resolveAddress(_ entry: inout Entry, id: Int64, now: Date) {
@@ -19,6 +33,8 @@ extension CapturePipeline {
         if entry.record.remoteIP == nil, !host.isEmpty, !HostName.isIPAddress(host) {
             if let cached = dnsCache[host], cached.expires > now, let ip = Self.preferredIP(cached.ips) {
                 entry.record.remoteIP = ip
+                entry.record.remoteIPSource = cached.source
+                entry.record.remoteIPResolvedAt = cached.resolvedAt
                 if entry.probeMatched, let port = entry.sourcePort { probes.addIP(ip, sourcePort: port, sourceAddress: entry.sourceAddress) }
             } else if (dnsFailures[host] ?? .distantPast) <= now {
                 waitingForHost[host, default: []].insert(id)
@@ -62,8 +78,9 @@ extension CapturePipeline {
         dnsInFlight.remove(host)
         if let result, !result.addresses.isEmpty {
             let ttl = min(3600, max(60, result.expiresIn ?? 0))
-            dnsCache[host] = (result.addresses, now.addingTimeInterval(ttl))
-            applyResolved(host: host, ips: result.addresses, now: now)
+            let resolved = ResolvedHost(ips: result.addresses, expires: now.addingTimeInterval(ttl), source: .tidemarkLookup, resolvedAt: now)
+            dnsCache[host] = resolved
+            applyResolved(host: host, resolved, now: now)
         } else {
             dnsFailures[host] = now.addingTimeInterval(120)
             waitingForHost[host] = nil
@@ -71,11 +88,13 @@ extension CapturePipeline {
         pumpDNS()
     }
 
-    private func applyResolved(host: String, ips: [String], now: Date) {
-        guard let ids = waitingForHost.removeValue(forKey: host), let ip = Self.preferredIP(ips) else { return }
+    func applyResolved(host: String, _ resolved: ResolvedHost, now: Date) {
+        guard let ids = waitingForHost.removeValue(forKey: host), let ip = Self.preferredIP(resolved.ips) else { return }
         for id in ids {
             guard var entry = entries[id], entry.record.remoteIP == nil else { continue }
             entry.record.remoteIP = ip
+            entry.record.remoteIPSource = resolved.source
+            entry.record.remoteIPResolvedAt = resolved.resolvedAt
             entry.record.geo = geoCache[ip]
             entry.dirty = true
             entry.urgent = true

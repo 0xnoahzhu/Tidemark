@@ -12,17 +12,20 @@ enum CaptureRecordMapper {
         let notes = request.notes ?? []
         let policyPath = policyPath(notes: notes, policyName: request.policyName)
         let leaf = request.processPath.map { [ProcessLink(name: processName(for: $0), pid: request.pid ?? 0, path: $0, startTime: nil)] } ?? []
+        let startedAt = date(request.startDate) ?? now
+        let address = remoteAddress(remoteAddress: request.remoteAddress, host: host, notes: notes, startedAt: startedAt,
+                                    setupCompletedAt: date(request.setupCompletedDate))
         return RequestRecord(
             key: RequestKey(deviceID: deviceID, session: session, surgeID: request.id),
             rowID: nil,
-            startedAt: date(request.startDate) ?? now,
+            startedAt: startedAt,
             setupCompletedAt: date(request.setupCompletedDate),
             completedAt: date(request.completedDate),
             method: nonEmpty(request.method)?.uppercased() ?? "TCP",
             host: host,
             port: port,
             url: nonEmpty(request.url),
-            remoteIP: remoteIP(remoteAddress: request.remoteAddress, host: host),
+            remoteIP: address?.ip,
             remoteAddress: nonEmpty(request.remoteAddress),
             geo: nil,
             policyPath: policyPath,
@@ -45,7 +48,9 @@ enum CaptureRecordMapper {
             entryMode: request.takeoverMode,
             originalPolicy: originalPolicy(request),
             modified: request.modified,
-            endReason: endReason(notes: notes)
+            endReason: endReason(notes: notes),
+            remoteIPSource: address?.source,
+            remoteIPResolvedAt: address?.resolvedAt
         )
     }
 
@@ -150,6 +155,35 @@ enum CaptureRecordMapper {
     static func originalPolicy(_ request: SurgeRequest) -> String? {
         guard let original = nonEmpty(request.originalPolicyName), let final = nonEmpty(request.policyName), original != final else { return nil }
         return original
+    }
+
+    /// The destination IP Surge's record tells, where it came from and when: the host itself when it is an IP
+    /// literal, the remote address of a connection Surge made itself (DIRECT; reported once it was set up), else
+    /// the address Surge resolved to match IP rules (rule mode), at the time of that note. Nil when the record
+    /// says nothing: the pipeline then resolves the host.
+    static func remoteAddress(remoteAddress: String?, host: String, notes: [String], startedAt: Date, setupCompletedAt: Date?)
+        -> (ip: String, source: RemoteIPSource, resolvedAt: Date?)? {
+        if let ip = remoteIP(remoteAddress: remoteAddress, host: host) {
+            if HostName.isIPAddress(host), stripBrackets(host) == ip { return (ip, .literal, nil) }
+            return (ip, .surge, setupCompletedAt ?? startedAt)
+        }
+        guard let match = ruleDNSAddress(notes: notes) else { return nil }
+        return (match.ip, .ruleDNS, RequestTiming.date(of: match.note, near: startedAt))
+    }
+
+    /// The address of `[Rule] DNS completed, IPv4 address for matching: 172.64.155.209, IPv6 address for matching:
+    /// N/A` (IPv4 first) and its note; the last such note wins.
+    static func ruleDNSAddress(notes: [String]) -> (ip: String, note: RequestTiming.Note)? {
+        for raw in notes.reversed() {
+            guard let note = RequestTiming.parse(note: raw), note.tag.caseInsensitiveCompare("Rule") == .orderedSame,
+                  note.text.hasPrefix("DNS completed") else { continue }
+            for label in ["IPv4 address for matching:", "IPv6 address for matching:"] {
+                guard let range = note.text.range(of: label) else { continue }
+                let value = note.text[range.upperBound...].prefix { $0 != "," }.trimmingCharacters(in: .whitespaces)
+                if HostName.isIPAddress(value) { return (stripBrackets(value), note) }
+            }
+        }
+        return nil
     }
 
     /// The destination IP when Surge knows it: `remoteAddress` for direct connections (not `… (Proxy)`),

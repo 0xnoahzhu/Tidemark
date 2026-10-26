@@ -37,8 +37,8 @@ protocol SurgeClient: Sendable {
     func recentRequests() async throws -> [SurgeRequest]
     func activeRequests() async throws -> [SurgeRequest]
     func dnsLookup(_ domain: String) async throws -> SurgeDNSLookup
-    /// Surge's DNS cache: domain → addresses (`dump dns`).
-    func dnsCache() async throws -> [String: [String]]
+    /// Surge's DNS cache and static mappings (`dump dns`), expired answers included.
+    func dnsCache() async throws -> [SurgeDNSRecord]
     func geoIP(_ ip: String) async throws -> SurgeGeoIP
     func ruleMatch(host: String, processPath: String?) async throws -> SurgeRuleMatch
     func httpProbe(url: String, policy: String?) async throws -> SurgeHTTPProbe

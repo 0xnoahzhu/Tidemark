@@ -59,14 +59,23 @@ struct SurgeOutputParserTests {
 
     @Test func readsDNSCacheAndLocalMappings() throws {
         let cache = try SurgeOutputParser.dnsCache(from: SurgeFixtures.data("surge-dump-dns.json"), command: "dump dns")
-        #expect(cache["example.com"] == ["172.66.147.243", "104.20.23.154"])
-        #expect(cache["mtalk.google.com"] == ["142.250.141.188"])
-        #expect(cache["proxy.example.net"] == ["203.0.113.40"])
-        #expect(cache["localhost"] == ["::1"])
+        #expect(cache.map(\.domain) == ["example.com", "mtalk.google.com", "proxy.example.net", "localhost"], "answers first, then mappings")
+        let example = cache[0]
+        #expect(example.addresses == ["172.66.147.243", "104.20.23.154"])
+        #expect(example.server == "https://cloudflare-dns.com/dns-query" && example.interface == nil)
+        #expect(example.path == "example.com -> 172.66.147.243, 104.20.23.154")
+        #expect(example.logs == ["950.85ms Receive an A answer from https://cloudflare-dns.com/dns-query"])
+        #expect(example.timeCost == 0.95088)
+        #expect(example.expires == Date(timeIntervalSince1970: 1792871412.869934) && !example.isLocal)
+        #expect(cache[1].path == "mtalk.google.com -> mobile-gtalk.l.google.com -> 142.250.141.188")
+        #expect(cache[2].addresses == ["203.0.113.40"] && cache[2].isLocal && cache[2].expires == nil, "static mappings never expire")
+        #expect(cache[3].addresses == ["::1"])
 
-        let mapped = try SurgeOutputParser.dnsCache(from: Data(#"{"local":[{"domain":"Router.LAN.","data":"server:system"},{"domain":"a.test","data":"10.0.0.1"}],"dnsCache":[{"domain":"a.test","data":["10.0.0.1","10.0.0.2"]}]}"#.utf8), command: "dump dns")
-        #expect(mapped["router.lan"] == nil, "mappings to other names are not addresses")
-        #expect(mapped["a.test"] == ["10.0.0.1", "10.0.0.2"], "duplicates are merged")
+        let mapped = try SurgeOutputParser.dnsCache(from: Data(#"{"local":[{"domain":"Router.LAN.","data":"server:system"},{"domain":"a.test","data":"10.0.0.1"}],"dnsCache":[{"domain":"A.test.","data":["10.0.0.1","10.0.0.2","10.0.0.1"],"expiresTime":"soon"}]}"#.utf8), command: "dump dns")
+        #expect(!mapped.contains { $0.domain == "router.lan" }, "mappings to other names are not addresses")
+        #expect(mapped.map(\.domain) == ["a.test", "a.test"])
+        #expect(mapped[0].addresses == ["10.0.0.1", "10.0.0.2"] && mapped[0].expires == nil, "a detail of another type is dropped, not the dump")
+        #expect(mapped[1].addresses == ["10.0.0.1"] && mapped[1].isLocal)
     }
 
     @Test func decodesPolicyGroupsWithLineHashes() throws {
