@@ -40,7 +40,7 @@ struct SiteProbeLayoutTests {
     }
 
     /// At the minimum window, whatever the sidebar's width, the browser card and the waterfall fit beside each other
-    /// with the waterfall at its minimum or wider: the sessions give way first, then the card narrows.
+    /// with the waterfall at its minimum or wider: the sessions give way, and the card narrows beside a wide sidebar.
     @Test func sessionFitsTheMinimumWindow() {
         for factor in Self.factors {
             let layout = SiteProbeLayout(factor: factor)
@@ -64,6 +64,27 @@ struct SiteProbeLayoutTests {
             // Without the sidebar the minimum window has room for the sessions too.
             #expect(layout.showsSessions(pageWidth: window), "at \(factor)")
         }
+    }
+
+    /// At the shipping 1.2, a page narrows the card down to its 200 px minimum before the sessions give way to a
+    /// session, so a window between the minimum and the design's keeps them in reach.
+    @Test func cardNarrowsBeforeTheSessionsGiveWay() {
+        let factor: CGFloat = 1.2
+        let layout = SiteProbeLayout(factor: factor)
+        // What the sessions, their divider and the page's padding take.
+        let taken = layout.sessionsWidth + 0.5 + 2 * layout.padding
+        let narrowest = taken + layout.cardMinimum + layout.gap + layout.waterfallMinimum
+        #expect(layout.showsSessions(pageWidth: narrowest))
+        #expect(!layout.showsSessions(pageWidth: narrowest - 0.5))
+        for mode in ProbeDeviceMode.allCases {
+            #expect(layout.cardWidth(total: narrowest - taken, mode: mode) == layout.cardMinimum, "\(mode)")
+        }
+        // A window 1150 px wide, beside the design's sidebar and the window's divider.
+        let page = UIScale.length(1150, factor: factor) - UIScale.length(244, factor: factor) - 1
+        #expect(layout.showsSessions(pageWidth: page))
+        let card = layout.cardWidth(total: page - taken, mode: .desktop)
+        #expect(card >= layout.cardMinimum && card < layout.cardWidths.lowerBound)
+        #expect(card + layout.gap + layout.waterfallMinimum <= page - taken)
     }
 
     /// The design's window shows the sessions, the card and the waterfall side by side at every factor.

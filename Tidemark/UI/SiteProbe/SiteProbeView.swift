@@ -294,10 +294,11 @@ struct SiteProbeView: View {
 /// The widths of the Site Probe page at a UI scale: the saved sessions, and a session's browser card beside its
 /// waterfall.
 ///
-/// The minimum window holds the card at the design's 256 px and the waterfall at its minimum, but not the sessions
-/// column too. So in a narrow page the column gives way to a session first, as it does while a probe runs (with no
-/// session picked it has the room), and the card then narrows below 256 px (beside a sidebar dragged wider) so the
-/// waterfall keeps its minimum.
+/// The minimum window holds the card and the waterfall at their minimums, but not the sessions column too. So as the
+/// page narrows, the card gives way first, from the design's 256 px down to 200 px, which keeps the saved sessions in
+/// reach. Then the column gives way to a session, as it does while a probe runs (with no session picked it has the
+/// room), and the card has 256 px again, or less only beside a sidebar dragged wider, so the waterfall keeps its
+/// minimum.
 @MainActor
 struct SiteProbeLayout: Equatable {
     /// The layout at the app's factor.
@@ -311,7 +312,7 @@ struct SiteProbeLayout: Equatable {
     var gap: CGFloat
     /// The card's width for a desktop page: 256 px, growing with the page up to 560 px.
     var cardWidths: ClosedRange<CGFloat>
-    /// The narrowest the card gets so the waterfall keeps its minimum.
+    /// The narrowest the card gets so the sessions and the waterfall keep their room.
     var cardMinimum: CGFloat
     var waterfallMinimum: CGFloat
 
@@ -324,10 +325,10 @@ struct SiteProbeLayout: Equatable {
         waterfallMinimum = ProbeWaterfall.minimumWidth(factor: factor)
     }
 
-    /// Whether a page `pageWidth` wide has room for the sessions beside a session: the card at 256 px and the
-    /// waterfall at its minimum still fit next to them.
+    /// Whether a page `pageWidth` wide has room for the sessions beside a session: the card and the waterfall at
+    /// their minimums still fit next to them.
     func showsSessions(pageWidth: CGFloat) -> Bool {
-        pageWidth - sessionsWidth - 0.5 - 2 * padding >= cardWidths.lowerBound + gap + waterfallMinimum
+        pageWidth - sessionsWidth - 0.5 - 2 * padding >= cardMinimum + gap + waterfallMinimum
     }
 
     /// The card's width in a row `total` wide. A desktop page gets 40 % of the row within `cardWidths`; an iPhone
