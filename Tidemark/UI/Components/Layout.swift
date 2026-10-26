@@ -2,15 +2,15 @@ import SwiftUI
 
 /// White rounded card with a hairline border (Egress page, settings groups, inspector blocks).
 struct Card<Content: View>: View {
-    var padding: CGFloat = 16
+    var padding: CGFloat = 16.px
     @ViewBuilder var content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { content }
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12.px, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12.px, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
     }
 }
 
@@ -20,8 +20,8 @@ struct SectionLabel: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 10.5, weight: .semibold))
-            .tracking(0.4)
+            .font(.design(10.5, .semibold))
+            .tracking(0.4 * UIScale.factor)
             .foregroundStyle(Theme.ink2)
     }
 }
@@ -29,30 +29,31 @@ struct SectionLabel: View {
 /// `Label      value` row of the inspector and egress cards.
 struct KeyValueRow<Value: View>: View {
     var label: String
-    var labelWidth: CGFloat = 76
+    /// The label column's width in points; callers pass design px (`70.px`).
+    var labelWidth: CGFloat = 76.px
     @ViewBuilder var value: Value
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 8.px) {
             Text(label)
-                .font(.system(size: 12))
+                .font(.design(12))
                 .foregroundStyle(Theme.ink2)
                 .frame(width: labelWidth, alignment: .leading)
             value
-                .font(.system(size: 12))
+                .font(.design(12))
                 .foregroundStyle(Theme.ink)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
         }
-        .frame(minHeight: 20)
+        .frame(minHeight: 20.px)
     }
 }
 
 extension KeyValueRow where Value == Text {
-    init(_ label: String, _ value: String, mono: Bool = false, labelWidth: CGFloat = 76) {
+    init(_ label: String, _ value: String, mono: Bool = false, labelWidth: CGFloat = 76.px) {
         self.label = label
         self.labelWidth = labelWidth
-        self.value = Text(value).font(mono ? Theme.mono(12) : .system(size: 12))
+        self.value = Text(value).font(mono ? Theme.mono(12) : .design(12))
     }
 }
 
@@ -73,8 +74,8 @@ struct PageHeader<Accessory: View>: View {
             Spacer(minLength: 12)
             accessory
         }
-        .padding(.horizontal, 20)
-        .frame(height: 52)
+        .padding(.horizontal, 20.px)
+        .frame(height: 52.px)
     }
 }
 

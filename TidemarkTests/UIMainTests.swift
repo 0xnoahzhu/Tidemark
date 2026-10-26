@@ -371,6 +371,23 @@ struct DesignSegmentedControlTests {
         #expect(Self.width(of: Self.kinds(selected: 0, count: 85)) == width)
     }
 
+    /// The two sizes are 40 and 32 px tall. Both grow with the UI scale, the compact one only as far as a toolbar
+    /// item's capsule holds it; the control draws at its size's height.
+    @Test func sizesFollowTheScaleUpToTheToolbarsHeight() {
+        typealias Size = DesignSegmentedControl<Int>.Size
+        #expect(Size.regular(factor: 1).height == 40)
+        #expect(Size.compact(factor: 1).height == 32)
+        for factor: CGFloat in [1, 1.1, 1.2, 1.3, 1.4, 1.5] {
+            #expect(Size.regular(factor: factor).height >= UIScale.length(40, factor: factor) - 1)
+            #expect(Size.compact(factor: factor).height <= Size.toolbarItemHeight, "at \(factor)")
+            #expect(Size.compact(factor: factor).height >= min(UIScale.length(32, factor: factor), Size.toolbarItemHeight) - 1)
+        }
+        #expect(Size.compact(factor: 1.1).factor == 1.1)
+        #expect(Size.compact(factor: 1.4).factor < 1.4)
+        let drawn = NSHostingController(rootView: Self.kinds(selected: 0, count: 12)).sizeThatFits(in: CGSize(width: CGFloat.infinity, height: .infinity))
+        #expect(drawn.height == Size.compact().height)
+    }
+
     /// A place narrower than the control gets it without its counts, then without its icons as well.
     @Test func countsAndThenIconsGiveWayWhenNarrow() {
         let control = Self.kinds(selected: 0, count: 185)

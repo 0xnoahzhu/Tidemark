@@ -4,7 +4,8 @@ import SwiftUI
 /// App tile: the real app icon when the bundle exists on this Mac, otherwise the design's letter tile.
 struct AppTile: View {
     var identity: AppIdentity
-    var size: CGFloat = 20
+    /// The tile's side in points; callers pass design px (`16.px`).
+    var size: CGFloat = 20.px
     /// Greys the tile out (archived app, or not installed on the selected Mac).
     var dimmed = false
 
@@ -36,7 +37,7 @@ struct AppTile: View {
 }
 
 extension AppTile {
-    init(app: MonitoredApp, size: CGFloat = 20, dimmed: Bool = false) {
+    init(app: MonitoredApp, size: CGFloat = 20.px, dimmed: Bool = false) {
         self.init(identity: AppIdentity(name: app.name, bundlePath: app.path, letter: app.tileLetter, hue: app.tileHue, isMonitored: true, appID: app.id), size: size, dimmed: dimmed)
     }
 }
@@ -45,7 +46,7 @@ extension AppTile {
 struct LetterTile: View {
     var letter: String
     var color: Color
-    var size: CGFloat = 20
+    var size: CGFloat = 20.px
 
     var body: some View {
         RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
@@ -63,7 +64,7 @@ struct LetterTile: View {
 struct GlyphTile: View {
     var systemName: String
     var color: Color
-    var size: CGFloat = 20
+    var size: CGFloat = 20.px
 
     var body: some View {
         RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)

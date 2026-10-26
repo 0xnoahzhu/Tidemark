@@ -9,10 +9,10 @@ import Testing
 @MainActor
 struct StatusDotTests {
     @Test func pulsesInCoreAnimation() throws {
-        let (window, host) = Self.host(StatusDot(color: Theme.recording, size: 8, pulsing: true))
+        let (window, host) = Self.host(StatusDot(color: Theme.recording, size: 8.px, pulsing: true))
         defer { window.close() }
         let dot = try #require(Self.pulseView(in: host))
-        #expect(dot.frame.size == CGSize(width: 8, height: 8))
+        #expect(dot.frame.size == CGSize(width: 8.px, height: 8.px))
         let pulse = try #require(dot.layer?.animation(forKey: StatusDotPulseView.animationKey) as? CABasicAnimation)
         #expect(pulse.keyPath == "opacity")
         #expect(pulse.fromValue as? Double == 1)
@@ -25,7 +25,7 @@ struct StatusDotTests {
 
     /// A still dot (Reduce Motion, reduced resource usage, or a status that does not pulse) stays a plain shape.
     @Test func stillDotDoesNotAnimate() {
-        let (window, host) = Self.host(StatusDot(color: Theme.live, size: 6))
+        let (window, host) = Self.host(StatusDot(color: Theme.live))
         defer { window.close() }
         #expect(Self.pulseView(in: host) == nil)
     }

@@ -106,4 +106,15 @@ struct UIScaleDrawingTests {
         let twoLines = Self.fittingHeight(Text(verbatim: "One\nTwo").font(.design(12)).lineHeight(Theme.noteLineHeight))
         #expect(abs(twoLines - 2 * 12 * UIScale.factor * 1.5) <= 1)
     }
+
+    /// Buttons and fields keep the design's heights whatever the line height around them.
+    @Test func controlsHaveTheDesignsHeights() {
+        let button = Button("Copy as JSON") {}.buttonStyle(DesignButtonStyle())
+        #expect(Self.fittingHeight(button) == 28.px)
+        #expect(Self.fittingHeight(button.lineHeight(Theme.lineHeight)) == 28.px)
+        #expect(Self.fittingHeight(Button("Pause") {}.buttonStyle(DesignButtonStyle(kind: .destructive, height: 30))) == 30.px)
+        let field = TextField("Find a Mac", text: .constant("")).designField(height: 26).lineHeight(Theme.lineHeight)
+        #expect(Self.fittingHeight(field) == 26.px)
+        #expect(Self.fittingHeight(FilterField(prompt: "Search", text: .constant(""), width: 190)) == 28.px)
+    }
 }

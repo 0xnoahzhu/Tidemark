@@ -10,7 +10,8 @@ import SwiftUI
 /// role for VoiceOver. Without the bezel the cell would put the field editor over its whole frame, under the
 /// magnifier, and draw a rectangular focus ring inside the capsule. ⌘F focuses it while its window is key. Its
 /// toolbar item should outlast the page's other items when the window narrows (`visibilityPriority`): a custom
-/// view has no usable form in the toolbar's overflow menu.
+/// view has no usable form in the toolbar's overflow menu. Its text is the design's 12 px at the UI scale; the
+/// capsule around it keeps the system's height.
 struct ToolbarSearchField: NSViewRepresentable {
     @Binding var text: String
     var prompt: String
@@ -19,6 +20,7 @@ struct ToolbarSearchField: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSSearchField {
         let field = NSSearchField()
+        field.font = .design(12)
         // Long text scrolls, as in the system field. A field made in code keeps it clipped at its start, so the caret
         // and the end of the text would go out of sight.
         field.cell?.isScrollable = true

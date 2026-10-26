@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Segmented timing bar: 8 pt with a legend in the inspector's TIMING, 7 pt without one in an App page's
+/// Segmented timing bar: 8 px with a legend in the inspector's TIMING, 7 px without one in an App page's
 /// expanded request row.
 struct TimingBar: View {
     var phases: [TimingPhase]
-    var barHeight: CGFloat = 8
+    /// The bar's height in points; callers pass design px.
+    var barHeight: CGFloat = 8.px
     var showsLegend = true
 
     static func color(_ kind: TimingPhase.Kind) -> Color {
@@ -19,28 +20,28 @@ struct TimingBar: View {
     var total: TimeInterval { phases.reduce(0) { $0 + $1.duration } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8.px) {
             GeometryReader { geo in
-                HStack(spacing: 1) {
+                HStack(spacing: 1.px) {
                     ForEach(Array(phases.enumerated()), id: \.offset) { _, phase in
                         Rectangle()
                             .fill(Self.color(phase.kind))
-                            .frame(width: max(2, geo.size.width * phase.duration / max(total, 0.001)))
+                            .frame(width: max(2.px, geo.size.width * phase.duration / max(total, 0.001)))
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 4.px, style: .continuous))
             }
             .frame(height: barHeight)
 
             if showsLegend {
                 TimingLegendLayout {
                     ForEach(Array(phases.enumerated()), id: \.offset) { _, phase in
-                        HStack(spacing: 5) {
-                            RoundedRectangle(cornerRadius: 2).fill(Self.color(phase.kind)).frame(width: 7, height: 7)
+                        HStack(spacing: 5.px) {
+                            RoundedRectangle(cornerRadius: 2.px).fill(Self.color(phase.kind)).frame(width: 7.px, height: 7.px)
                             Text(phase.kind.rawValue).foregroundStyle(Theme.ink2)
                             Text(Fmt.ms(phase.duration * 1000)).font(Theme.mono(11)).foregroundStyle(Theme.ink3)
                         }
-                        .font(.system(size: 11))
+                        .font(.design(11))
                         .fixedSize()
                     }
                 }
@@ -49,11 +50,11 @@ struct TimingBar: View {
     }
 }
 
-/// The legend's `● Label 12 ms` items in rows that wrap like text (the design's `flex-wrap`, 12 pt apart
-/// and 4 pt between rows), so an item never breaks inside.
+/// The legend's `● Label 12 ms` items in rows that wrap like text (the design's `flex-wrap`, 12 px apart
+/// and 4 px between rows), so an item never breaks inside.
 private struct TimingLegendLayout: Layout {
-    var spacing: CGFloat = 12
-    var rowSpacing: CGFloat = 4
+    var spacing: CGFloat = 12.px
+    var rowSpacing: CGFloat = 4.px
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let frames = frames(for: subviews, width: proposal.width ?? .infinity)

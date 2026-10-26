@@ -17,7 +17,7 @@ struct AnalyzeColumnsLayout: Layout {
     }
 
     var columns: [Column]
-    var spacing: CGFloat = 10
+    var spacing: CGFloat = 10.px
     /// Aligns cells to the top of the row instead of centering them (multi-line cards).
     var topAligned = false
 
@@ -115,14 +115,14 @@ struct AnalyzeColumnsLayout: Layout {
 /// Grey column titles above a hand-built table, with a hairline underneath.
 struct AnalyzeHeaderRow<Content: View>: View {
     var columns: [AnalyzeColumnsLayout.Column]
-    var spacing: CGFloat = 10
-    var height: CGFloat = 28
-    var horizontalPadding: CGFloat = 20
+    var spacing: CGFloat = 10.px
+    var height: CGFloat = 28.px
+    var horizontalPadding: CGFloat = 20.px
     @ViewBuilder var content: Content
 
     var body: some View {
         AnalyzeColumnsLayout(columns: columns, spacing: spacing) { content }
-            .font(.system(size: 11, weight: .semibold))
+            .font(.design(11, .semibold))
             .foregroundStyle(Theme.ink2)
             .lineLimit(1)
             .padding(.horizontal, horizontalPadding)
@@ -136,14 +136,15 @@ struct AnalyzePill: View {
     enum Style { case new, neutral }
     var text: String
     var style: Style = .new
+    /// The text's size in design px.
     var size: CGFloat = 11.5
 
     var body: some View {
         Text(text)
-            .font(.system(size: size, weight: style == .new ? .semibold : .regular))
+            .font(.design(size, style == .new ? .semibold : .regular))
             .lineLimit(1)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 9.px)
+            .padding(.vertical, 3.px)
             .background(style == .new ? Color(oklch: 0.8, 0.14, 75, alpha: 0.24) : Theme.fill, in: Capsule())
             .foregroundStyle(style == .new ? Theme.amberInk : Theme.ink2)
             .fixedSize()

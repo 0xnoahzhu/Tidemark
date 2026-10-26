@@ -4,14 +4,15 @@ import SwiftUI
 /// SF Symbol, its title and (where a number is at hand) a count in a small capsule, and the selected one is raised
 /// on a white cell (20% white in dark mode) with a hairline border, its title in ink rather than ink2.
 ///
-/// It comes in two sizes of the same look: `.regular()` (about 40 pt tall) for page tabs and filters in page
-/// content, `.compact()` (32 pt) where that is too tall, such as the window toolbar and Settings rows. The control
-/// sizes to its content; a control with counts, in a place too narrow for it, drops the counts and then the icons.
+/// It comes in two sizes of the same look: `.regular()` (40 px tall) for page tabs and filters in page content,
+/// `.compact()` (32 px) where that is too tall, such as the window toolbar and Settings rows. Both are drawn at the
+/// UI scale, the compact one no taller than a toolbar item holds. The control sizes to its content; a control with
+/// counts, in a place too narrow for it, drops the counts and then the icons.
 ///
 /// Every choice is a button, so keyboard navigation reaches each one; VoiceOver reads the control as a
 /// segmented picker with its selected choice, and a toolbar's overflow menu lists the choices.
 struct DesignSegmentedControl<Value: Hashable>: View {
-    /// The metrics of one of the two sizes.
+    /// The metrics of one of the two sizes, in design px, and the factor they are drawn at.
     struct Size {
         var fontSize: CGFloat
         var iconSize: CGFloat
@@ -25,20 +26,42 @@ struct DesignSegmentedControl<Value: Hashable>: View {
         var cornerRadius: CGFloat
         var trackPadding: CGFloat
         var trackCornerRadius: CGFloat
+        /// The UI scale these px are drawn at.
+        var factor: CGFloat
 
-        /// 14 pt titles, 15 pt icons and 12 pt counts; `padding: 8px 14px; border-radius: 9px` in a 4 pt track with
-        /// 12 pt corners: 40 pt tall.
-        static func regular() -> Size {
+        /// The control's height in points.
+        var height: CGFloat {
+            points(contentHeight) + 2 * points(verticalPadding) + 2 * points(trackPadding)
+        }
+
+        /// `px` at this size's factor, rounded to half a point.
+        func points(_ px: CGFloat) -> CGFloat {
+            UIScale.length(px, factor: factor)
+        }
+
+        func font(_ px: CGFloat, _ weight: Font.Weight) -> Font {
+            .system(size: px * factor, weight: weight)
+        }
+
+        /// 14 px titles, 15 px icons and 12 px counts; `padding: 8px 14px; border-radius: 9px` in a 4 px track with
+        /// 12 px corners: 40 px tall.
+        static func regular(factor: CGFloat = UIScale.factor) -> Size {
             Size(fontSize: 14, iconSize: 15, badgeFontSize: 12, contentHeight: 16, verticalPadding: 8,
-                 horizontalPadding: 14, spacing: 6, cornerRadius: 9, trackPadding: 4, trackCornerRadius: 12)
+                 horizontalPadding: 14, spacing: 6, cornerRadius: 9, trackPadding: 4, trackCornerRadius: 12, factor: factor)
         }
 
-        /// 13 pt titles, 13 pt icons and 11 pt counts; `padding: 5px 11px; border-radius: 7px` in a 3 pt track with
-        /// 10 pt corners: 32 pt tall, which a toolbar item holds without clipping.
-        static func compact() -> Size {
-            Size(fontSize: 13, iconSize: 13, badgeFontSize: 11, contentHeight: 16, verticalPadding: 5,
-                 horizontalPadding: 11, spacing: 5, cornerRadius: 7, trackPadding: 3, trackCornerRadius: 10)
+        /// 13 px titles, 13 px icons and 11 px counts; `padding: 5px 11px; border-radius: 7px` in a 3 px track with
+        /// 10 px corners: 32 px tall. It grows with the UI scale only as far as `toolbarItemHeight`, so a toolbar item
+        /// still holds it without clipping.
+        static func compact(factor: CGFloat = UIScale.factor) -> Size {
+            var size = Size(fontSize: 13, iconSize: 13, badgeFontSize: 11, contentHeight: 16, verticalPadding: 5,
+                            horizontalPadding: 11, spacing: 5, cornerRadius: 7, trackPadding: 3, trackCornerRadius: 10, factor: 1)
+            size.factor = min(factor, toolbarItemHeight / size.height)
+            return size
         }
+
+        /// The tallest control a toolbar item's glass capsule holds, which the system draws the same at every scale.
+        static var toolbarItemHeight: CGFloat { 36 }
     }
 
     /// One choice: its value, (localized) title, and optionally an SF Symbol and a count.
@@ -92,7 +115,7 @@ struct DesignSegmentedControl<Value: Hashable>: View {
     }
 
     private func track(showsCounts: Bool, showsIcons: Bool) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: size.points(2)) {
             ForEach(segments) { segment in
                 Button {
                     selection = segment.id
@@ -103,8 +126,8 @@ struct DesignSegmentedControl<Value: Hashable>: View {
                 .buttonStyle(SegmentStyle(isSelected: segment.id == selection, size: size, hairline: 1 / max(displayScale, 1)))
             }
         }
-        .padding(size.trackPadding)
-        .background(Theme.segmentTrack, in: RoundedRectangle(cornerRadius: size.trackCornerRadius, style: .continuous))
+        .padding(size.points(size.trackPadding))
+        .background(Theme.segmentTrack, in: RoundedRectangle(cornerRadius: size.points(size.trackCornerRadius), style: .continuous))
         .fixedSize()
     }
 
@@ -152,26 +175,26 @@ extension DesignSegmentedControl {
         var size: Size
 
         var body: some View {
-            HStack(spacing: size.spacing) {
+            HStack(spacing: size.points(size.spacing)) {
                 if showsIcon, let systemImage = segment.systemImage {
                     Image(systemName: systemImage)
-                        .font(.system(size: size.iconSize, weight: .medium))
+                        .font(size.font(size.iconSize, .medium))
                         .imageScale(.medium)
                         .accessibilityHidden(true)
                 }
                 Text(segment.title)
-                    .font(.system(size: size.fontSize, weight: .medium))
+                    .font(size.font(size.fontSize, .medium))
                     .hidden()
                     .overlay {
                         Text(segment.title)
-                            .font(.system(size: size.fontSize, weight: isSelected ? .medium : .regular))
+                            .font(size.font(size.fontSize, isSelected ? .medium : .regular))
                     }
                 if showsCount, let count = segment.count {
                     CountCapsule(count: count, isSelected: isSelected, size: size)
                 }
             }
             .lineLimit(1)
-            .frame(height: size.contentHeight)
+            .frame(height: size.points(size.contentHeight))
             // A toolbar offers a button's label a little less than its ideal width, which would cut the last count.
             .fixedSize()
         }
@@ -187,11 +210,11 @@ extension DesignSegmentedControl {
 
         var body: some View {
             Text(Fmt.short(count))
-                .font(.system(size: size.badgeFontSize, weight: .medium))
+                .font(size.font(size.badgeFontSize, .medium))
                 .monospacedDigit()
                 .foregroundStyle(isSelected ? Theme.segmentCount : Theme.ink2)
-                .padding(.horizontal, size.badgeFontSize / 2)
-                .frame(minWidth: size.contentHeight, minHeight: size.contentHeight)
+                .padding(.horizontal, size.points(size.badgeFontSize / 2))
+                .frame(minWidth: size.points(size.contentHeight), minHeight: size.points(size.contentHeight))
                 .background(isSelected ? Theme.segmentCountFill : Theme.fill, in: Capsule())
         }
     }
@@ -203,12 +226,12 @@ extension DesignSegmentedControl {
         var hairline: CGFloat
 
         func makeBody(configuration: Configuration) -> some View {
-            let cell = RoundedRectangle(cornerRadius: size.cornerRadius, style: .continuous)
+            let cell = RoundedRectangle(cornerRadius: size.points(size.cornerRadius), style: .continuous)
             configuration.label
                 .foregroundStyle(isSelected ? Theme.ink : Theme.ink2)
                 .opacity(configuration.isPressed && !isSelected ? 0.65 : 1)
-                .padding(.vertical, size.verticalPadding)
-                .padding(.horizontal, size.horizontalPadding)
+                .padding(.vertical, size.points(size.verticalPadding))
+                .padding(.horizontal, size.points(size.horizontalPadding))
                 .background {
                     if isSelected {
                         cell

@@ -9,7 +9,7 @@ struct PolicyChip: View {
     var body: some View {
         if policyPath.isEmpty {
             // Surge reports the policy only after the connection is set up.
-            Text("—").font(.system(size: 11)).foregroundStyle(Theme.ink3)
+            Text("—").font(.design(11)).foregroundStyle(Theme.ink3)
         } else {
             chip
         }
@@ -29,10 +29,10 @@ struct PolicyChip: View {
                 .lineLimit(1)
                 .truncationMode(.head)
         }
-        .font(.system(size: 11, weight: .medium))
-        .padding(.horizontal, 6)
-        .frame(height: 18)
-        .background(tint.background, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .font(.design(11, .medium))
+        .padding(.horizontal, 6.px)
+        .frame(height: 18.px)
+        .background(tint.background, in: RoundedRectangle(cornerRadius: 5.px, style: .continuous))
         .foregroundStyle(tint.foreground)
         .frame(maxWidth: maxWidth, alignment: .leading)
         .fixedSize(horizontal: maxWidth == nil, vertical: true)
@@ -64,11 +64,11 @@ struct TagBadge: View {
     var body: some View {
         let (bg, fg) = colors
         Text(text)
-            .font(mono ? Theme.mono(9.5, weight: .bold) : .system(size: 9.5, weight: .bold))
+            .font(mono ? Theme.mono(9.5, weight: .bold) : .design(9.5, .bold))
             .lineLimit(1)
-            .padding(.horizontal, 5)
-            .frame(height: 15)
-            .background(bg, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .padding(.horizontal, 5.px)
+            .frame(height: 15.px)
+            .background(bg, in: RoundedRectangle(cornerRadius: 4.px, style: .continuous))
             .foregroundStyle(fg)
             .fixedSize()
     }
@@ -92,10 +92,10 @@ struct DeviceBadge: View {
 
     var body: some View {
         Text(shortName)
-            .font(.system(size: 9, weight: .bold))
-            .padding(.horizontal, 4)
-            .frame(height: 14)
-            .background(Theme.deviceColor(hue: hue), in: RoundedRectangle(cornerRadius: 3.5, style: .continuous))
+            .font(.design(9, .bold))
+            .padding(.horizontal, 4.px)
+            .frame(height: 14.px)
+            .background(Theme.deviceColor(hue: hue), in: RoundedRectangle(cornerRadius: 3.5.px, style: .continuous))
             .foregroundStyle(.white)
             .fixedSize()
     }
@@ -109,10 +109,10 @@ struct CountBadge: View {
 
     var body: some View {
         Text("\(count)")
-            .font(.system(size: 10, weight: .bold))
+            .font(.design(10, .bold))
             .monospacedDigit()
-            .padding(.horizontal, 5)
-            .frame(minWidth: 18, minHeight: 16)
+            .padding(.horizontal, 5.px)
+            .frame(minWidth: 18.px, minHeight: 16.px)
             .background(style == .unread ? Theme.unreadBadge : Theme.newBadge, in: Capsule())
             .foregroundStyle(style == .unread ? Color.white : Theme.newBadgeInk)
             .fixedSize()
@@ -126,7 +126,7 @@ struct CountBadge: View {
 /// Callers pass `pulsing: false` under Reduce Motion or reduced resource usage, for a still dot.
 struct StatusDot: View {
     var color: Color
-    var size: CGFloat = 6
+    var size: CGFloat = 6.px
     var pulsing = false
 
     var body: some View {

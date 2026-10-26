@@ -9,6 +9,7 @@ struct GlassDialog<Icon: View>: View {
     enum Tone { case destructive, accent }
 
     @Environment(AppModel.self) private var model
+    /// The dialog's width in design px.
     var width: CGFloat
     var surface: GlassSurface
     var title: String
@@ -21,34 +22,30 @@ struct GlassDialog<Icon: View>: View {
     @ViewBuilder var icon: Icon
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-        VStack(spacing: 10) {
+        let shape = RoundedRectangle(cornerRadius: 18.px, style: .continuous)
+        VStack(spacing: 10.px) {
             icon
                 .accessibilityHidden(true)
             Text(title)
-                .font(.system(size: 13.5, weight: .bold))
+                .font(.design(13.5, .bold))
                 .accessibilityAddTraits(.isHeader)
             Text(message)
-                .font(.system(size: 12))
-                .lineSpacing(3.5)
+                .font(.design(12))
+                .lineHeight(Theme.noteLineHeight)
                 .foregroundStyle(Theme.ink2)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
+            HStack(spacing: 8.px) {
                 Button(cancelTitle, action: onCancel)
-                    .buttonStyle(GlassDialogButtonStyle(fill: Theme.fill2, ink: Theme.ink, weight: .medium))
+                    .buttonStyle(Self.buttonStyle(.strongFill))
                 Button(confirmTitle, action: onConfirm)
-                    .buttonStyle(GlassDialogButtonStyle(
-                        fill: tone == .destructive ? Theme.destructive : Theme.accent,
-                        ink: Theme.onAccent,
-                        weight: .semibold
-                    ))
+                    .buttonStyle(Self.buttonStyle(tone == .destructive ? .destructive : .accent))
             }
-            .padding(.top, 6)
+            .padding(.top, 6.px)
         }
         .multilineTextAlignment(.center)
         .foregroundStyle(Theme.ink)
-        .padding(EdgeInsets(top: 20, leading: 18, bottom: 16, trailing: 18))
-        .frame(width: width)
+        .padding(EdgeInsets(top: 20.px, leading: 18.px, bottom: 16.px, trailing: 18.px))
+        .frame(width: width.px)
         .background(surface.tint(preference: model.preferences.glass), in: shape)
         .glassEffect(.regular, in: shape)
         .overlay { shape.strokeBorder(.black.opacity(0.22), lineWidth: 0.5) }
@@ -68,28 +65,10 @@ struct GlassDialog<Icon: View>: View {
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
     }
-}
 
-/// A dialog button: half the row, 30 pt high, radius 9, darker while pressed.
-private struct GlassDialogButtonStyle: ButtonStyle {
-    var fill: Color
-    var ink: Color
-    var weight: Font.Weight
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12.5, weight: weight))
-            .lineLimit(1)
-            .foregroundStyle(ink)
-            .frame(maxWidth: .infinity)
-            .frame(height: 30)
-            .background(fill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay {
-                if configuration.isPressed {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous).fill(.black.opacity(0.1))
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    /// A dialog button: half the row, 30 px high, radius 9.
+    private static func buttonStyle(_ kind: DesignButtonStyle.Kind) -> DesignButtonStyle {
+        DesignButtonStyle(kind: kind, height: 30, fontSize: 12.5, cornerRadius: 9, fillsWidth: true)
     }
 }
 
