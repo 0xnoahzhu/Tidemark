@@ -48,7 +48,6 @@ private struct ShellDetail: View {
             EgressView()
         case .app(let id):
             AppDetailView(appID: id)
-                .id(id)
         }
     }
 }

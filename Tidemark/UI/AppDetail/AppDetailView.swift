@@ -41,14 +41,20 @@ struct AppDetailView: View {
             if absent { absentBanner(app) }
             statsStrip(app, stats: stats, absent: absent)
             installsRow(app)
-            switch nav.appTab {
-            case .requests:
-                AppDetailRequestsTab(app: app, storedCount: stats.requests, absent: absent)
-            case .inventory:
-                AppDetailInventoryTab(app: app, absent: absent)
-            case .tree:
-                AppDetailProcessTreeTab(app: app, absent: absent)
+                .id(app.id)
+            // The page stays when another app opens, so the window's toolbar items are updated rather than
+            // rebuilt; the tab starts afresh (state, scroll position) for every app.
+            Group {
+                switch nav.appTab {
+                case .requests:
+                    AppDetailRequestsTab(app: app, storedCount: stats.requests, absent: absent)
+                case .inventory:
+                    AppDetailInventoryTab(app: app, absent: absent)
+                case .tree:
+                    AppDetailProcessTreeTab(app: app, absent: absent)
+                }
             }
+            .id(app.id)
         }
         .background(Theme.bg)
         .navigationTitle(app.name)
