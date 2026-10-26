@@ -348,22 +348,30 @@ enum SettingsDatabaseURL {
 
     /// The URL to save for the field's text: the text as typed, except that a mask (or what is left of it) stands
     /// for the saved URL's password, the one in the same place (user info or `password` parameter) when it has
-    /// one there. A mask with no saved password to stand for is dropped. Nil for text that is not a PostgreSQL
-    /// URL, which must not be saved.
+    /// one there, encoded as it was saved. A mask with no saved password to stand for is dropped. The field left
+    /// as `masked` showed it gives back the saved URL exactly. Nil for text that is not a PostgreSQL URL, which
+    /// must not be saved.
     static func unmasked(_ text: String, saved: String) -> String? {
         guard var components = postgresComponents(text) else { return nil }
+        guard text != masked(saved) else { return saved }
         let savedComponents = postgresComponents(saved)
-        let savedUserPassword = savedComponents?.password.flatMap { $0.isEmpty ? nil : $0 }
-        let savedQueryPassword = savedComponents.flatMap(queryPassword)
+        // Percent-encoded; the last non-empty `password` parameter is the one that counts, as in `PostgresConnectionURL`.
+        let savedUserPassword = savedComponents?.percentEncodedPassword.flatMap { $0.isEmpty ? nil : $0 }
+        let savedQueryPassword = savedComponents?.percentEncodedQueryItems?.last { isPassword($0) && $0.value?.isEmpty == false }?.value
         var restored = false
         if let password = components.password, isMask(password) {
-            components.password = savedUserPassword ?? savedQueryPassword
+            if let savedUserPassword {
+                components.percentEncodedPassword = savedUserPassword
+            } else {
+                components.password = savedQueryPassword?.removingPercentEncoding
+            }
             if components.password == nil, components.user?.isEmpty == true { components.user = nil }
             restored = true
         }
         if let items = components.percentEncodedQueryItems, items.contains(where: isMaskedPassword) {
             // The other parameters keep their encoding.
-            let password = (savedQueryPassword ?? savedUserPassword)?.addingPercentEncoding(withAllowedCharacters: queryValueAllowed)
+            let password = savedQueryPassword
+                ?? savedUserPassword?.removingPercentEncoding?.addingPercentEncoding(withAllowedCharacters: queryValueAllowed)
             let kept = items.compactMap { item in
                 isMaskedPassword(item) ? password.map { URLQueryItem(name: item.name, value: $0) } : item
             }
@@ -384,11 +392,6 @@ enum SettingsDatabaseURL {
         guard let components = URLComponents(string: string.replacingOccurrences(of: "•", with: "%E2%80%A2")),
               let scheme = components.scheme?.lowercased(), scheme == "postgres" || scheme == "postgresql" else { return nil }
         return components
-    }
-
-    /// The last non-empty `password` parameter, decoded: the one that counts, as in `PostgresConnectionURL`.
-    private static func queryPassword(_ components: URLComponents) -> String? {
-        components.queryItems?.last { isPassword($0) && $0.value?.isEmpty == false }?.value
     }
 
     /// A `password` parameter, whatever its case and encoding.

@@ -300,6 +300,15 @@ struct UIChromeTests {
         let restored = try #require(SettingsDatabaseURL.unmasked(SettingsDatabaseURL.masked(at), saved: at))
         #expect(try PostgresConnectionURL(restored).password == "se@cret")
 
+        // The field left as shown gives back the saved URL exactly, whatever its encoding, so nothing is saved and
+        // nothing reconnects; an edit elsewhere keeps the password's own encoding.
+        for unedited in ["postgres://tide:a%21b@h/db", at, "postgres://tide:pw@h/my db?password=a=b"] {
+            #expect(SettingsDatabaseURL.unmasked(SettingsDatabaseURL.masked(unedited), saved: unedited) == unedited, "\(unedited)")
+        }
+        #expect(SettingsDatabaseURL.unmasked("postgres://tide:••••••••@h2/db", saved: "postgres://tide:a%21b@h/db") == "postgres://tide:a%21b@h2/db")
+        #expect(SettingsDatabaseURL.unmasked("postgres://h2/db?password=••••••••", saved: "postgres://h/db?password=a%21b")
+                == "postgres://h2/db?password=a%21b")
+
         // Without a user name the mask still round-trips.
         let userless = "postgresql://:pw@localhost:5432/tidemark"
         #expect(SettingsDatabaseURL.masked(userless) == "postgresql://:••••••••@localhost:5432/tidemark")
