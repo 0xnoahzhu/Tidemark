@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Menu bar commands: File, View (page shortcuts) and Capture.
@@ -44,8 +45,8 @@ struct TidemarkCommands: Commands {
     }
 }
 
-/// A menu item that performs `action` and brings the main window forward, reopening it if it was closed:
-/// the page, sheet or confirmation it sets up lives there.
+/// A menu item that performs `action`, then activates Tidemark and brings the main window forward, reopening it
+/// if it was closed: the page, sheet or confirmation it sets up lives there.
 private struct CommandsWindowButton: View {
     @Environment(\.openWindow) private var openWindow
     var title: String
@@ -56,6 +57,7 @@ private struct CommandsWindowButton: View {
     var body: some View {
         Button(title) {
             action()
+            NSApp.activate()
             openWindow(id: WindowID.main)
         }
         .keyboardShortcut(key, modifiers: modifiers)
