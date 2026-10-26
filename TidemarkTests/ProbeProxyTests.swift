@@ -39,9 +39,10 @@ final class ProbeFakeUpstream: Sendable {
 
     func stop() { task.withLock { $0?.cancel() } }
 
-    /// Stopping cancels the operations of open connections, so they are retired like the proxy's.
+    /// Stopping cancels the operations of open connections; those, and failed ones, are retired like the proxy's.
     private func serve(_ connection: NetworkConnection<TCP>) async {
-        defer { ProbeProxyServer.retire([connection]) }
+        var interrupted = false
+        defer { if interrupted || Task.isCancelled { ProbeProxyServer.retire([connection]) } }
         do {
             var buffer = Data()
             var end: Int?
@@ -73,50 +74,67 @@ final class ProbeFakeUpstream: Sendable {
             } else {
                 try await connection.send(Data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".utf8), endOfStream: true)
             }
-        } catch {}
+        } catch {
+            interrupted = true
+        }
     }
 }
 
-/// A browser-side client of the probe proxy. A read that times out cancels its connection, so the connection
-/// is retired rather than dropped.
+/// A browser-side client of the probe proxy. A connection whose operation failed or was cancelled (a read that
+/// timed out, say) is retired rather than dropped.
 final class ProbeTestClient: Sendable {
     let connection: NetworkConnection<TCP>
+    private let interrupted = Mutex(false)
 
     init(port: UInt16) {
         connection = NetworkConnection(to: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!)) { TCP() }
     }
 
-    deinit { ProbeProxyServer.retire([connection]) }
+    deinit { if interrupted.withLock({ $0 }) { ProbeProxyServer.retire([connection]) } }
 
-    func send(_ text: String) async throws { try await connection.send(Data(text.utf8)) }
+    func send(_ text: String) async throws {
+        let connection = self.connection
+        try await noting { try await connection.send(Data(text.utf8)) }
+    }
 
     /// Reads until `marker` arrived or the stream ended.
     func read(until marker: String, timeout: Duration = .seconds(5)) async throws -> String {
         let connection = self.connection
-        return try await CaptureTimeout.run(timeout) {
-            var data = Data()
-            while !String(decoding: data, as: UTF8.self).contains(marker) {
-                let message = try await connection.receive(atLeast: 1, atMost: 65_536)
-                data.append(message.content)
-                if message.metadata.endOfStream { break }
+        return try await noting {
+            try await CaptureTimeout.run(timeout) {
+                var data = Data()
+                while !String(decoding: data, as: UTF8.self).contains(marker) {
+                    let message = try await connection.receive(atLeast: 1, atMost: 65_536)
+                    data.append(message.content)
+                    if message.metadata.endOfStream { break }
+                }
+                return String(decoding: data, as: UTF8.self)
             }
-            return String(decoding: data, as: UTF8.self)
         }
     }
 
     /// Sends data through a tunnel and reads the echo every millisecond until the connection ends or the task is
     /// cancelled.
     func pump() async {
+        let connection = self.connection
         let chunk = Data(repeating: 0x61, count: 4_096)
-        while !Task.isCancelled {
-            do {
+        try? await noting {
+            while !Task.isCancelled {
                 try await connection.send(chunk)
-                let message = try await connection.receive(atLeast: 1, atMost: 65_536)
-                if message.metadata.endOfStream { return }
+                if try await connection.receive(atLeast: 1, atMost: 65_536).metadata.endOfStream { return }
                 try await Task.sleep(for: .milliseconds(1))
-            } catch {
-                return
             }
+        }
+    }
+
+    /// Runs `operation`, noting a failure or a cancellation of the calling task.
+    private func noting<T: Sendable>(_ operation: () async throws -> T) async throws -> T {
+        defer { if Task.isCancelled { interrupted.withLock { $0 = true } } }
+        do {
+            return try await operation()
+        } catch {
+            interrupted.withLock { $0 = true }
+            throw error
         }
     }
 }
