@@ -20,24 +20,30 @@ struct SiteProbeView: View {
     private var web: ProbeWebSession { .shared }
 
     var body: some View {
-        HStack(spacing: 0) {
-            if !model.probe.isRunning {
-                ProbeSessionsColumn()
-                Rectangle().fill(Theme.line).frame(width: 0.5)
-            }
-            VStack(spacing: 0) {
-                urlBar
-                optionsRow
-                if let session = model.probe.selected {
-                    TimelineView(.animation(minimumInterval: 0.25, paused: !model.probe.isRunning)) { context in
-                        sessionDetail(session, now: context.date)
-                    }
-                } else {
-                    emptyState
+        GeometryReader { page in
+            // While a probe runs the session takes the page; a page too narrow for the sessions beside a session
+            // shows them only until one is picked (`SiteProbeLayout`).
+            let showsSessions = !model.probe.isRunning
+                && (model.probe.selected == nil || SiteProbeLayout.current.showsSessions(pageWidth: page.size.width))
+            HStack(spacing: 0) {
+                if showsSessions {
+                    ProbeSessionsColumn()
+                    Rectangle().fill(Theme.line).frame(width: 0.5)
                 }
-                footer
+                VStack(spacing: 0) {
+                    urlBar
+                    optionsRow
+                    if let session = model.probe.selected {
+                        TimelineView(.animation(minimumInterval: 0.25, paused: !model.probe.isRunning)) { context in
+                            sessionDetail(session, now: context.date)
+                        }
+                    } else {
+                        emptyState
+                    }
+                    footer
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Theme.bg)
         .pageToolbar(tr("Site Probe", "SiteProbe"), subtitle: tr("Open a URL in an isolated browser and record every host it touches", "SiteProbe")) {
@@ -59,42 +65,49 @@ struct SiteProbeView: View {
     private var urlBar: some View {
         @Bindable var web = web
         let running = model.probe.isRunning
-        return HStack(spacing: 8) {
-            TextField(text: $web.urlDraft, prompt: Text(verbatim: "https://example.com")) {
-                Text(tr("Address", "SiteProbe"))
+        return HStack(spacing: 8.px) {
+            HStack(spacing: 8.px) {
+                Circle()
+                    .strokeBorder(Theme.ink3, lineWidth: 1.5.px)
+                    .frame(width: 11.px, height: 11.px)
+                TextField(text: $web.urlDraft, prompt: Text(verbatim: "https://example.com")) {
+                    Text(tr("Address", "SiteProbe"))
+                }
+                .font(Theme.mono(12.5))
+                .autocorrectionDisabled()
+                .focused($urlFocused)
+                .disabled(running || web.isBusy)
+                .onSubmit { if !running, !web.isBusy { start() } }
             }
-            .textFieldStyle(.bordered)
-            .textInputBorderShape(.capsule)
-            .font(Theme.mono(12.5))
-            .autocorrectionDisabled()
-            .focused($urlFocused)
-            .disabled(running || web.isBusy)
-            .onSubmit { if !running, !web.isBusy { start() } }
+            .designField(height: 32, cornerRadius: 9, horizontalPadding: 12)
 
             if web.isStopping {
                 ProbeStoppingButton()
+                    .buttonStyle(Self.buttonStyle(.destructive))
             } else if running {
                 Button(tr("Stop", "SiteProbe")) { stop() }
-                    .buttonStyle(.glassProminent)
-                    .tint(ProbeStoppingButton.tint)
+                    .buttonStyle(Self.buttonStyle(.destructive))
                     .keyboardShortcut(".", modifiers: .command)
             } else {
                 Button(tr("Start Probe", "SiteProbe")) { start() }
-                    .buttonStyle(.glassProminent)
-                    .tint(Theme.accent)
+                    .buttonStyle(Self.buttonStyle(.accent))
                     .disabled(ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isBusy)
             }
         }
-        .controlSize(.large)
-        .padding(.horizontal, 20)
-        .padding(.top, 14)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 20.px)
+        .padding(.top, 14.px)
+        .padding(.bottom, 8.px)
+    }
+
+    /// Start Probe and Stop: the design's 32 px buttons beside the field, on the accent or red.
+    private static func buttonStyle(_ kind: DesignButtonStyle.Kind) -> DesignButtonStyle {
+        DesignButtonStyle(kind: kind, height: 32, fontSize: 12.5, cornerRadius: 9, horizontalPadding: 16)
     }
 
     /// The design's row: isolation, "Records until you press Stop", Desktop / iPhone, own window, proxy port. When the
     /// page is too narrow for one line, Desktop / iPhone and own window go to a second line.
     private var optionsRow: some View {
-        ProbeOptionsLayout(spacing: 18, lineSpacing: 8, minimumGap: 8) {
+        ProbeOptionsLayout(spacing: 18.px, lineSpacing: 8.px, minimumGap: 8.px) {
             isolationToggle
             recordsUntilStop
             modePicker
@@ -103,22 +116,26 @@ struct SiteProbeView: View {
                 .layoutValue(key: ProbeOptionsLayout.Wraps.self, value: true)
             proxyCaption
         }
-        .font(.system(size: 12))
-        .padding(.horizontal, 20)
-        .padding(.bottom, 10)
+        .font(.design(12))
+        .padding(.horizontal, 20.px)
+        .padding(.bottom, 10.px)
     }
 
     private var isolationToggle: some View {
         @Bindable var preferences = model.preferences
         return Toggle(tr("Isolated session, no cache or cookies", "SiteProbe"), isOn: $preferences.probeIsolated)
             .toggleStyle(.checkbox)
+            .controlSize(Self.checkboxSize)
             .disabled(model.probe.isRunning)
             .fixedSize()
     }
 
+    /// The native checkboxes do not follow the UI scale; from 1.2 on they go one size up, beside their larger labels.
+    private static let checkboxSize: ControlSize = UIScale.factor >= 1.2 ? .large : .regular
+
     private var recordsUntilStop: some View {
-        HStack(spacing: 7) {
-            Circle().fill(Theme.live).frame(width: 7, height: 7)
+        HStack(spacing: 7.px) {
+            Circle().fill(Theme.live).frame(width: 7.px, height: 7.px)
             Text(tr("Records until you press Stop", "SiteProbe")).foregroundStyle(Theme.ink2)
         }
         .fixedSize()
@@ -139,6 +156,7 @@ struct SiteProbeView: View {
         @Bindable var preferences = model.preferences
         return Toggle(tr("Open in its own window", "SiteProbe"), isOn: $preferences.probeOwnWindow)
             .toggleStyle(.checkbox)
+            .controlSize(Self.checkboxSize)
             .fixedSize()
     }
 
@@ -163,8 +181,8 @@ struct SiteProbeView: View {
         let ipCount = waterfall.steps.reduce(0) { $0 + $1.rows.reduce(0) { $0 + $1.ipCount } }
         let requestCount = waterfall.steps.reduce(0) { $0 + $1.rows.reduce(0) { $0 + $1.requests } }
         return VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                if running { StatusDot(color: Theme.recording, size: 7.px, pulsing: !reduceMotion && !reducedResources) }
+            HStack(spacing: 8.px) {
+                if running { StatusDot(color: Theme.recording, size: 8.px, pulsing: !reduceMotion && !reducedResources) }
                 Text(status(session, running: running))
                     .fontWeight(.semibold)
                     .foregroundStyle(Theme.ink)
@@ -184,24 +202,25 @@ struct SiteProbeView: View {
                 }
                 Spacer(minLength: 0)
             }
-            .font(.system(size: 12))
+            .font(.design(12))
             .foregroundStyle(Theme.ink2)
             .lineLimit(1)
-            .padding(.horizontal, 20)
-            .padding(.top, 2)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 20.px)
+            .padding(.top, 2.px)
+            .padding(.bottom, 12.px)
 
             GeometryReader { geometry in
-                HStack(alignment: .top, spacing: 16) {
+                let layout = SiteProbeLayout.current
+                HStack(alignment: .top, spacing: layout.gap) {
                     ProbePreviewPane(session: session, running: running,
                                      openWindow: { web.popOut { openWindow(id: WindowID.probeBrowser) } },
                                      closeWindow: { dismissWindow(id: WindowID.probeBrowser) })
-                        .frame(width: previewWidth(total: geometry.size.width))
+                        .frame(width: layout.cardWidth(total: geometry.size.width, mode: model.preferences.probeMode))
                     ProbeWaterfall(model: waterfall, running: running)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
+            .padding(.horizontal, SiteProbeLayout.current.padding)
+            .padding(.bottom, 12.px)
         }
     }
 
@@ -216,26 +235,18 @@ struct SiteProbeView: View {
         return tr("Loading page…", "SiteProbe")
     }
 
-    /// The inline browser gets enough room to be usable: an iPhone-width page, or 40 % for desktop.
-    private func previewWidth(total: CGFloat) -> CGFloat {
-        if model.preferences.probeMode == .iphone {
-            return min(ProbeWebSession.iPhoneViewport.width, max(256, total * 0.45))
-        }
-        return min(560, max(256, total * 0.4))
-    }
-
     private var emptyState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 8.px) {
             Text(tr("Enter a URL to start a probe", "SiteProbe"))
-                .font(.system(size: 15, weight: .semibold))
+                .font(.design(15, .semibold))
                 .foregroundStyle(Theme.ink)
             Text(tr("The page loads in a fresh, isolated browser. Its traffic goes through a proxy port opened only for this session, so every host listed belongs to this URL and nothing else.", "SiteProbe"))
-                .font(.system(size: 12.5))
+                .font(.design(12.5))
                 .foregroundStyle(Theme.ink2)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 430)
+                .frame(maxWidth: 430.px)
         }
-        .padding(40)
+        .padding(40.px)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -244,12 +255,13 @@ struct SiteProbeView: View {
                                       tr("How attribution works.", "SiteProbe"), size: 11.5))
             .font(.design(11.5))
             .foregroundStyle(Theme.ink2)
-            .lineSpacing(3)
+            // The design's `line-height: 1.55` for this note.
+            .lineHeight(.multiple(factor: 1.55))
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
-            .padding(.horizontal, 20)
-            .padding(.top, 10)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 20.px)
+            .padding(.top, 10.px)
+            .padding(.bottom, 14.px)
             .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
 
@@ -279,6 +291,57 @@ struct SiteProbeView: View {
     }
 }
 
+/// The widths of the Site Probe page at a UI scale: the saved sessions, and a session's browser card beside its
+/// waterfall.
+///
+/// The minimum window holds the card at the design's 256 px and the waterfall at its minimum, but not the sessions
+/// column too. So in a narrow page the column gives way to a session first, as it does while a probe runs (with no
+/// session picked it has the room), and the card then narrows below 256 px (beside a sidebar dragged wider) so the
+/// waterfall keeps its minimum.
+@MainActor
+struct SiteProbeLayout: Equatable {
+    /// The layout at the app's factor.
+    static let current = SiteProbeLayout()
+
+    /// The sessions column.
+    var sessionsWidth: CGFloat
+    /// The page's padding at either side of the URL bar and the session.
+    var padding: CGFloat
+    /// Between the card and the waterfall.
+    var gap: CGFloat
+    /// The card's width for a desktop page: 256 px, growing with the page up to 560 px.
+    var cardWidths: ClosedRange<CGFloat>
+    /// The narrowest the card gets so the waterfall keeps its minimum.
+    var cardMinimum: CGFloat
+    var waterfallMinimum: CGFloat
+
+    init(factor: CGFloat = UIScale.factor) {
+        sessionsWidth = UIScale.length(232, factor: factor)
+        padding = UIScale.length(20, factor: factor)
+        gap = UIScale.length(16, factor: factor)
+        cardWidths = UIScale.length(256, factor: factor)...UIScale.length(560, factor: factor)
+        cardMinimum = UIScale.length(200, factor: factor)
+        waterfallMinimum = ProbeWaterfall.minimumWidth(factor: factor)
+    }
+
+    /// Whether a page `pageWidth` wide has room for the sessions beside a session: the card at 256 px and the
+    /// waterfall at its minimum still fit next to them.
+    func showsSessions(pageWidth: CGFloat) -> Bool {
+        pageWidth - sessionsWidth - 0.5 - 2 * padding >= cardWidths.lowerBound + gap + waterfallMinimum
+    }
+
+    /// The card's width in a row `total` wide. A desktop page gets 40 % of the row within `cardWidths`; an iPhone
+    /// page 45 %, up to the iPhone's viewport, which is web content and does not scale. Where the waterfall would
+    /// lack its minimum, the card gives it the room, down to `cardMinimum`.
+    func cardWidth(total: CGFloat, mode: ProbeDeviceMode) -> CGFloat {
+        let preferred = switch mode {
+        case .iphone: min(ProbeWebSession.iPhoneViewport.width, max(cardWidths.lowerBound, total * 0.45))
+        case .desktop: min(cardWidths.upperBound, max(cardWidths.lowerBound, total * 0.4))
+        }
+        return max(cardMinimum, min(preferred, total - gap - waterfallMinimum))
+    }
+}
+
 /// Saved probe sessions, newest first.
 private struct ProbeSessionsColumn: View {
     @Environment(AppModel.self) private var model
@@ -286,29 +349,29 @@ private struct ProbeSessionsColumn: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionLabel(text: tr("Sessions", "SiteProbe"))
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 6)
+                .padding(.horizontal, 16.px)
+                .padding(.top, 12.px)
+                .padding(.bottom, 6.px)
             if model.probe.sessions.isEmpty {
                 Text(tr("Probes you run are kept here.", "SiteProbe"))
-                    .font(.system(size: 11.5))
+                    .font(.design(11.5))
                     .foregroundStyle(Theme.ink3)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 16.px)
                 Spacer(minLength: 0)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 2) {
+                    LazyVStack(spacing: 2.px) {
                         ForEach(model.probe.sessions) { session in
                             row(session)
                         }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, 8.px)
+                    .padding(.bottom, 8.px)
                 }
             }
         }
-        // Leading, so the header stays 16 pt in when the column has no sessions yet.
-        .frame(width: 232, alignment: .leading)
+        // Leading, so the header stays 16 px in when the column has no sessions yet.
+        .frame(width: SiteProbeLayout.current.sessionsWidth, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Theme.bg2)
     }
@@ -320,32 +383,32 @@ private struct ProbeSessionsColumn: View {
             model.probe.selectedID = session.id
             ProbeWebSession.shared.urlDraft = session.url
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 10.px) {
                 Text(verbatim: String(bare.prefix(1)).uppercased())
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.design(12, .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 28.px, height: 28.px)
                     .background(Theme.tileProbe, in: Circle())
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 1.px) {
                     Text(session.host)
-                        .font(.system(size: 12.5, weight: .semibold))
+                        .font(.design(12.5, .semibold))
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
                     Text([trn("%lld host", "%lld hosts", session.hosts.count, "SiteProbe"),
                           trn("%lld IP", "%lld IPs", session.ipCount, "SiteProbe"),
                           Fmt.seconds(session.duration)].joined(separator: " · "))
-                        .font(.system(size: 11))
+                        .font(.design(11))
                         .foregroundStyle(Theme.ink2)
                         .lineLimit(1)
                     Text(AnalyzeFormat.seen(session.startedAt))
-                        .font(.system(size: 10.5))
+                        .font(.design(10.5))
                         .foregroundStyle(Theme.ink3)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(8)
-            .background(selected ? Theme.accentTint : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .padding(8.px)
+            .background(selected ? Theme.accentTint : .clear, in: RoundedRectangle(cornerRadius: 9.px, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 9.px, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -463,37 +526,41 @@ private struct ProbePreviewPane: View {
             .clipped()
         }
         .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 12.px, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12.px, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.06), radius: 4.px, y: 2.px)
     }
 
     private var miniToolbar: some View {
-        HStack(spacing: 7) {
-            Button { web.goBack() } label: { Image(systemName: "chevron.left") }
-                .disabled(!running || !web.canGoBack)
-            Button { web.goForward() } label: { Image(systemName: "chevron.right") }
-                .disabled(!running || !web.canGoForward)
-            HStack(spacing: 5) {
-                Circle().fill(running ? Theme.live : Theme.ink3).frame(width: 6, height: 6)
+        HStack(spacing: 7.px) {
+            Group {
+                Button { web.goBack() } label: { Image(systemName: "chevron.left") }
+                    .disabled(!running || !web.canGoBack)
+                Button { web.goForward() } label: { Image(systemName: "chevron.right") }
+                    .disabled(!running || !web.canGoForward)
+            }
+            .font(.design(13))
+            HStack(spacing: 5.px) {
+                Circle().fill(running ? Theme.live : Theme.ink3).frame(width: 6.px, height: 6.px)
                 Text(currentAddress)
                     .font(Theme.mono(10.5))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 8)
-            .frame(height: 20)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            Button(tr("Pop Out", "SiteProbe")) { openWindow() }
-                .font(.system(size: 10.5, weight: .semibold))
+            .padding(.horizontal, 8.px)
+            .frame(height: 20.px)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 6.px, style: .continuous))
+            // The design's 20 px pill on the fill, its label semibold.
+            Button { openWindow() } label: { Text(tr("Pop Out", "SiteProbe")).fontWeight(.semibold) }
+                .buttonStyle(DesignButtonStyle(height: 20, fontSize: 10.5, cornerRadius: 5, horizontalPadding: 7))
                 .disabled(!running || web.isPoppedOut || web.isStopping)
         }
         .buttonStyle(.borderless)
-        .font(.system(size: 11))
+        .font(.design(11))
         .foregroundStyle(Theme.ink2)
-        .padding(.horizontal, 10)
-        .frame(height: 30)
+        .padding(.horizontal, 10.px)
+        .frame(height: 30.px)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
 
@@ -514,19 +581,20 @@ private struct ProbePreviewPane: View {
     private var content: some View {
         if running, web.isPoppedOut {
             ProbeVeil {
-                VStack(spacing: 9) {
+                VStack(spacing: 9.px) {
                     Image(systemName: "macwindow")
-                        .font(.system(size: 30, weight: .light))
+                        .font(.design(30, .light))
                         .foregroundStyle(Theme.ink3)
                     Text(tr("Browsing in its own window", "SiteProbe"))
-                        .font(.system(size: 12.5, weight: .semibold))
+                        .font(.design(12.5, .semibold))
                         .foregroundStyle(Theme.ink)
                     Text(ProbeViewport.caption(mode: model.preferences.probeMode, size: nil))
-                        .font(.system(size: 11))
+                        .font(.design(11))
                         .foregroundStyle(Theme.ink2)
                         .multilineTextAlignment(.center)
+                    // The design's 24 px pill on the fill.
                     Button(tr("Close Window", "SiteProbe")) { closeWindow() }
-                        .controlSize(.small)
+                        .buttonStyle(DesignButtonStyle(height: 24, fontSize: 11.5, cornerRadius: 7, horizontalPadding: 10))
                 }
             }
             .background(Theme.bg2)
@@ -570,36 +638,34 @@ struct ProbeEndedView: View {
             // The veil dims the page; the note sits on its own opaque card so no page text can run through it.
             Theme.bg.opacity(0.62)
             Text(tr("This session has ended. Start a new probe to keep browsing.", "SiteProbe"))
-                .font(.system(size: compact ? 12 : 13, weight: .medium))
+                .font(.design(compact ? 12 : 13, .medium))
                 .foregroundStyle(Theme.ink)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, compact ? 14 : 18)
-                .padding(.vertical, compact ? 10 : 12)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
-                .frame(maxWidth: compact ? 300 : 380)
-                .padding(compact ? 16 : 32)
+                .padding(.horizontal, (compact ? 14 : 18).px)
+                .padding(.vertical, (compact ? 10 : 12).px)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 10.px, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10.px, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.12), radius: 8.px, y: 2.px)
+                .frame(maxWidth: (compact ? 300 : 380).px)
+                .padding((compact ? 16 : 32).px)
         }
         .clipped()
     }
 }
 
 /// Stands in for Stop while the probe finishes: the rest of the tail after the first load, the last Surge
-/// records, then saving the session.
+/// records, then saving the session. It takes the button style of the Stop it replaces.
 struct ProbeStoppingButton: View {
     static let tint = Color(oklch: 0.62, 0.19, 27)
 
     var body: some View {
         Button {} label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 6.px) {
                 ProgressView().controlSize(.mini)
                 Text(tr("Stopping…", "SiteProbe"))
             }
         }
-        .buttonStyle(.glassProminent)
-        .tint(Self.tint)
         .disabled(true)
         .help(tr("Recording the page's last requests, then saving the session", "SiteProbe"))
     }
@@ -611,7 +677,7 @@ private struct ProbeVeil<Content: View>: View {
 
     var body: some View {
         content
-            .padding(20)
+            .padding(20.px)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -620,7 +686,7 @@ private struct ProbeVeil<Content: View>: View {
 struct ProbeStripes: View {
     var body: some View {
         Canvas { context, size in
-            let spacing: CGFloat = 16
+            let spacing = 16.px
             var path = Path()
             var x: CGFloat = -size.height
             while x < size.width {
@@ -628,7 +694,7 @@ struct ProbeStripes: View {
                 path.addLine(to: CGPoint(x: x + size.height, y: 0))
                 x += spacing
             }
-            context.stroke(path, with: .color(Theme.fill), lineWidth: 8)
+            context.stroke(path, with: .color(Theme.fill), lineWidth: 8.px)
         }
     }
 }

@@ -60,16 +60,18 @@ struct ProbeBrowserWindow: View {
         .sharedBackgroundVisibility(.hidden)
 
         ToolbarItem(placement: .principal) {
-            HStack(spacing: 7) {
-                if running { StatusDot(color: Theme.recording, size: 7.px, pulsing: !reduceMotion && !reducedResources) }
+            HStack(spacing: 7.px) {
+                if running { StatusDot(color: Theme.recording, size: 8.px, pulsing: !reduceMotion && !reducedResources) }
                 Text(address)
                     .font(Theme.mono(12))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
-            .frame(minWidth: 200, idealWidth: 420, maxWidth: 560)
+            .padding(.horizontal, 12.px)
+            .frame(minWidth: 200.px, idealWidth: 420.px, maxWidth: 560.px)
+            // In a narrow window the address shortens before the toolbar moves it to the overflow menu.
+            .toolbarItemCompressible()
         }
 
         ToolbarSpacer(.flexible)
@@ -90,6 +92,8 @@ struct ProbeBrowserWindow: View {
         ToolbarItem(placement: .primaryAction) {
             if web.isStopping {
                 ProbeStoppingButton()
+                    .buttonStyle(.glassProminent)
+                    .tint(ProbeStoppingButton.tint)
             } else if running {
                 Button(tr("Stop", "SiteProbe")) {
                     Task { await web.stop(model: model) }
@@ -119,28 +123,40 @@ struct ProbeBrowserWindow: View {
 
     // MARK: Caption
 
+    /// The proxy everything goes through, the viewport and the session's counts. A window too narrow for the whole
+    /// line drops the words before the proxy, then the viewport, rather than cutting them off.
     private func captionStrip(running: Bool) -> some View {
+        ViewThatFits(in: .horizontal) {
+            captionLine(intro: true, viewport: true)
+            captionLine(intro: false, viewport: true)
+            captionLine(intro: false, viewport: false)
+        }
+        .font(.design(11))
+        .foregroundStyle(Theme.ink2)
+        .lineLimit(1)
+        .padding(.horizontal, 14.px)
+        .frame(height: 24.px)
+        .background(Theme.bg2)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
+        .opacity(running ? 1 : 0.6)
+    }
+
+    private func captionLine(intro: Bool, viewport showsViewport: Bool) -> some View {
         let session = model.probe.running
-        return HStack(spacing: 8) {
-            Text(tr("All traffic from this window goes to", "SiteProbe"))
+        return HStack(spacing: 8.px) {
+            if intro { Text(tr("All traffic from this window goes to", "SiteProbe")) }
             Text(verbatim: "127.0.0.1:\((model.probe.proxyPort ?? web.port).map(String.init) ?? "—") → Surge")
                 .font(Theme.mono(11))
-            Text(verbatim: "·")
-            Text(ProbeViewport.caption(mode: model.preferences.probeMode, size: viewport))
-            Spacer(minLength: 8)
+            if showsViewport {
+                Text(verbatim: "·")
+                Text(ProbeViewport.caption(mode: model.preferences.probeMode, size: viewport))
+            }
+            Spacer(minLength: 8.px)
             if let session {
                 Text([trn("%lld step", "%lld steps", session.steps.count, "SiteProbe"),
                       trn("%lld host", "%lld hosts", session.hosts.count, "SiteProbe")].joined(separator: " · "))
             }
         }
-        .font(.system(size: 11))
-        .foregroundStyle(Theme.ink2)
-        .lineLimit(1)
-        .padding(.horizontal, 14)
-        .frame(height: 24)
-        .background(Theme.bg2)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
-        .opacity(running ? 1 : 0.6)
     }
 
     // MARK: Content
@@ -159,10 +175,10 @@ struct ProbeBrowserWindow: View {
             ProbeEndedView(snapshot: snapshot, compact: false)
         } else {
             Text(tr("Enter a URL in the Site Probe page and press Start Probe.", "SiteProbe"))
-                .font(.system(size: 13, weight: .medium))
+                .font(.design(13, .medium))
                 .foregroundStyle(Theme.ink2)
                 .multilineTextAlignment(.center)
-                .padding(40)
+                .padding(40.px)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Theme.bg2)
         }
@@ -170,7 +186,8 @@ struct ProbeBrowserWindow: View {
 
     /// The page, full size for desktop or at iPhone size inside a device outline. Both profiles use the same
     /// `WebView` (only its frame and outline change), because WebKit traps when a second `WebView` is made
-    /// for a page that is still bound to the first.
+    /// for a page that is still bound to the first. The page is web content, which the UI scale leaves at its size,
+    /// and so is the outline around the iPhone's viewport, in points.
     private func browser(_ page: WebPage) -> some View {
         let iphone = model.preferences.probeMode == .iphone
         let screen = ProbeWebSession.iPhoneViewport
