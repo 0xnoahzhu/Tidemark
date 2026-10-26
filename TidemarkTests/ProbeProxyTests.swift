@@ -92,12 +92,20 @@ final class ProbeFakeUpstream: Sendable {
 final class ProbeTestClient: Sendable {
     let connection: NetworkConnection<TCP>
     private let interrupted = Mutex(false)
+    private let clashed = Mutex(false)
 
     init(port: UInt16) {
         connection = NetworkConnection(to: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!)) { TCP() }
+        connection.onStateUpdate { [weak self] _, state in
+            if case .waiting(.posix(.EADDRINUSE)) = state { self?.clashed.withLock { $0 = true } }
+        }
     }
 
     deinit { if interrupted.withLock({ $0 }) { ProbeProxyServer.retire([connection]) } }
+
+    /// Whether the connect waited because its pair of loopback ports was still in TIME_WAIT from an earlier
+    /// connection between them: Network picks the source port without regard to it, and retries every few seconds.
+    var waitedOnAPortClash: Bool { clashed.withLock { $0 } }
 
     func send(_ text: String) async throws {
         let connection = self.connection
@@ -399,34 +407,55 @@ struct ProbeProxyTests {
     /// The proxy used to pass that on to the connection the other pipe's cancellation had torn down, which
     /// queued the start of a connection the proxy then released, and the start trapped the test host. Both sides
     /// of every tunnel close with the stop, also those of a tunnel the stop found between two operations.
-    @Test func stopsWhileTunnelsCarryData() async throws {
+    @Test func stopClosesBothSidesOfEveryTunnel() async throws {
         let upstream = ProbeFakeUpstream()
         let upstreamPort = try await upstream.start()
         defer { upstream.stop() }
-        for _ in 0..<40 {
-            let registry = ProbeRegistry()
-            registry.begin(sessionID: UUID(), startedAt: .now)
-            let proxy = ProbeProxyServer(upstreamPort: upstreamPort, registry: registry)
-            let port = try await proxy.start()
-            var pumps: [Task<Void, Never>] = []
-            for _ in 0..<4 {
-                let client = ProbeTestClient(port: port)
-                try await client.send("CONNECT flow.test:443 HTTP/1.1\r\n\r\n")
-                #expect(try await client.read(until: "\r\n\r\n").hasPrefix("HTTP/1.1 200"))
-                pumps.append(Task { await client.pump() })
+        for _ in 0..<3 { try await Self.stopWhileTunnelsCarryData(upstream: upstream, port: upstreamPort) }
+    }
+
+    /// The same many times over, to hunt rare interleavings. Off unless `TIDEMARK_PROBE_STRESS` is set
+    /// (`TEST_RUNNER_TIDEMARK_PROBE_STRESS=1` through xcodebuild): every round leaves its loopback port pairs in
+    /// TIME_WAIT, and a later connection that Network gives one of those pairs waits on `EADDRINUSE`, this test's
+    /// or a parallel one's.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["TIDEMARK_PROBE_STRESS"] != nil, "Set TIDEMARK_PROBE_STRESS to run"))
+    func stopsWhileTunnelsCarryData() async throws {
+        let upstream = ProbeFakeUpstream()
+        let upstreamPort = try await upstream.start()
+        defer { upstream.stop() }
+        for _ in 0..<40 { try await Self.stopWhileTunnelsCarryData(upstream: upstream, port: upstreamPort) }
+    }
+
+    /// Opens four tunnels through a new proxy, stops it 2-15 ms into pumping data through them, and expects both
+    /// sides of each to close well before a retired connection is released. A tunnel whose connect waits on a
+    /// port pair still in TIME_WAIT is left out.
+    private static func stopWhileTunnelsCarryData(upstream: ProbeFakeUpstream, port upstreamPort: UInt16) async throws {
+        let registry = ProbeRegistry()
+        registry.begin(sessionID: UUID(), startedAt: .now)
+        let proxy = ProbeProxyServer(upstreamPort: upstreamPort, registry: registry)
+        let port = try await proxy.start()
+        var pumps: [Task<Void, Never>] = []
+        for _ in 0..<4 {
+            let client = ProbeTestClient(port: port)
+            do {
+                try await CaptureTimeout.run(.seconds(3)) { try await client.send("CONNECT flow.test:443 HTTP/1.1\r\n\r\n") }
+            } catch is CaptureTimeoutError where client.waitedOnAPortClash {
+                continue
             }
-            try await Task.sleep(for: .milliseconds(Int.random(in: 2...15)))
-            proxy.stop()
-            let ended = await CaptureTimeout.value(within: .seconds(2)) { [pumps] in
-                for pump in pumps { await pump.value }
-                return true
-            }
-            #expect(ended == true, "every browser side closed with the stop")
-            #expect(await Self.eventually(.seconds(2)) { upstream.openConnections == 0 }, "every Surge side closed with the stop")
-            for pump in pumps {
-                pump.cancel()
-                await pump.value
-            }
+            #expect(try await client.read(until: "\r\n\r\n").hasPrefix("HTTP/1.1 200"))
+            pumps.append(Task { await client.pump() })
+        }
+        try await Task.sleep(for: .milliseconds(Int.random(in: 2...15)))
+        proxy.stop()
+        let ended = await CaptureTimeout.value(within: .seconds(2)) { [pumps] in
+            for pump in pumps { await pump.value }
+            return true
+        }
+        #expect(ended == true, "every browser side closed with the stop")
+        #expect(await eventually(.seconds(2)) { upstream.openConnections == 0 }, "every Surge side closed with the stop")
+        for pump in pumps {
+            pump.cancel()
+            await pump.value
         }
     }
 
