@@ -410,10 +410,10 @@ list applies at the next launch.
   whose rows have the design's height gets it from a cell's minimum height (the request table's 28 px, less what
   the inset style adds), not from `rowHeight`.
 * Sizes in UI code are the design's px through `UIScale` (`14.px`, `.design(12)`, `.designMono(11)`), so the whole
-  window grows or shrinks with one factor; hairlines, opacities and the system's chrome stay as they are. So far
-  the shell, the Requests page, Settings, the sheets, the empty states and the shared components are written this
-  way; the other pages still use points, except for the sizes they hand the shared components (a tile's or dot's
-  `size`, `labelWidth`), which are px. Settings' panes grow under the system's tab toolbar, 88 pt at every factor,
+  window grows or shrinks with one factor; hairlines, opacities and the system's chrome stay as they are. Tidemark
+  ships at 1.2 (`UIScale.standard`): each design px is 1.2 points, so the main window opens at 1498×975 and is at
+  least 1200×768. Every page, the menu bar panel, Settings, the sheets and the shared components are written this
+  way. Settings' panes grow under the system's tab toolbar, 88 pt at every factor,
   and its native switch and slider are a control size larger from 1.2. `scripts/check-design-px.sh` lists the
   sizes in `Tidemark/UI` still written in points (fonts, stack spacing, padding, frames, corner radii), except the
   few it allows, which the scale must not change (the probe window sized for its web page, Xcode previews).

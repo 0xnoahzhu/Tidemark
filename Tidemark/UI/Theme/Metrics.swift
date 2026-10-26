@@ -8,8 +8,8 @@ import SwiftUI
 /// The factor is resolved once, before the first window, and never changes while the app runs, so AppKit code,
 /// static widths and SwiftUI views all see the same number. Hairlines, opacities and system chrome do not scale.
 enum UIScale {
-    /// The factor the app ships with.
-    static let standard: CGFloat = 1.0
+    /// The factor the app ships with: every design px is drawn 1.2 points large.
+    static let standard: CGFloat = 1.2
     /// The factors the app can be drawn at.
     static let range: ClosedRange<CGFloat> = 1.0...1.5
     /// The main window's minimum content size in design px; a factor whose scaled minimum does not fit the screen is
@@ -20,7 +20,7 @@ enum UIScale {
     /// The tallest toolbar item, in points at every factor: the glass capsule an item sits in.
     static let toolbarItemHeight: CGFloat = 36
 
-    /// The factor asked for: `standard`, or in Debug builds the `-TidemarkUIScale 1.3` launch argument, clamped to
+    /// The factor asked for: `standard`, or in Debug builds the `-TidemarkUIScale 1.0` launch argument, clamped to
     /// `range`. Unlike `factor`, it is the same whatever screen the app launches on.
     static let requested: CGFloat = resolve(requested: requestedFactor, visibleSize: nil)
 
