@@ -97,7 +97,9 @@ delete it in Keychain Access. A stream that ends or fails is always restarted, w
   policy) that carried requests in the last minute and was asked least recently, and stores the errors it had not
   listed before in `proxy_errors`: one short-lived surge-cli process a minute at most, never one per request. The line
   hashes come from `dump traffic`, read instead of a poll when a node is missing from them (at most every 10 minutes);
-  a node with none is asked by name, and one Surge cannot report on waits 10 minutes.
+  a node with none is asked by name, and one Surge cannot report on waits 10 minutes. A hash changes with the profile
+  or a policy-path subscription: a node Surge no longer knows by a hash read 10 minutes ago or more is asked by a fresh
+  one, read in the next minute, and a profile reload or a new Surge session forgets them all.
 * **Other commands** — `summary` (interface, IP, router, DNS), `http probe <url> [policy]`,
   `rule match <host> process-path=…`, `test external-ip`, `dump event` / profile (`http-listen` port, usually 6152).
 

@@ -527,6 +527,85 @@ struct CapturePipelineTests {
         #expect(surge.snapshot.proxyCommands.count == 7)
     }
 
+    @Test func asksAProxyNodeByAFreshLineHashAndQueuesEachErrorOnce() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let surge = CaptureFakeSurge()
+        let recorded = try SurgeOutputParser.proxyRuntimeStatus(from: SurgeFixtures.data("surge-proxy-runtime-status.json"), command: "proxy-runtime-status")
+        let status = SurgeProxyRuntimeStatus(type: "Hysteria 2", errors: Array(recorded.errors.prefix(3)))
+        surge.update {
+            // `dump traffic` lists no hash for the node yet; a node of the profile also answers by its name.
+            $0.runtimeStatus["US-Hysteria2"] = status
+            $0.dns["api.github.com"] = ["140.82.112.6"]
+        }
+        let pipeline = makePipeline(database: database, surge: surge, spoolDirectory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        func traffic(_ id: Int64, at seconds: TimeInterval) async {
+            await pipeline.ingest(CaptureFixtures.request(id: id, host: "api.github.com", processPath: "/usr/bin/git",
+                                                          remoteAddress: "203.0.113.10 (Proxy)", policy: "US-Hysteria2"),
+                                  now: base.addingTimeInterval(seconds))
+        }
+        func poll(at seconds: TimeInterval) async { await pipeline.pollProxyErrors(now: base.addingTimeInterval(seconds)) }
+
+        // Asked by name, as `dump traffic` lists no hash for it.
+        await traffic(1, at: 0)
+        await poll(at: 10)
+        await traffic(2, at: 50)
+        await poll(at: 70)
+        #expect(surge.snapshot.proxyCommands == ["dump traffic", "proxy-runtime-status US-Hysteria2"])
+
+        // Ten minutes on, `dump traffic` lists its hash and the node is asked by it: the errors it lists again are its
+        // own, already queued.
+        surge.update {
+            $0.lineHashes = ["US-Hysteria2": "POLICY::2ed45e4c"]
+            $0.runtimeStatus["POLICY::2ed45e4c"] = status
+        }
+        await traffic(3, at: 690)
+        await poll(at: 700)
+        await traffic(4, at: 740)
+        await poll(at: 760)
+        #expect(surge.snapshot.proxyCommands.suffix(2) == ["dump traffic", "proxy-runtime-status POLICY::2ed45e4c"])
+        await pipeline.tick(now: base.addingTimeInterval(761))
+        #expect(await database.proxyErrorsSaved.count == 3, "each error once")
+        #expect(await database.proxyErrorsSaved.allSatisfy { $0.policy == "US-Hysteria2" && $0.lineHash == "US-Hysteria2" })
+
+        // A policy-path subscription update gives the node another hash, and Surge no longer knows the old one. That
+        // hash was read more than ten minutes ago: the next minute reads them again, the one after asks by the new one.
+        let fresh = SurgeProxyRuntimeStatus.ProxyError(message: "Stream closed", time: base.addingTimeInterval(1_300), targetHost: "api.github.com")
+        surge.update {
+            $0.lineHashes = ["US-Hysteria2": "POLICY::9f3a77c1"]
+            $0.runtimeStatus["POLICY::2ed45e4c"] = nil
+            $0.runtimeStatus["POLICY::9f3a77c1"] = SurgeProxyRuntimeStatus(type: "Hysteria 2", errors: [fresh] + status.errors)
+        }
+        await traffic(5, at: 1_350)
+        await poll(at: 1_360)
+        await traffic(6, at: 1_400)
+        await poll(at: 1_420)
+        await traffic(7, at: 1_460)
+        await poll(at: 1_480)
+        #expect(surge.snapshot.proxyCommands.suffix(3) == ["proxy-runtime-status POLICY::2ed45e4c", "dump traffic", "proxy-runtime-status POLICY::9f3a77c1"])
+        await pipeline.tick(now: base.addingTimeInterval(1_481))
+        #expect(await database.proxyErrorsSaved.count == 4)
+        #expect(await database.proxyErrorsSaved.last.map { $0.at == fresh.time && $0.lineHash == "POLICY::9f3a77c1" } == true)
+
+        // A profile reload may change every hash: they are read again at once.
+        surge.update {
+            $0.lineHashes = ["US-Hysteria2": "POLICY::5be0d218"]
+            $0.runtimeStatus["POLICY::5be0d218"] = SurgeProxyRuntimeStatus(type: "Hysteria 2", errors: [fresh] + status.errors)
+        }
+        let (stream, continuation) = AsyncThrowingStream<SurgeEvent, Error>.makeStream()
+        continuation.yield(.reload)
+        continuation.finish()
+        try await pipeline.consume(stream)
+        await traffic(8, at: 1_500)
+        await poll(at: 1_510)
+        await traffic(9, at: 1_530)
+        await poll(at: 1_540)
+        #expect(surge.snapshot.proxyCommands.suffix(2) == ["dump traffic", "proxy-runtime-status POLICY::5be0d218"])
+        await pipeline.tick(now: base.addingTimeInterval(1_541))
+        #expect(await database.proxyErrorsSaved.count == 4)
+    }
+
     @Test func matchesProbeConnectionsBySourcePort() async throws {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()

@@ -161,8 +161,8 @@ them by host and time, always on its own Mac (`device_id`; each Mac has its own 
 * **Proxy errors** (`proxy_errors`) — `proxy-runtime-status <line hash>` lists a proxy node's last 15 errors
   (`{"error":"Stream closed","time":…,"targetHostname":…}`). Tidemark asks about the nodes (final policies) that carried
   requests in the last minute, one node a minute (the one asked least recently) and never per request; a node's line
-  hash comes from `dump traffic`, read instead of a poll when a node is missing from it (at most every 10 minutes).
-  `line_hash` is what the node was asked by: its `POLICY::…` hash, or its name when Surge lists none. An error is
+  hash comes from `dump traffic`, read instead of a poll when a node is missing from it (at most every 10 minutes), and
+  read again when Surge no longer knows a node by its hash or reloads its profile. `line_hash` is what the node was asked by: its `POLICY::…` hash, or its name when Surge lists none. An error is
   stored once per Mac, node (`policy`), time and host, the primary key, whichever way the node was asked: a node may be
   asked by name before `dump traffic` lists its hash, and a hash changes with the profile. A burst of more than 15
   errors on a node between two of its polls loses the oldest ones.

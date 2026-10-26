@@ -265,7 +265,7 @@ actor CapturePipeline {
     /// Proxy node → when it was last asked for its errors, and when it may be asked again after a failure.
     var proxyNodesPolledAt: [String: Date] = [:]
     var proxyNodeRetryAt: [String: Date] = [:]
-    /// Line hash (or name) → the errors the node listed last time; it lists its last 15 every time it is asked.
+    /// Proxy node → the errors it listed last time; it lists its last 15 every time it is asked.
     var proxyErrorsListed: [String: Set<SurgeProxyRuntimeStatus.ProxyError>] = [:]
 
     // Writes
@@ -442,6 +442,7 @@ actor CapturePipeline {
         if newSession > 0 { sessionCloses[settings.deviceID] = SessionClose(before: newSession, at: boundary) }
         session = newSession
         clearSessionState()
+        forgetProxyLineHashes()
         epoch += 1
         return epoch
     }
@@ -524,7 +525,9 @@ actor CapturePipeline {
             case .speed(let speed): pending.speed = speed
             case .dns(let answer): recordDNSAnswer(answer, now: now)
             case .environmentChanged: pending.signals.append(.environmentChanged)
-            case .reload: pending.signals.append(.reload)
+            case .reload:
+                forgetProxyLineHashes()
+                pending.signals.append(.reload)
             case .shutdown: pending.signals.append(.shutdown)
             case .subscribed:
                 subscriptions += 1
