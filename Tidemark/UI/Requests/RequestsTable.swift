@@ -71,8 +71,8 @@ struct RequestsTable: View {
         }
         .alternatingRowBackgrounds()
         // A table reports the sum of its column widths as its minimum, which would push the split view past the
-        // window once the inspector opens; below that width it scrolls horizontally instead.
-        .frame(minWidth: 360.px, maxWidth: .infinity, maxHeight: .infinity)
+        // window once the inspector opens (see `RequestsView`); narrower than its columns it scrolls horizontally.
+        .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @TableColumnBuilder<RequestRecord, Never>

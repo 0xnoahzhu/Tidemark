@@ -16,6 +16,11 @@ struct RequestsView: View {
                     .onAppear { historyShown = true }
             }
         }
+        // The content runs beneath the sidebar and the inspector, so its minimum width holds both of theirs, and the
+        // split view adds the sidebar's again. Any width of the content's own takes that sum past a window near its
+        // minimum once the inspector opens, and AppKit then aborts after resizing the columns back and forth. The
+        // content asks for none; the table scrolls horizontally instead.
+        .frame(minWidth: 0, maxWidth: .infinity)
         .inspector(isPresented: Binding(
             get: { nav.requestsLive && nav.selectedRequest != nil },
             set: { if !$0 { nav.selectedRequest = nil } }
