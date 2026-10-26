@@ -25,11 +25,11 @@ struct InventoryView: View {
             .navigationSubtitle(subtitle(snapshot))
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    // The subtitle's counts (none before the first load).
+                    // No counts: the subtitle beside it gives them, and at the default window width they would cut it.
                     DesignSegmentedControl(tr("Kind", "Inventory"), selection: $nav.inventoryKind, size: .compact(), segments: [
-                        .init(nil, tr("All", "Inventory"), systemImage: "list.bullet", count: snapshot?.all.count),
-                        .init(.domain, tr("Domains", "Inventory"), systemImage: "globe", count: snapshot?.domainCount),
-                        .init(.ip, tr("IPs", "Inventory"), systemImage: "number", count: snapshot.map { $0.all.count - $0.domainCount }),
+                        .init(nil, tr("All", "Inventory"), systemImage: "list.bullet"),
+                        .init(.domain, tr("Domains", "Inventory"), systemImage: "globe"),
+                        .init(.ip, tr("IPs", "Inventory"), systemImage: "number"),
                     ])
                 }
                 .sharedBackgroundVisibility(.hidden)
