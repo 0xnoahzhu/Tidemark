@@ -147,7 +147,7 @@ extension PostgresDatabase {
         let start = request.startedAt
         var answer = SQL(Self.dnsAnswerSelect + " WHERE a.device_id = ")
         answer.append(answer.bind(device))
-        answer.append(" AND a.domain = \(answer.bind(Self.answerDomain(request.host))) AND a.resolved_at <= \(answer.bind(Self.dnsMoment(of: request)))")
+        answer.append(" AND a.domain = \(answer.bind(Self.answerDomain(request.host))) AND a.resolved_at <= \(answer.bind(request.dnsAnswerMoment))")
         answer.append(" ORDER BY a.resolved_at DESC LIMIT 1")
         let answerQuery = request.isIPLiteral ? nil : answer.query
         let errorsQuery = Self.proxyErrorsQuery(for: request)?.query
@@ -200,14 +200,6 @@ extension PostgresDatabase {
         let end = sql.bind(completed)
         sql.append(" ORDER BY abs(extract(epoch FROM e.at - \(end)::timestamptz)), e.at")
         return sql
-    }
-
-    /// When the request needed its host's address: when Surge's rule matching or Tidemark resolved the address it
-    /// shows (within a minute of the start), otherwise its start; plus a second for the watch event to arrive.
-    static func dnsMoment(of request: RequestRecord) -> Date {
-        let start = request.startedAt
-        let resolved = request.remoteIPResolvedAt.map { min(max($0, start), start.addingTimeInterval(60)) } ?? start
-        return resolved.addingTimeInterval(1)
     }
 
     /// A host as `dns_answers.domain` stores it: `exactHost` without a trailing dot.

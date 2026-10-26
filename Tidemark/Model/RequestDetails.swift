@@ -84,6 +84,16 @@ struct DNSAnswer: Hashable, Codable, Sendable {
     var byTidemark: Bool = false
 }
 
+extension RequestRecord {
+    /// When the request needed its host's address, for joining its DNS answer (the latest one at or before this, on
+    /// its Mac): when Surge's rule matching or Tidemark resolved the address it shows (within a minute of the start),
+    /// otherwise its start; plus a second for the watch event to arrive.
+    var dnsAnswerMoment: Date {
+        let resolved = remoteIPResolvedAt.map { min(max($0, startedAt), startedAt.addingTimeInterval(60)) } ?? startedAt
+        return resolved.addingTimeInterval(1)
+    }
+}
+
 /// An error a proxy node reported (`proxy-runtime-status` → `errors`, row in `proxy_errors`). A node keeps only
 /// its last 15, so Tidemark polls the nodes that carry requests. Requests join it by host and completion time.
 struct ProxyNodeError: Hashable, Codable, Sendable {

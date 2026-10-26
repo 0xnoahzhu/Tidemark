@@ -170,8 +170,27 @@ enum ShellDemoData {
         ("time.apple.com", "17.253.84.253", ["DIRECT"], "UDP"),
     ]
 
+    /// How a demo connection ended: the note Surge writes and the end reason Tidemark keeps. Surge marks resets and
+    /// broken pipes completed; only the notes tell them apart.
+    private static func ending(index: Int, udp: Bool, failed: Bool) -> (note: String, reason: String) {
+        if udp { return ("[UDP] Closed for inactivity.", "Closed for inactivity") }
+        if failed || index % 11 == 7 { return ("[Connection] Disconnect: TCP error: Connection reset.", "TCP error: Connection reset") }
+        if index % 29 == 11 { return ("[Connection] Disconnect: Broken pipe (POSIX:32)", "Broken pipe (POSIX:32)") }
+        if index % 3 == 0 { return ("[Connection] Disconnect: Closed by client", "Closed by client") }
+        return ("[Connection] Disconnect: Closed by remote", "Closed by remote")
+    }
+
+    /// `HH:mm:ss.ffffff`, the clock Surge's notes start with (this Mac's time zone).
+    private static let noteClock: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH:mm:ss.SSSSSS"
+        return formatter
+    }()
+
     private static func sampleRow(index: Int, startedAt: Date, model: AppModel, apps: [MonitoredApp], devices: [DeviceID]) -> RequestRecord {
         let pick = hosts[index % hosts.count]
+        let (host, ip, policyPath, method) = pick
         let app = apps[index % apps.count]
         let device = devices[index % max(1, devices.count)]
         let unmonitored = index % 5 == 3
@@ -183,19 +202,65 @@ enum ShellDemoData {
         let failed = index % 17 == 6
         let active = index % 6 == 0
         let size = Int64((index * 7919) % 900_000 + 400)
-        return RequestRecord(
+
+        // Rule mode, as Surge 6.10 notes it: an IP rule above the domain rules makes every hostname need a DNS
+        // answer first (timed on a cache miss), then the policy decision; proxied TCP reuses the node's connection.
+        let direct = policyPath == ["DIRECT"]
+        let literal = HostName.isIPAddress(host)
+        let udp = method == "UDP"
+        let throughHTTPProxy = !udp && index % 7 == 2
+        let cachedAnswer = index % 4 != 0
+        let lookup = literal ? 0 : cachedAnswer ? 0.000_05 : Double(18 + index % 40) / 1_000
+        let rule = literal ? "IP-CIDR,183.3.0.0/16" : "DOMAIN-SUFFIX,\(host.split(separator: ".").suffix(2).joined(separator: "."))"
+        let setup = startedAt.addingTimeInterval(max(0.09, lookup + 0.03))
+        let completed = active ? nil : setup.addingTimeInterval(0.07 + Double(index % 50) / 10)
+        var notes: [(TimeInterval, String)] = [(0, udp ? "[UDP] Init packet: 198.18.0.1:\(52_000 + index % 900) -> 198.18.0.\(20 + index % 200):123"
+                                                    : throughHTTPProxy ? "[Connection] Incoming proxy protocol: HTTP" : "[Connection] Handled by VIF")]
+        if method == "HTTPS" { notes.append((0.000_8, "[TLS] TLS Client Hello SNI: \(host)")) }
+        if !literal {
+            notes.append((0.001, "[Rule] Rule evaluating requires DNS lookup for rule: RULE-SET LAN"))
+            notes.append((0.001 + lookup, cachedAnswer
+                ? "[DNS] Use cached DNS result for \(host). A record count: 1, AAAA record count: 0"
+                : String(format: "[DNS] DNS lookup for %@ completed in %.1fms. A record count: 1, AAAA record count: 0", host, lookup * 1_000)))
+            notes.append((0.001_1 + lookup, "[Rule] DNS completed, IPv4 address for matching: \(ip), IPv6 address for matching: N/A"))
+        }
+        notes.append((0.001_2 + lookup, "[Rule] Rule matched: \(rule)"))
+        notes.append((0.001_3 + lookup, "[Rule] Policy decision path: \(policyPath.joined(separator: " -> "))"))
+        if !direct, !udp {
+            notes.append((0.001_5 + lookup, "[Connection-Pool] Use an existing master connector: SGHysteriaMasterConnector-2"))
+            notes.append((0.001_6 + lookup, "[Connector] Master connector is now ready"))
+        }
+        let end = completed.map { _ in ending(index: index, udp: udp, failed: failed) }
+        if let completed, let end {
+            let duration = completed.timeIntervalSince(startedAt)
+            if !udp { notes.append((duration - 0.05, "[Connection] Client closed sending stream")) }
+            notes.append((duration, end.note))
+        }
+        let resolvedAt = literal ? nil : direct ? setup : startedAt.addingTimeInterval(0.001_1 + lookup)
+
+        var record = RequestRecord(
             key: RequestKey(deviceID: device, session: 1_729_700_000_000, surgeID: Int64(index)),
             rowID: index % 9 == 0 ? nil : Int64(1_284_000 + index),
-            startedAt: startedAt, setupCompletedAt: startedAt.addingTimeInterval(0.09),
-            completedAt: active ? nil : startedAt.addingTimeInterval(0.16),
-            method: pick.3, host: pick.0, port: 443, url: pick.0 + ":443",
-            remoteIP: pick.1, remoteAddress: pick.1, geo: GeoInfo(countryCode: "US", asn: 13335, organization: "Cloudflare, Inc."),
-            policyPath: pick.2, rule: "DOMAIN-SUFFIX,\(pick.0.split(separator: ".").suffix(2).joined(separator: "."))",
+            startedAt: startedAt, setupCompletedAt: setup, completedAt: completed,
+            method: method, host: host, port: udp ? 123 : 443, url: host + (udp ? ":123" : ":443"),
+            remoteIP: ip, remoteAddress: direct ? ip : "203.0.113.\(10 + policyPath.joined().count % 5) (Proxy)",
+            geo: GeoInfo(countryCode: "US", asn: 13335, organization: "Cloudflare, Inc."),
+            policyPath: policyPath, rule: rule,
             state: failed ? .failed : (active ? .active : .completed), inBytes: size, outBytes: size / 9,
             pid: chain.last?.pid, processPath: chain.last?.path, bundlePath: unmonitored ? nil : app.path, chain: chain,
             appID: unmonitored ? nil : app.id, localAddress: "192.168.31.24:\(51000 + index % 900)", interface: "en0",
-            notes: [], isNew: index % 23 == 4, writtenAt: index % 9 == 0 ? nil : startedAt.addingTimeInterval(0.4), probeSessionID: nil
+            notes: notes.map { noteClock.string(from: startedAt.addingTimeInterval($0.0)) + " " + $0.1 },
+            isNew: index % 23 == 4, writtenAt: index % 9 == 0 ? nil : startedAt.addingTimeInterval(0.4), probeSessionID: nil
         )
+        record.timing = literal ? [RequestTimingRecord(name: "Rule Evaluating", duration: 0.000_4)]
+            : (cachedAnswer ? [] : [RequestTimingRecord(name: "DNS Lookup", duration: lookup)]) + [RequestTimingRecord(name: "Rule Evaluating", duration: 0.000_4)]
+        record.entryMode = udp ? 20 : throughHTTPProxy ? 1 : 40
+        record.originalPolicy = policyPath.last == "HK-01" && index % 19 == 7 ? "HK-02" : nil
+        record.modified = false
+        record.endReason = end?.reason
+        record.remoteIPSource = literal ? .literal : direct ? .surge : .ruleDNS
+        record.remoteIPResolvedAt = resolvedAt
+        return record
     }
 
     /// A model filled with the demo data, for previews.
@@ -203,6 +268,77 @@ enum ShellDemoData {
         let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: "TidemarkPreview") ?? .standard))
         install(into: model)
         return model
+    }
+}
+
+/// The request details of the demo rows (schema v4), derived from the rows so they always agree with them: a DNS answer
+/// for each lookup their notes timed, and a proxy error for each proxied request that was reset.
+extension ShellDemoDatabase {
+    func requests(forHost host: String, query: RequestQuery) async throws -> RequestPage {
+        let host = host.lowercased()
+        let all = matching(query).filter { $0.host == host && (!query.endedWithError || $0.endedWithError) }
+        let page = Array(all.dropFirst(query.offset).prefix(query.limit))
+        return RequestPage(rows: page, totalCount: Int64(all.count), elapsed: .milliseconds(3))
+    }
+
+    func dnsAnswers(forHost host: String, from: Date?, to: Date?, scope: DeviceScope, limit: Int) async throws -> [DNSAnswer] {
+        let host = host.lowercased()
+        let answers = demoDNSAnswers.filter { answer in
+            answer.domain == host && scope.includes(answer.deviceID) && from.map { answer.resolvedAt >= $0 } != false
+                && to.map { answer.resolvedAt <= $0 } != false
+        }
+        return Array(answers.sorted { $0.resolvedAt > $1.resolvedAt }.prefix(limit))
+    }
+
+    func proxyErrors(forHost host: String, from: Date?, to: Date?, scope: DeviceScope, limit: Int) async throws -> [ProxyNodeError] {
+        let host = host.lowercased()
+        let errors = demoProxyErrors.filter { error in
+            error.targetHost == host && scope.includes(error.deviceID) && from.map { error.at >= $0 } != false && to.map { error.at <= $0 } != false
+        }
+        return Array(errors.sorted { $0.at > $1.at }.prefix(limit))
+    }
+
+    func proxyErrors(for request: RequestRecord) async throws -> [ProxyNodeError] {
+        guard let completed = request.completedAt else { return [] }
+        return demoProxyErrors.filter {
+            $0.deviceID == request.deviceID && $0.targetHost == request.host && abs($0.at.timeIntervalSince(completed)) < 1
+        }
+    }
+
+    func relatedRecords(of request: RequestRecord) async throws -> RequestRelatedRecords {
+        var related = RequestRelatedRecords()
+        let moment = request.dnsAnswerMoment
+        related.dnsAnswer = demoDNSAnswers.filter { $0.deviceID == request.deviceID && $0.domain == request.host && $0.resolvedAt <= moment }
+            .max { $0.resolvedAt < $1.resolvedAt }
+        related.proxyErrors = try await proxyErrors(for: request)
+        return related
+    }
+
+    /// CNAME chains of a few demo hosts.
+    private static let demoCNAMEs = [
+        "registry.npmjs.org": "registry.npmjs.org -> registry.npmjs.org.cdn.cloudflare.net",
+        "production.cloudflare.docker.com": "production.cloudflare.docker.com -> production.cloudflare.docker.com.cdn.cloudflare.net",
+    ]
+
+    private var demoDNSAnswers: [DNSAnswer] {
+        rows.compactMap { row in
+            guard let lookup = row.timing?.first(where: { $0.name == "DNS Lookup" }), let ip = row.remoteIP,
+                  let resolvedAt = row.remoteIPResolvedAt else { return nil }
+            let server = row.finalPolicy == "DIRECT" ? "223.5.5.5" : "https://cloudflare-dns.com/dns-query"
+            let chain = Self.demoCNAMEs[row.host] ?? row.host
+            return DNSAnswer(deviceID: row.deviceID, domain: row.host, resolvedAt: resolvedAt, server: server, interface: nil, addresses: [ip],
+                             path: "\(chain) -> \(ip)", log: String(format: "%.2fms Receive an A answer from %@", lookup.duration * 1_000, server),
+                             timeCostMs: lookup.duration * 1_000, expiresAt: resolvedAt.addingTimeInterval(300))
+        }
+    }
+
+    private var demoProxyErrors: [ProxyNodeError] {
+        rows.compactMap { row in
+            guard row.endReason == "TCP error: Connection reset", let node = row.finalPolicy, node != "DIRECT",
+                  let completed = row.completedAt else { return nil }
+            return ProxyNodeError(deviceID: row.deviceID, policy: node, lineHash: "POLICY::demo-\(node)", at: completed.addingTimeInterval(0.000_1),
+                                  targetHost: row.host, error: "Stream closed")
+        }
     }
 }
 
