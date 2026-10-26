@@ -17,20 +17,28 @@ struct RequestsInspector: View {
         VStack(spacing: 0) {
             RequestsInspectorHeader(record: record, close: close)
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18.px) {
-                    RequestsInspectorChain(record: record, identity: identity)
-                    RequestsInspectorConnection(record: record)
-                    RequestsInspectorJourney(record: record, details: details)
-                    RequestsInspectorTiming(record: record)
-                    RequestsInspectorRelated(record: record, details: details)
-                    RequestsInspectorStored(record: record)
+            // The stack sizes the scroll view only to share the height out; filling what it is offered, it does not
+            // lay the whole request out for that.
+            RequestsInspectorFill {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18.px) {
+                        RequestsInspectorChain(record: record, identity: identity)
+                        RequestsInspectorConnection(record: record)
+                        RequestsInspectorJourney(
+                            journey: RequestsJourney(record: record, related: details?.related, nodeType: details?.nodeType, proxyGeo: details?.proxyGeo),
+                            notes: record.notes
+                        )
+                        .equatable()
+                        RequestsInspectorTiming(record: record)
+                        RequestsInspectorRelated(record: record, details: details)
+                        RequestsInspectorStored(record: record)
+                    }
+                    .padding(.horizontal, 16.px)
+                    .padding(.vertical, 14.px)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal, 16.px)
-                .padding(.vertical, 14.px)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .scrollEdgeEffectStyle(.soft, for: .vertical)
             }
-            .scrollEdgeEffectStyle(.soft, for: .vertical)
             Divider()
             RequestsInspectorActions(record: record, identity: identity)
         }
@@ -41,6 +49,35 @@ struct RequestsInspector: View {
                 if !Task.isCancelled { self.details = loaded }
             }
         }
+    }
+}
+
+/// Takes the size it is offered and never measures its content for a size of its own: the inspector's size is its
+/// column's, and its scroll view's the rest of the column.
+///
+/// A flexible frame still asks its content, so each time the selection moved, the hosting view's minimum size and the
+/// stack sharing out the height laid every text of the request out again, beside the layout that draws it.
+struct RequestsInspectorFill: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions(by: .zero)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews {
+            subview.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        }
+    }
+
+    // No alignment guides of its own either: by default a layout takes its content's, which it places to read them.
+
+    func explicitAlignment(of guide: HorizontalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+                           cache: inout ()) -> CGFloat? {
+        nil
+    }
+
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+                           cache: inout ()) -> CGFloat? {
+        nil
     }
 }
 

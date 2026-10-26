@@ -14,6 +14,18 @@ struct RequestsJourney: Equatable {
         case route(Route)
         case connection(Connection)
         case end(End)
+
+        /// Which stage it is: a journey has each at most once, in this order.
+        var kind: Int {
+            switch self {
+            case .entered: 0
+            case .dns: 1
+            case .rule: 2
+            case .route: 3
+            case .connection: 4
+            case .end: 5
+            }
+        }
     }
 
     /// How the request reached Surge.

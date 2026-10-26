@@ -31,9 +31,10 @@ struct RequestsView: View {
             // The inspector's minimum size must not follow its content: its host title and URL wrap, so a
             // width-dependent minimum height changes on every pass while the column opens, and AppKit aborts
             // after more update-constraints passes than the window has views. `inspectorColumnWidth` sets the width.
-            RequestsInspectorHost()
-                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                .inspectorColumnWidth(min: 280.px, ideal: 316.px, max: 440.px)
+            RequestsInspectorFill {
+                RequestsInspectorHost()
+            }
+            .inspectorColumnWidth(min: 280.px, ideal: 316.px, max: 440.px)
         }
         .pageToolbar(tr("Requests", "Requests"), subtitle: tr("Every request Surge sees, kept in PostgreSQL", "Requests")) {
             RequestsToolbar(model: model)

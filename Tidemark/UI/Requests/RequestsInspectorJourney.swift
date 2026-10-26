@@ -1,18 +1,22 @@
 import SwiftUI
 
 /// JOURNEY: what happened to the request, stage by stage, on a thin timeline in a card, with Surge's log of it under.
-struct RequestsInspectorJourney: View {
-    var record: RequestRecord
-    var details: RequestsInspectorDetails?
+///
+/// Equatable on what it shows, as is each stage: the inspector's other updates leave it alone, and the details
+/// arriving redraw only the stages they change.
+struct RequestsInspectorJourney: View, Equatable {
+    var journey: RequestsJourney
+    var notes: [String]
 
     var body: some View {
-        let journey = RequestsJourney(record: record, related: details?.related, nodeType: details?.nodeType, proxyGeo: details?.proxyGeo)
         VStack(alignment: .leading, spacing: 8.px) {
             SectionLabel(text: tr("Journey", "Requests"))
             if !journey.stages.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(journey.stages.enumerated()), id: \.offset) { index, stage in
-                        RequestsJourneyStageView(stage: stage, isLast: index == journey.stages.count - 1)
+                    // Each stage keeps its views from one request to the next, also where another has fewer stages.
+                    ForEach(journey.stages, id: \.kind) { stage in
+                        RequestsJourneyStageView(stage: stage, isLast: stage.kind == journey.stages.last?.kind)
+                            .equatable()
                     }
                 }
                 .padding(.horizontal, 10.px)
@@ -25,15 +29,15 @@ struct RequestsInspectorJourney: View {
                     .font(.design(11.5))
                     .foregroundStyle(Theme.ink3)
             }
-            if !record.notes.isEmpty {
-                RequestsSurgeLog(notes: record.notes)
+            if !notes.isEmpty {
+                RequestsSurgeLog(notes: notes)
             }
         }
     }
 }
 
 /// One stage: a dot on the timeline, its name and offset, and what is known about it.
-private struct RequestsJourneyStageView: View {
+private struct RequestsJourneyStageView: View, Equatable {
     var stage: RequestsJourney.Stage
     var isLast: Bool
 
@@ -108,7 +112,10 @@ private struct RequestsJourneyNote: View {
     }
 }
 
-/// `Label  value` under a stage: the label in the faint ink, the value selectable.
+/// `Label  value` under a stage, as one text: the label in the faint ink, the value, and what else is known after it.
+///
+/// One text rather than a row of two, and only a value the inspector shows nowhere else can be selected: the journey
+/// is drawn again for each request the selection passes, and each text, a selectable one most, takes its share.
 private struct RequestsJourneyFact: View {
     var label: String
     var value: String
@@ -116,24 +123,26 @@ private struct RequestsJourneyFact: View {
     var color: Color = Theme.ink
     /// Said after the value in the secondary ink (`· From Surge's cache`).
     var detail: String?
+    var selectable = false
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6.px) {
-            Text(label)
-                .font(.design(11))
-                .foregroundStyle(Theme.ink3)
-                .fixedSize()
-            let valueText = Text(value).font(mono ? Theme.mono(11) : .design(11.5)).foregroundStyle(color)
-            Group {
-                if let detail {
-                    Text("\(valueText)\(Text(verbatim: " · " + detail).foregroundStyle(Theme.ink2))")
-                } else {
-                    valueText
-                }
-            }
-            .font(.design(11.5))
-            .textSelection(.enabled)
+        let label = Text(label + "  ").font(.design(11)).foregroundStyle(Theme.ink3)
+        let value = Text(value).font(mono ? Theme.mono(11) : .design(11.5)).foregroundStyle(color)
+        let detail = Text(verbatim: detail.map { " · " + $0 } ?? "").font(.design(11.5)).foregroundStyle(Theme.ink2)
+        Text("\(label)\(value)\(detail)")
+            .selectable(selectable)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private extension View {
+    /// Lets the text be selected for copying where `enabled`.
+    @ViewBuilder
+    func selectable(_ enabled: Bool) -> some View {
+        if enabled {
+            textSelection(.enabled)
+        } else {
+            self
         }
     }
 }
@@ -163,15 +172,15 @@ private struct RequestsJourneyDNS: View {
                 .help(server)
         }
         if !dns.cnames.isEmpty {
-            RequestsJourneyFact(label: "CNAME", value: dns.cnames.joined(separator: " → "), mono: true)
+            RequestsJourneyFact(label: "CNAME", value: dns.cnames.joined(separator: " → "), mono: true, selectable: true)
         }
         if let answer = dns.answer, !answer.addresses.isEmpty {
-            RequestsJourneyFact(label: tr("Answer", "Requests"), value: answer.addresses.joined(separator: ", "), mono: true)
+            RequestsJourneyFact(label: tr("Answer", "Requests"), value: answer.addresses.joined(separator: ", "), mono: true, selectable: true)
         } else if let counts = dns.recordCounts {
             RequestsJourneyFact(label: tr("Answer", "Requests"), value: trf("%1$lld A, %2$lld AAAA", "Requests", counts.a, counts.aaaa))
         }
         if let matched = dns.matchedIP {
-            RequestsJourneyFact(label: tr("Matched on", "Requests"), value: matched, mono: true)
+            RequestsJourneyFact(label: tr("Matched on", "Requests"), value: matched, mono: true, selectable: true)
         }
         if dns.resolvedByProxy {
             RequestsJourneyNote(text: tr("The proxy resolved the name on its side, which this Mac can't see.", "Requests"))
@@ -195,7 +204,7 @@ private struct RequestsJourneyRule: View {
             RequestsJourneyNote(text: tr("All direct", "Requests"), color: Theme.ink)
         }
         if let subRule = rule.subRule {
-            RequestsJourneyFact(label: tr("Sub-rule", "Requests"), value: subRule, mono: true)
+            RequestsJourneyFact(label: tr("Sub-rule", "Requests"), value: subRule, mono: true, selectable: true)
         }
         if let original = rule.originalPolicy {
             RequestsJourneyNote(text: trf("Surge first chose %@.", "Requests", original))
@@ -211,32 +220,24 @@ private struct RequestsJourneyRoute: View {
         VStack(alignment: .leading, spacing: 2.px) {
             ForEach(Array(route.hops.enumerated()), id: \.offset) { index, hop in
                 let labels = RequestsJourneyLabels.hop(hop)
-                let value = Text(labels.value)
-                    .font(labels.mono ? Theme.mono(11) : .design(11.5))
-                    .foregroundStyle(Theme.ink)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                let role = Text(labels.role)
-                    .font(.design(11))
-                    .foregroundStyle(Theme.ink3)
-                    .lineLimit(1)
                 HStack(alignment: .firstTextBaseline, spacing: 5.px) {
                     Text(verbatim: index == 0 ? "·" : "→")
                         .font(Theme.mono(11))
                         .foregroundStyle(Theme.ink3)
                         .frame(width: 10.px, alignment: .leading)
                     VStack(alignment: .leading, spacing: 0) {
-                        // The role follows the value on its line where both fit, and goes under it where not.
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .firstTextBaseline, spacing: 6.px) {
-                                value.fixedSize()
-                                role.fixedSize()
-                            }
-                            VStack(alignment: .leading, spacing: 0) {
-                                value
-                                role
-                            }
+                        RequestsHopLayout(spacing: 6.px) {
+                            Text(labels.value)
+                                .font(labels.mono ? Theme.mono(11) : .design(11.5))
+                                .foregroundStyle(Theme.ink)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                // The addresses (the proxy server, the exit IP), which the inspector shows nowhere else.
+                                .selectable(labels.mono)
+                            Text(labels.role)
+                                .font(.design(11))
+                                .foregroundStyle(Theme.ink3)
+                                .lineLimit(1)
                         }
                         if let detail = labels.detail {
                             Text(detail)
@@ -257,6 +258,67 @@ private struct RequestsJourneyRoute: View {
     }
 }
 
+/// A hop's value and its role: the role follows the value on its line where both fit, and goes under it where not,
+/// the value then shortened in the middle. Each is measured once, at its ideal size.
+private struct RequestsHopLayout: Layout {
+    var spacing: CGFloat
+
+    struct Cache {
+        var value: CGSize
+        var role: CGSize
+        /// Their first baselines, from their tops.
+        var valueBaseline: CGFloat
+        var roleBaseline: CGFloat
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        let value = subviews[0].dimensions(in: .unspecified)
+        let role = subviews[1].dimensions(in: .unspecified)
+        return Cache(value: CGSize(width: value.width, height: value.height), role: CGSize(width: role.width, height: role.height),
+                     valueBaseline: value[.firstTextBaseline], roleBaseline: role[.firstTextBaseline])
+    }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        cache = makeCache(subviews: subviews)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        let width = proposal.width ?? .infinity
+        if fitsOnOneLine(width, cache) {
+            let baseline = max(cache.valueBaseline, cache.roleBaseline)
+            let descent = max(cache.value.height - cache.valueBaseline, cache.role.height - cache.roleBaseline)
+            return CGSize(width: cache.value.width + spacing + cache.role.width, height: baseline + descent)
+        }
+        return CGSize(width: min(max(cache.value.width, cache.role.width), width), height: cache.value.height + cache.role.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        if fitsOnOneLine(bounds.width, cache) {
+            let baseline = bounds.minY + max(cache.valueBaseline, cache.roleBaseline)
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: baseline - cache.valueBaseline), proposal: ProposedViewSize(cache.value))
+            subviews[1].place(at: CGPoint(x: bounds.minX + cache.value.width + spacing, y: baseline - cache.roleBaseline),
+                              proposal: ProposedViewSize(cache.role))
+        } else {
+            subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(width: min(cache.value.width, bounds.width), height: cache.value.height))
+            subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + cache.value.height),
+                              proposal: ProposedViewSize(width: min(cache.role.width, bounds.width), height: cache.role.height))
+        }
+    }
+
+    /// The value's first baseline, which the hop's arrow sits on.
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
+                           cache: inout Cache) -> CGFloat? {
+        guard guide == .firstTextBaseline else { return nil }
+        let oneLine = fitsOnOneLine(bounds.width, cache)
+        return bounds.minY + (oneLine ? max(cache.valueBaseline, cache.roleBaseline) : cache.valueBaseline)
+    }
+
+    private func fitsOnOneLine(_ width: CGFloat, _ cache: Cache) -> Bool {
+        // Half a point of slack: the width proposed back is the one this reported.
+        cache.value.width + spacing + cache.role.width <= width + 0.5
+    }
+}
+
 private struct RequestsJourneyConnection: View {
     var connection: RequestsJourney.Connection
 
@@ -264,7 +326,7 @@ private struct RequestsJourneyConnection: View {
         if connection.reused {
             RequestsJourneyNote(text: tr("Reused an open connection", "Requests"))
             if let connector = connection.connector {
-                RequestsJourneyFact(label: tr("Connector", "Requests"), value: connector, mono: true)
+                RequestsJourneyFact(label: tr("Connector", "Requests"), value: connector, mono: true, selectable: true)
             }
         } else {
             RequestsJourneyNote(text: tr("Opened a new connection", "Requests"))
