@@ -138,6 +138,39 @@ struct CaptureSpoolTests {
         #expect(sidecar.takeAuxiliary() == nil, "taken once")
     }
 
+    /// A row as Tidemark 0.3 (schema 3) spooled it: `RequestRecord` without the request details of schema v4.
+    static let previousBuildLine = #"""
+    {"completedAt":814700301.8445439,"pid":21046,"interface":"en0","notes":["02:38:21.255251 [Connection] Handled by VIF","02:38:21.844495 [Connection] Disconnect: TCP error: Connection reset."],"remoteIP":"203.0.113.80","remoteAddress":"203.0.113.10 (Proxy)","inBytes":4135,"localAddress":"10.1.2.133:52068","url":"collect.moomoo.com:443","key":{"deviceID":"6F0C2A8E-1B7D-4E55-9A51-2C3D4E5F6071","session":1792921314590,"surgeID":61456},"policyPath":["AI","US-Hysteria2"],"state":"completed","geo":{"organization":"Cloudflare, Inc.","asn":13335,"countryCode":"US"},"port":443,"startedAt":814700301.2552519,"host":"collect.moomoo.com","setupCompletedAt":814700301.2568312,"rule":"Global · AI","chain":[{"startTime":814692800.5,"path":"\/Applications\/moomoo.app\/Contents\/MacOS\/moomoo","name":"moomoo","pid":21046}],"outBytes":1691,"bundlePath":"\/Applications\/moomoo.app","processPath":"\/Applications\/moomoo.app\/Contents\/MacOS\/moomoo","isNew":false,"method":"HTTPS"}
+    """#
+
+    @Test func replaysRowsThePreviousBuildSpooled() throws {
+        let temp = CaptureTempDirectory()
+        try Data((Self.previousBuildLine + "\n").utf8).write(to: temp.url.appending(path: "000001.jsonl"))
+        var spool = CaptureSpool(directory: temp.url, limit: 1000)
+        let found = spool.count
+        #expect(found == 1)
+        let oldest = spool.oldestSegment()
+        let segment = try #require(oldest)
+        let row = try #require(segment.rows.first, "a row without the new fields still decodes")
+        #expect(row.key.surgeID == 61456 && row.host == "collect.moomoo.com" && row.state == .completed)
+        #expect(row.startedAt == Date(timeIntervalSince1970: 1793007501.255252))
+        #expect(row.chain.first?.name == "moomoo" && row.geo?.asn == 13335 && row.notes.count == 2)
+        #expect(row.timing == nil && row.entryMode == nil && row.originalPolicy == nil && row.modified == nil)
+        #expect(row.endReason == nil && row.remoteIPSource == nil && row.remoteIPResolvedAt == nil)
+
+        // And a row of this build round-trips its details.
+        var detailed = row
+        detailed.timing = [RequestTimingRecord(name: "Rule Evaluating", duration: 0.0004)]
+        detailed.entryMode = 40
+        detailed.endReason = "TCP error: Connection reset"
+        detailed.remoteIPSource = .tidemarkLookup
+        detailed.remoteIPResolvedAt = row.startedAt
+        try spool.append([detailed])
+        spool.removeSegment(segment.id)
+        let replayed = spool.oldestSegment()?.rows
+        #expect(replayed == [detailed])
+    }
+
     @Test func appendsDuringReplayGoToANewSegment() throws {
         let temp = CaptureTempDirectory()
         var spool = CaptureSpool(directory: temp.url, limit: 100, segmentSize: 50)

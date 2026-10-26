@@ -40,7 +40,12 @@ enum CaptureRecordMapper {
             notes: notes,
             isNew: false,
             writtenAt: nil,
-            probeSessionID: nil
+            probeSessionID: nil,
+            timing: timing(request.timingRecords),
+            entryMode: request.takeoverMode,
+            originalPolicy: originalPolicy(request),
+            modified: request.modified,
+            endReason: endReason(notes: notes)
         )
     }
 
@@ -113,6 +118,38 @@ enum CaptureRecordMapper {
             }
         }
         return subRule ?? outbound
+    }
+
+    /// Why the connection ended (`RequestEndReason`): the text of the last `Disconnect:` note, or of the last UDP
+    /// note saying the flow closed (`Closed for inactivity.`, `ICMP closed`), without a trailing period. Nil until
+    /// the notes say how it ended. Surge does not document its notes: they stay the source of truth.
+    static func endReason(notes: [String]) -> String? {
+        for note in notes.reversed() {
+            let parsed = RequestTiming.parse(note: note)
+            let text = parsed?.text ?? note
+            var reason: String?
+            if let range = text.range(of: "Disconnect:"), parsed == nil || range.lowerBound == text.startIndex {
+                reason = String(text[range.upperBound...])
+            } else if let parsed, parsed.tag.caseInsensitiveCompare("UDP") == .orderedSame, parsed.text.localizedCaseInsensitiveContains("closed") {
+                reason = parsed.text
+            }
+            guard var value = reason?.trimmingCharacters(in: .whitespaces) else { continue }
+            while value.hasSuffix(".") { value.removeLast() }
+            if !value.isEmpty { return value }
+        }
+        return nil
+    }
+
+    /// Surge's per-phase timings; nil when it timed nothing (global-proxy mode).
+    static func timing(_ records: [SurgeTimingRecord]?) -> [RequestTimingRecord]? {
+        guard let records, !records.isEmpty else { return nil }
+        return records.map { RequestTimingRecord(name: $0.name, duration: $0.duration) }
+    }
+
+    /// `originalPolicyName` when Surge reports both names and they differ (a policy group's fallback, a script).
+    static func originalPolicy(_ request: SurgeRequest) -> String? {
+        guard let original = nonEmpty(request.originalPolicyName), let final = nonEmpty(request.policyName), original != final else { return nil }
+        return original
     }
 
     /// The destination IP when Surge knows it: `remoteAddress` for direct connections (not `… (Proxy)`),

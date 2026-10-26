@@ -221,6 +221,31 @@ struct CapturePipelineTests {
         #expect(surge.snapshot.dnsLookups.isEmpty)
     }
 
+    @Test func keepsSurgesDetailsAcrossEventsAndWritesThem() async throws {
+        let temp = CaptureTempDirectory()
+        let database = CaptureFakeDatabase()
+        let pipeline = makePipeline(database: database, surge: CaptureFakeSurge(), spoolDirectory: temp.url)
+        await pipeline.setDatabaseOnline(true)
+        await pipeline.beginSession(1_000)
+        let recorded = try #require(try CaptureMappingTests.recorded()[61456])
+
+        // The creation event carries no notes; the reset shows only in the last update's notes.
+        var created = recorded
+        created.notes = nil
+        created.completed = false
+        created.completedDate = nil
+        created.status = "Active"
+        await pipeline.ingest(created, now: base)
+        await pipeline.ingest(recorded, now: base.addingTimeInterval(1))
+        // A late `dump recent` snapshot from before the end changes nothing.
+        await pipeline.ingest(created, backfill: true, now: base.addingTimeInterval(2))
+        await pipeline.tick(now: base.addingTimeInterval(3))
+
+        let row = try #require(await database.rows[RequestKey(deviceID: device, session: 1_000, surgeID: 61456)])
+        #expect(row.state == .completed && row.endReason == "TCP error: Connection reset" && row.endedWithError)
+        #expect(row.entryMode == 40 && row.modified == false)
+    }
+
     @Test func matchesProbeConnectionsBySourcePort() async throws {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()

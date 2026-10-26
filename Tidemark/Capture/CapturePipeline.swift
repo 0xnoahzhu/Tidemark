@@ -672,6 +672,11 @@ actor CapturePipeline {
         if !mapped.notes.isEmpty, mapped.notes.count >= record.notes.count { record.notes = mapped.notes }
         record.pid = mapped.pid ?? record.pid
         record.processPath = mapped.processPath ?? record.processPath
+        record.timing = mapped.timing ?? record.timing
+        record.entryMode = mapped.entryMode ?? record.entryMode
+        record.originalPolicy = mapped.originalPolicy ?? record.originalPolicy
+        record.modified = mapped.modified ?? record.modified
+        record.endReason = mapped.endReason ?? record.endReason
         entry.sourcePort = request.sourcePort ?? entry.sourcePort
         entry.sourceAddress = request.sourceAddress ?? entry.sourceAddress
         entry.pathForStatistics = request.pathForStatistics ?? entry.pathForStatistics
@@ -721,14 +726,15 @@ actor CapturePipeline {
         if let stored = entries[request.id] { entry = stored }
     }
 
-    /// While recording is paused, a request recorded before the pause still gets its end (state and time
-    /// only: no bytes, attribution or first contact), so its row does not stay active until the next reconnect.
+    /// While recording is paused, a request recorded before the pause still gets its end (state, time and end
+    /// reason only: no bytes, attribution or first contact), so its row does not stay active until the next reconnect.
     private func finishWhilePaused(_ entry: inout Entry, request: SurgeRequest, now: Date) {
         guard entry.record.state == .active, !looksRecycled(request, now: now) else { return }
         let mapped = CaptureRecordMapper.record(from: request, deviceID: settings.deviceID, session: session, now: now)
         guard mapped.state != .active else { return }
         entry.record.state = mapped.state
         entry.record.completedAt = mapped.completedAt ?? max(entry.record.startedAt, now)
+        entry.record.endReason = mapped.endReason ?? entry.record.endReason
         entry.finishedAt = now
         enqueue(&entry, now: now)
         markChanged(entry.record, fresh: false)
