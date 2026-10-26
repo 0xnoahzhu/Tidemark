@@ -162,7 +162,6 @@ struct AppDetailRequestsTab: View {
             .padding(.horizontal, 20)
             .frame(height: 28)
             .background(background)
-            .animation(.easeOut(duration: 0.9), value: isFresh)
             .contentShape(Rectangle())
             .onTapGesture {
                 withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { expanded = isExpanded ? nil : record.key }
