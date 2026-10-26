@@ -142,7 +142,7 @@ struct RequestsJourney: Equatable {
         /// Surge's words (`TCP error: Connection reset`), nil when its notes do not say.
         var reason: String?
         var state: RequestState
-        /// The error the proxy node reported for the host as the request ended.
+        /// The error the request's own proxy node reported for the host as the request ended.
         var proxyError: ProxyNodeError?
         var duration: TimeInterval?
         var inBytes: Int64
@@ -188,7 +188,7 @@ struct RequestsJourney: Equatable {
                 offset: record.completedAt.map { max(0, $0.timeIntervalSince(record.startedAt)) },
                 reason: record.endReason ?? CaptureRecordMapper.endReason(notes: record.notes),
                 state: record.state,
-                proxyError: related?.proxyErrors.first,
+                proxyError: Self.proxyError(of: record, related: related),
                 duration: record.duration,
                 inBytes: record.inBytes,
                 outBytes: record.outBytes
@@ -214,6 +214,13 @@ struct RequestsJourney: Equatable {
         if let matched = notes.matchedIP, matched != dns.shownIP?.ip { dns.matchedIP = matched }
         guard dns.lookup != nil || dns.answer != nil || dns.resolvedByProxy || dns.shownIP != nil else { return nil }
         return dns
+    }
+
+    /// The error the request's own node reported for its host as it ended: errors are joined by host and time, so one
+    /// another node reported, or one for a request that never left through a proxy, is not its.
+    private static func proxyError(of record: RequestRecord, related: RequestRelatedRecords?) -> ProxyNodeError? {
+        guard isProxied(record), let final = record.finalPolicy else { return nil }
+        return related?.proxyErrors.first { $0.policy == final }
     }
 
     /// The decision a stored rule tells (`Global · AI`, `Direct`, else the matched rule).

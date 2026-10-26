@@ -285,6 +285,30 @@ struct RequestsJourneyTests {
         #expect(end.proxyError == error)
     }
 
+    /// Proxy errors are joined by host and time: only one the request's own node reported is its.
+    @Test func takesOnlyItsOwnNodesError() {
+        let record = F.globalModeReset()
+        func end(_ record: RequestRecord, _ errors: [ProxyNodeError]) -> RequestsJourney.End? {
+            let journey = RequestsJourney(record: record, related: RequestRelatedRecords(proxyErrors: errors))
+            if case .end(let end) = journey.stages.last { return end }
+            return nil
+        }
+        let other = ProxyNodeError(deviceID: F.mac, policy: "HK-01", lineHash: "POLICY::2", at: record.completedAt!, targetHost: record.host,
+                                   error: "Stream closed")
+        var own = other
+        own.policy = "AT&T-RackNerd-Hysteria2"
+        own.error = "Connection refused"
+        #expect(end(record, [other])?.proxyError == nil)
+        #expect(end(record, [other, own])?.proxyError == own)
+
+        var direct = record
+        direct.policyPath = ["DIRECT"]
+        direct.remoteAddress = "43.175.21.9"
+        var directError = other
+        directError.policy = "DIRECT"
+        #expect(end(direct, [directError])?.proxyError == nil)
+    }
+
     @Test func aDirectIPLiteralNeedsNoDNS() {
         let record = F.record(
             host: "183.3.226.35", started: "09:00:00.000000", setup: "09:00:00.020000", completed: nil,
