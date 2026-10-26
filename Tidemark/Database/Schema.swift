@@ -83,7 +83,9 @@ enum Schema {
     ///   catalog-only change: nothing is rewritten. One `ALTER`, taken before the new tables lock `devices`, so
     ///   the migration never waits for `requests` while holding a lock capture's writes need.
     /// * `dns_answers`: Surge's `dns` watch events, completed from `dump dns`, per Mac.
-    /// * `proxy_errors`: the errors `proxy-runtime-status` reports for the proxy nodes that carry requests.
+    /// * `proxy_errors`: the errors `proxy-runtime-status` reports for the proxy nodes that carry requests, keyed by
+    ///   the node's name: Tidemark may ask a node by name before Surge lists its line hash, and a line hash changes
+    ///   with the profile, while the node lists the same errors.
     private static let v4 = """
     ALTER TABLE requests
         ADD COLUMN IF NOT EXISTS timing jsonb,
@@ -116,7 +118,7 @@ enum Schema {
         at          timestamptz NOT NULL,
         target_host text NOT NULL,
         error       text NOT NULL,
-        PRIMARY KEY (device_id, line_hash, at, target_host)
+        PRIMARY KEY (device_id, policy, at, target_host)
     );
     """
 

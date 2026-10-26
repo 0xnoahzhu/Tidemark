@@ -98,9 +98,9 @@ extension RequestRecord {
 /// its last 15, so Tidemark polls the nodes that carry requests. Requests join it by host and completion time.
 struct ProxyNodeError: Hashable, Codable, Sendable {
     var deviceID: DeviceID
-    /// The node's name (a request's final policy).
+    /// The node's name (a request's final policy); it identifies the error, with the time and host.
     var policy: String
-    /// The node's `POLICY::…` line hash, or its name when Surge listed none.
+    /// What Tidemark asked the node by: its `POLICY::…` line hash, or its name when Surge listed none.
     var lineHash: String
     /// When the error happened (Surge's clock, this Mac's).
     var at: Date

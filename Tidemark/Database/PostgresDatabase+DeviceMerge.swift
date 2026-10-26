@@ -475,7 +475,7 @@ enum DeviceMergeSQL {
         "UPDATE dns_answers SET device_id = $2 WHERE device_id = $1",
         """
         DELETE FROM proxy_errors f USING proxy_errors i
-        WHERE f.device_id = $1 AND i.device_id = $2 AND i.line_hash = f.line_hash AND i.at = f.at AND i.target_host = f.target_host
+        WHERE f.device_id = $1 AND i.device_id = $2 AND i.policy = f.policy AND i.at = f.at AND i.target_host = f.target_host
         """,
         "UPDATE proxy_errors SET device_id = $2 WHERE device_id = $1",
         "DELETE FROM devices WHERE id = $1",

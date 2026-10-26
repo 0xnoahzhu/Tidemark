@@ -48,7 +48,7 @@ extension PostgresDatabase {
     }
 
     /// Inserts on the writer pool; an error already stored (same Mac, node, time and host: a node lists its last 15
-    /// errors every time it is asked) is skipped.
+    /// errors every time it is asked, by whichever name or line hash) is skipped.
     func saveProxyErrors(_ errors: [ProxyNodeError]) async throws {
         guard !errors.isEmpty else { return }
         let columns = ["device_id", "policy", "line_hash", "at", "target_host", "error"]
@@ -63,7 +63,7 @@ extension PostgresDatabase {
                 ]
                 sql.append("(" + values.joined(separator: ", ") + ")")
             }
-            sql.append(" ON CONFLICT (device_id, line_hash, at, target_host) DO NOTHING")
+            sql.append(" ON CONFLICT (device_id, policy, at, target_host) DO NOTHING")
             statements.append(sql.query)
         }
         try await withTransaction(on: .writer) { [statements] connection in
@@ -133,7 +133,7 @@ extension PostgresDatabase {
         if let device = scope.deviceID { sql.append(" AND e.device_id = \(sql.bind(device))") }
         if let from { sql.append(" AND e.at >= \(sql.bind(from))") }
         if let to { sql.append(" AND e.at <= \(sql.bind(to))") }
-        sql.append(" ORDER BY e.at DESC, e.line_hash LIMIT \(sql.bind(max(0, limit)))")
+        sql.append(" ORDER BY e.at DESC, e.policy LIMIT \(sql.bind(max(0, limit)))")
         return try await rows(sql.query).map(Self.decodeProxyError)
     }
 

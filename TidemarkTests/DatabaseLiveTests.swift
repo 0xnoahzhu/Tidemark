@@ -1525,6 +1525,10 @@ struct DatabaseLiveTests {
                              error(end, device: mini.id)]
             try await db.saveProxyErrors(errorList)
             try await db.saveProxyErrors(errorList)
+            // The same error again, from the node asked by its name: an error is the node's, however it was asked.
+            var byName = errorList[0]
+            byName.lineHash = byName.policy
+            try await db.saveProxyErrors([byName])
             #expect(try await db.proxyErrors(forHost: "api.github.com", from: nil, to: nil, scope: .all, limit: 10).count == 3)
             let found = try await db.proxyErrors(for: request4)
             #expect(found.count == 1 && found.allSatisfy { Fixture.close($0.at, end) }, "same Mac and host, within a second")
@@ -1594,6 +1598,7 @@ struct DatabaseLiveTests {
             let error = ProxyNodeError(deviceID: old.id, policy: "US", lineHash: "POLICY::1", at: Fixture.now, targetHost: "api.github.com", error: "Stream closed")
             var sameError = error
             sameError.deviceID = new.id
+            sameError.lineHash = "US"
             var otherError = error
             otherError.targetHost = "github.com"
             try await db.saveProxyErrors([error, sameError, otherError])
