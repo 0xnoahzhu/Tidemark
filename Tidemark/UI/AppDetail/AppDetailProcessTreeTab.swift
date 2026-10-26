@@ -37,7 +37,8 @@ struct AppDetailProcessTreeTab: View {
                     .frame(maxWidth: 780, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
 
-                VStack(spacing: 0) {
+                // Lazy, so a big tree only builds and measures the rows on screen.
+                LazyVStack(spacing: 0) {
                     AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
                         Text(tr("Process", "AppDetail"))
                         Text(tr("Domains", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
