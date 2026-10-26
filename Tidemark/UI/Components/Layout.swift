@@ -197,18 +197,37 @@ extension PageHeader where Accessory == EmptyView {
     }
 }
 
-/// Centered placeholder for empty lists.
+/// Centered placeholder for empty lists: the system's `ContentUnavailableView` as it draws at 1.0 (a 36 px symbol in
+/// the tertiary ink, a 15 px bold title and a 15 px message, 380 px wide at most), laid out here in design px so it
+/// grows with the UI scale, which the system's does not.
 struct EmptyState: View {
     var systemImage: String
     var title: String
     var message: String?
 
     var body: some View {
-        ContentUnavailableView {
-            Label(title, systemImage: systemImage)
-        } description: {
-            if let message { Text(message) }
+        VStack(spacing: 0) {
+            Image(systemName: systemImage)
+                .font(.design(36))
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, 24.px)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.design(15, .bold))
+                .accessibilityAddTraits(.isHeader)
+            if let message {
+                Text(message)
+                    .font(.design(15))
+                    .padding(.top, 6.px)
+            }
         }
+        .multilineTextAlignment(.center)
         .foregroundStyle(Theme.ink2)
+        .accessibilityElement(children: .combine)
+        .frame(maxWidth: 380.px)
+        .padding(20.px)
+        // A little above the middle, as the system's.
+        .padding(.bottom, 18.px)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
