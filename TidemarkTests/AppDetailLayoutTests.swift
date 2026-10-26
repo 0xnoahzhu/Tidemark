@@ -117,6 +117,23 @@ import Testing
         #expect(Self.laidOut(AppDetailRequestsTab.columns(factor: Self.factor), total: total) <= total + 0.001)
     }
 
+    /// At the narrowest window, beside a scroller, BY IP gives way before the host, and the host keeps ten characters
+    /// of an address beside the method and NEW, in both languages.
+    @Test func hostKeepsItsTextAtTheNarrowestWindow() {
+        let total = Self.narrowestPage - 2 * Self.px(20) - Self.scroller
+        let column = Self.widths(AppDetailRequestsTab.columns(factor: Self.factor), total: total)[2]
+        let room = column - AppDetailRequestsTab.methodWidth(factor: Self.factor) - Self.px(6)
+        let host = Self.width("183.3.226.35", Self.system(12))
+        for (byIP, new) in [("BY IP", "NEW"), ("直连 IP", "新")] {
+            let items = [AppDetailNameLayout.Item(ideal: Self.badge(byIP), narrowest: 0),
+                         AppDetailNameLayout.Item(ideal: Self.badge(new), narrowest: Self.badge(new))]
+            let widths = AppDetailNameLayout.widths(name: host, items: items, spacing: Self.px(6), width: room)
+            #expect(widths[1] == 0, "\(byIP)")
+            #expect(widths[2] == Self.badge(new), "\(new)")
+            #expect(widths[0] >= Self.width("255.255.25", Self.system(12)), "\(new)")
+        }
+    }
+
     /// The Domains & IPs panes split 1.4 to 1, as in the design. At the narrowest window, beside scrollers, the Domains
     /// pane drops First seen so the site keeps its 150 px and the network its 90 px, and neither pane's columns run
     /// past it.

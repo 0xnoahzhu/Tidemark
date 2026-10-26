@@ -319,9 +319,18 @@ private struct AppDetailRequestRow: View {
                     .foregroundStyle(Theme.ink2)
                     .lineLimit(1)
                     .frame(width: AppDetailRequestsTab.methodWidth, alignment: .leading)
-                Text(record.host).lineLimit(1).truncationMode(.middle)
-                if record.isIPLiteral { TagBadge(text: tr("BY IP", "AppDetail")) }
-                if record.isNew { TagBadge(text: tr("NEW", "AppDetail"), style: .new) }
+                // In a narrow column BY IP goes before the host shortens: the host is the address it marks, and
+                // Remote IP repeats it.
+                AppDetailNameLayout(spacing: 6.px) {
+                    Text(record.host).lineLimit(1).truncationMode(.middle)
+                    if record.isIPLiteral {
+                        ViewThatFits(in: .horizontal) {
+                            TagBadge(text: tr("BY IP", "AppDetail"))
+                            Color.clear.frame(width: 0, height: 0)
+                        }
+                    }
+                    if record.isNew { TagBadge(text: tr("NEW", "AppDetail"), style: .new) }
+                }
             }
 
             Text(record.remoteIP ?? "—")
