@@ -93,29 +93,17 @@ struct SiteProbeView: View {
         .padding(.bottom, 8)
     }
 
-    /// The design's row: isolation, "Records until you press Stop", Desktop / iPhone, own window, proxy port.
+    /// The design's row: isolation, "Records until you press Stop", Desktop / iPhone, own window, proxy port. When the
+    /// page is too narrow for one line, Desktop / iPhone and own window go to a second line.
     private var optionsRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 18) {
-                isolationToggle
-                recordsUntilStop
-                modePicker
-                ownWindowToggle
-                Spacer(minLength: 8)
-                proxyCaption
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 18) {
-                    isolationToggle
-                    recordsUntilStop
-                    Spacer(minLength: 8)
-                    proxyCaption
-                }
-                HStack(spacing: 18) {
-                    modePicker
-                    ownWindowToggle
-                }
-            }
+        ProbeOptionsLayout(spacing: 18, lineSpacing: 8, minimumGap: 8) {
+            isolationToggle
+            recordsUntilStop
+            modePicker
+                .layoutValue(key: ProbeOptionsLayout.Wraps.self, value: true)
+            ownWindowToggle
+                .layoutValue(key: ProbeOptionsLayout.Wraps.self, value: true)
+            proxyCaption
         }
         .font(.system(size: 12))
         .padding(.horizontal, 20)
@@ -163,6 +151,7 @@ struct SiteProbeView: View {
                 .font(Theme.mono(11))
                 .foregroundStyle(Theme.ink3)
                 .fixedSize()
+                .layoutValue(key: ProbeOptionsLayout.Trailing.self, value: true)
         }
     }
 
@@ -361,6 +350,97 @@ private struct ProbeSessionsColumn: View {
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// The options row's layout: the controls `spacing` apart on one line and the `Trailing` caption at its far end, at
+/// least `minimumGap` (and `spacing` on either side) after them, as an `HStack` with a `Spacer` would place them.
+/// When that line is wider than the row, the `Wraps` controls move to a second line, `lineSpacing` below. Each line
+/// centers its controls vertically.
+///
+/// One layout rather than a `ViewThatFits` of both arrangements, which would build and measure every control twice.
+private struct ProbeOptionsLayout: Layout {
+    /// Controls that move to the second line when the row is too narrow.
+    struct Wraps: LayoutValueKey {
+        static let defaultValue = false
+    }
+
+    /// The caption at the far end of the first line.
+    struct Trailing: LayoutValueKey {
+        static let defaultValue = false
+    }
+
+    var spacing: CGFloat
+    var lineSpacing: CGFloat
+    var minimumGap: CGFloat
+
+    private struct Line {
+        var items: [Int] = []
+        var trailing: Int?
+        var height: CGFloat = 0
+        /// Width of the controls, the gap and the caption, with the gap at its minimum.
+        var minimumWidth: CGFloat = 0
+        /// Whether the line ends in the flexible gap (and the caption, if there is one).
+        var hasGap = false
+    }
+
+    private struct Arrangement {
+        var lines: [Line]
+        var sizes: [CGSize]
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let arrangement = arrange(subviews, width: proposal.width)
+        let width = arrangement.lines.map { $0.hasGap ? max(proposal.width ?? $0.minimumWidth, $0.minimumWidth) : $0.minimumWidth }.max() ?? 0
+        let heights = arrangement.lines.map(\.height)
+        return CGSize(width: width, height: heights.reduce(0, +) + lineSpacing * CGFloat(max(0, heights.count - 1)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let arrangement = arrange(subviews, width: proposal.width)
+        var y = bounds.minY
+        for line in arrangement.lines {
+            let center = y + line.height / 2
+            var x = bounds.minX
+            for index in line.items {
+                let size = arrangement.sizes[index]
+                subviews[index].place(at: CGPoint(x: x, y: center), anchor: .leading, proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            if let index = line.trailing {
+                // The gap takes what the proposal leaves, so the caption ends at the line's end.
+                let size = arrangement.sizes[index]
+                let end = bounds.minX + max(proposal.width ?? line.minimumWidth, line.minimumWidth)
+                subviews[index].place(at: CGPoint(x: end - size.width, y: center), anchor: .leading, proposal: ProposedViewSize(size))
+            }
+            y += line.height + lineSpacing
+        }
+    }
+
+    /// Everything on one line when it fits in `width` (or `width` is unknown), else two lines.
+    private func arrange(_ subviews: Subviews, width: CGFloat?) -> Arrangement {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let trailing = subviews.indices.first { subviews[$0][Trailing.self] }
+        let controls = subviews.indices.filter { $0 != trailing }
+        let single = line(controls, trailing: trailing, gap: true, sizes: sizes)
+        if width.map({ single.minimumWidth <= $0 }) ?? true {
+            return Arrangement(lines: [single], sizes: sizes)
+        }
+        let first = line(controls.filter { !subviews[$0][Wraps.self] }, trailing: trailing, gap: true, sizes: sizes)
+        let second = line(controls.filter { subviews[$0][Wraps.self] }, trailing: nil, gap: false, sizes: sizes)
+        return Arrangement(lines: [first, second], sizes: sizes)
+    }
+
+    private func line(_ items: [Int], trailing: Int?, gap: Bool, sizes: [CGSize]) -> Line {
+        var line = Line(items: items, trailing: trailing, hasGap: gap)
+        let widths = items.map { sizes[$0].width }
+        line.minimumWidth = widths.reduce(0, +) + spacing * CGFloat(max(0, widths.count - 1))
+        if gap {
+            line.minimumWidth += (widths.isEmpty ? 0 : spacing) + minimumGap
+            if let trailing { line.minimumWidth += spacing + sizes[trailing].width }
+        }
+        line.height = (items + [trailing].compactMap { $0 }).map { sizes[$0].height }.max() ?? 0
+        return line
     }
 }
 
