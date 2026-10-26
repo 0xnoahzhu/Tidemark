@@ -25,7 +25,7 @@ struct RequestsView: View {
             // after more update-constraints passes than the window has views. `inspectorColumnWidth` sets the width.
             RequestsInspectorHost()
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                .inspectorColumnWidth(min: 280, ideal: 316, max: 440)
+                .inspectorColumnWidth(min: 280.px, ideal: 316.px, max: 440.px)
         }
         .navigationTitle(tr("Requests", "Requests"))
         .navigationSubtitle(tr("Every request Surge sees, kept in PostgreSQL", "Requests"))
@@ -59,7 +59,7 @@ private struct RequestsToolbar: ToolbarContent {
 
         ToolbarItem(placement: .primaryAction) {
             ToolbarSearchField(text: $nav.requestSearch, prompt: tr("Filter host, IP, process", "Requests"))
-                .frame(width: 200)
+                .frame(width: 200.px)
         }
         // Outlasts Live / History in a narrow window: the field has no usable form in the overflow menu.
         .visibilityPriority(Self.searchPriority)
@@ -86,18 +86,18 @@ private struct RequestsRecordingButton: View {
         Button {
             model.nav.confirmRecordingToggle = true
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 7.px) {
                 if recording {
-                    StatusDot(color: Theme.recording, size: 8, pulsing: !reduceMotion && !reducedResources)
+                    StatusDot(color: Theme.recording, size: 8.px, pulsing: !reduceMotion && !reducedResources)
                 } else {
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    RoundedRectangle(cornerRadius: 2.px, style: .continuous)
                         .fill(Theme.ink3)
-                        .frame(width: 8, height: 8)
+                        .frame(width: 8.px, height: 8.px)
                 }
                 Text(recording ? tr("Recording", "Requests") : tr("Resume", "Requests"))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.design(12, .medium))
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 4.px)
         }
         .help(recording ? tr("Recording to PostgreSQL. Click to pause.", "Requests") : tr("Recording is paused. Click to resume.", "Requests"))
         .accessibilityLabel(recording ? tr("Pause Recording…", "Requests") : tr("Resume Recording…", "Requests"))

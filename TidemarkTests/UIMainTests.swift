@@ -229,13 +229,23 @@ struct RequestsRowTintTests {
 
 @MainActor
 struct RequestsTableLayoutTests {
-    /// The Remote IP column is fixed to the widest IPv4 address in the cell's 11 pt SF Mono, with the few
+    /// The factors the column widths are checked at: every step the UI scale offers.
+    static let factors: [CGFloat] = [1, 1.1, 1.2, 1.3, 1.4, 1.5]
+
+    private static func width(_ text: String, _ font: NSFont) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: font]).width
+    }
+
+    /// The Remote IP column is fixed to the widest IPv4 address in the cell's 11 px SF Mono, with the few
     /// points of inset the fixed Time column also leaves around its text, so a rebuilt table can't squeeze it.
     @Test func remoteIPColumnFitsEveryIPv4Address() {
-        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        let widest = ("255.255.255.255" as NSString).size(withAttributes: [.font: font]).width
-        #expect(widest + 6 <= RequestsTable.remoteIPWidth)
-        #expect(RequestsTable.remoteIPWidth <= 124, "the column stays narrow; App · Process and Host get the rest")
+        for factor in Self.factors {
+            let font = NSFont.monospacedSystemFont(ofSize: 11 * factor, weight: .regular)
+            let column = RequestsTable.remoteIPWidth(factor: factor)
+            #expect(Self.width("255.255.255.255", font) + 6 <= column, "at \(factor)")
+            #expect(column <= UIScale.length(124, factor: factor), "the column stays narrow; App · Process and Host get the rest")
+        }
+        #expect(RequestsTable.remoteIPWidth == RequestsTable.remoteIPWidth(factor: UIScale.factor))
     }
 
     /// History's time column fits the date and the time to the millisecond in both languages.
@@ -246,30 +256,41 @@ struct RequestsTableLayoutTests {
         #expect(english == "Oct 24 23:59:59.999")
         #expect(chinese == "10月24日 23:59:59.999")
         #expect(RequestsTimeCell.label(date, style: .clock, locale: Locale(identifier: "en")) == "23:59:59.999")
-        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        for label in [english, chinese, "Sep 30 23:59:59.999"] {
-            #expect((label as NSString).size(withAttributes: [.font: font]).width + 6 <= RequestsTable.historyTimeWidth, "\(label)")
+        for factor in Self.factors {
+            let font = NSFont.monospacedSystemFont(ofSize: 11 * factor, weight: .regular)
+            for label in [english, chinese, "Sep 30 23:59:59.999"] {
+                #expect(Self.width(label, font) + 6 <= RequestsTable.historyTimeWidth(factor: factor), "\(label) at \(factor)")
+            }
         }
+        #expect(RequestsTable.historyTimeWidth == RequestsTable.historyTimeWidth(factor: UIScale.factor))
     }
 
     /// A rebuilt table leaves Policy at its minimum, which still shows the group and enough of the final policy
     /// to tell nodes with the same protocol apart (`AI › …kNerd-Hysteria2`, not `AI › …Hysteria2`).
     @Test func policyColumnKeepsTheGroupAndTheEndOfThePolicy() {
-        let font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        let group = ("AI › " as NSString).size(withAttributes: [.font: font]).width
-        let leafEnd = ("…kNerd-Hysteria2" as NSString).size(withAttributes: [.font: font]).width
-        // 6 pt chip padding on each side.
-        #expect(group + leafEnd + 12 <= RequestsTable.policyMinWidth)
-        #expect(RequestsTable.policyMinWidth >= 84, "at least the design's column")
+        for factor in Self.factors {
+            let font = NSFont.systemFont(ofSize: 11 * factor, weight: .medium)
+            let group = Self.width("AI › ", font)
+            let leafEnd = Self.width("…kNerd-Hysteria2", font)
+            // 6 px chip padding on each side.
+            let column = RequestsTable.policyMinWidth(factor: factor)
+            #expect(group + leafEnd + 2 * UIScale.length(6, factor: factor) <= column, "at \(factor)")
+            #expect(column >= UIScale.length(84, factor: factor), "at least the design's column")
+        }
+        #expect(RequestsTable.policyMinWidth == RequestsTable.policyMinWidth(factor: UIScale.factor))
     }
 
     /// At its minimum the App · Process column still shows the tile, an app name like `Brave Browser` and the
     /// start of the process.
     @Test func appColumnKeepsTheAppName() {
-        let name = ("Brave Browser" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium)]).width
-        let process = (" › …" as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width
-        // 16 pt tile and 6 pt spacing.
-        #expect(22 + name + process <= RequestsTable.appMinWidth)
+        for factor in Self.factors {
+            let name = Self.width("Brave Browser", NSFont.systemFont(ofSize: 12 * factor, weight: .medium))
+            let process = Self.width(" › …", NSFont.systemFont(ofSize: 12 * factor))
+            // 16 px tile and 6 px spacing.
+            let tile = UIScale.length(16, factor: factor) + UIScale.length(6, factor: factor)
+            #expect(tile + name + process <= RequestsTable.appMinWidth(factor: factor), "at \(factor)")
+        }
+        #expect(RequestsTable.appMinWidth == RequestsTable.appMinWidth(factor: UIScale.factor))
     }
 
     /// "Open <App>" in the inspector shows the app's Domains & IPs, as in the design.

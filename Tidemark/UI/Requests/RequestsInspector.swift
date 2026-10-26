@@ -12,14 +12,14 @@ struct RequestsInspector: View {
             RequestsInspectorHeader(record: record, close: close)
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 18.px) {
                     RequestsInspectorChain(record: record, identity: identity)
                     RequestsInspectorConnection(record: record)
                     RequestsInspectorTiming(record: record)
                     RequestsInspectorStored(record: record)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+                .padding(.horizontal, 16.px)
+                .padding(.vertical, 14.px)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollEdgeEffectStyle(.soft, for: .vertical)
@@ -35,13 +35,13 @@ private struct RequestsInspectorHeader: View {
     var close: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6.px) {
+            HStack(spacing: 6.px) {
                 Text(record.method.uppercased())
                     .font(Theme.mono(10, weight: .bold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Theme.fill, in: .rect(cornerRadius: 5, style: .continuous))
+                    .padding(.horizontal, 6.px)
+                    .padding(.vertical, 2.px)
+                    .background(Theme.fill, in: .rect(cornerRadius: 5.px, style: .continuous))
                     .foregroundStyle(Theme.ink2)
                 if let status = RequestsPresentation.status(of: record) {
                     RequestsStatusChip(status: status)
@@ -49,12 +49,12 @@ private struct RequestsInspectorHeader: View {
                 if record.isNew {
                     TagBadge(text: tr("FIRST VISIT", "Requests"), style: .new)
                 }
-                Spacer(minLength: 4)
+                Spacer(minLength: 4.px)
                 Button(action: close) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 22, height: 22)
-                        .contentShape(.rect(cornerRadius: 6))
+                        .font(.design(11, .semibold))
+                        .frame(width: 22.px, height: 22.px)
+                        .contentShape(.rect(cornerRadius: 6.px))
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Theme.ink2)
@@ -64,8 +64,8 @@ private struct RequestsInspectorHeader: View {
             }
             // The design's 16 px / 650 host title, slightly tightened.
             Text(record.host)
-                .font(.system(size: 16, weight: .semibold))
-                .tracking(-0.16)
+                .font(.design(16, .semibold))
+                .tracking(-0.16 * UIScale.factor)
                 .foregroundStyle(Theme.ink)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -78,9 +78,9 @@ private struct RequestsInspectorHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 16.px)
+        .padding(.top, 14.px)
+        .padding(.bottom, 12.px)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -95,10 +95,10 @@ private struct RequestsStatusChip: View {
         case .failed: (tr("Failed", "Requests"), Theme.tint(27))
         }
         Text(label)
-            .font(.system(size: 10.5, weight: .semibold))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(colors.0, in: .rect(cornerRadius: 5, style: .continuous))
+            .font(.design(10.5, .semibold))
+            .padding(.horizontal, 7.px)
+            .padding(.vertical, 2.px)
+            .background(colors.0, in: .rect(cornerRadius: 5.px, style: .continuous))
             .foregroundStyle(colors.1)
     }
 }
@@ -111,19 +111,19 @@ private struct RequestsInspectorChain: View {
 
     var body: some View {
         let links = RequestsPresentation.chainLinks(for: record)
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8.px) {
             SectionLabel(text: tr("Process chain", "Requests"))
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(links.enumerated()), id: \.offset) { index, link in
                     let isLeaf = index == links.count - 1
-                    HStack(spacing: 6) {
+                    HStack(spacing: 6.px) {
                         if index > 0 {
                             Text(verbatim: "└")
                                 .font(Theme.mono(11))
                                 .foregroundStyle(Theme.ink3)
                         }
                         Text(link.name.isEmpty ? RequestsPresentation.unknownProcessLabel : link.name)
-                            .font(.system(size: 12.5, weight: isLeaf ? .semibold : .regular))
+                            .font(.design(12.5, isLeaf ? .semibold : .regular))
                             .foregroundStyle(link.name.isEmpty ? Theme.ink2 : Theme.ink)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -134,22 +134,22 @@ private struct RequestsInspectorChain: View {
                                 .fixedSize()
                         }
                         if isLeaf {
-                            Spacer(minLength: 4)
+                            Spacer(minLength: 4.px)
                             TagBadge(text: tr("sent it", "Requests"), style: .accent)
                         }
                     }
-                    .padding(.leading, CGFloat(index) * 16)
-                    .frame(height: 26)
+                    .padding(.leading, CGFloat(index) * 16.px)
+                    .frame(height: 26.px)
                     .help(link.path ?? (link.name.isEmpty ? RequestsPresentation.unknownProcessLabel : link.name))
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Theme.card, in: .rect(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+            .padding(.horizontal, 10.px)
+            .padding(.vertical, 5.px)
+            .background(Theme.card, in: .rect(cornerRadius: 10.px, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10.px, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
 
             Text(attributionText)
-                .font(.system(size: 11.5))
+                .font(.design(11.5))
                 .foregroundStyle(Theme.ink2)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -176,21 +176,21 @@ private struct RequestsInspectorConnection: View {
     var record: RequestRecord
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8.px) {
             SectionLabel(text: tr("Connection", "Requests"))
-            VStack(alignment: .leading, spacing: 5) {
-                KeyValueRow(tr("Remote IP", "Requests"), record.remoteIP ?? record.remoteAddress ?? "—", mono: true, labelWidth: 70)
-                KeyValueRow(tr("Network", "Requests"), networkText, labelWidth: 70)
+            VStack(alignment: .leading, spacing: 5.px) {
+                KeyValueRow(tr("Remote IP", "Requests"), record.remoteIP ?? record.remoteAddress ?? "—", mono: true, labelWidth: 70.px)
+                KeyValueRow(tr("Network", "Requests"), networkText, labelWidth: 70.px)
                 if record.policyPath.isEmpty {
-                    KeyValueRow(tr("Policy", "Requests"), "—", labelWidth: 70)
+                    KeyValueRow(tr("Policy", "Requests"), "—", labelWidth: 70.px)
                 } else {
-                    KeyValueRow(label: tr("Policy", "Requests"), labelWidth: 70) {
+                    KeyValueRow(label: tr("Policy", "Requests"), labelWidth: 70.px) {
                         PolicyChip(policyPath: record.policyPath)
                     }
                 }
-                KeyValueRow(tr("Rule", "Requests"), record.rule ?? "—", mono: true, labelWidth: 70)
-                KeyValueRow(tr("Local", "Requests"), record.localAddress ?? "—", mono: true, labelWidth: 70)
-                KeyValueRow(tr("Mac", "Requests"), macText, labelWidth: 70)
+                KeyValueRow(tr("Rule", "Requests"), record.rule ?? "—", mono: true, labelWidth: 70.px)
+                KeyValueRow(tr("Local", "Requests"), record.localAddress ?? "—", mono: true, labelWidth: 70.px)
+                KeyValueRow(tr("Mac", "Requests"), macText, labelWidth: 70.px)
             }
         }
     }
@@ -224,7 +224,7 @@ private struct RequestsInspectorTiming: View {
     private func content(now: Date) -> some View {
         let phases = RequestTiming.phases(for: record, now: now)
         let total = phases.reduce(0) { $0 + $1.duration }
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 8.px) {
             HStack(alignment: .firstTextBaseline) {
                 SectionLabel(text: tr("Timing", "Requests"))
                 Spacer()
@@ -235,7 +235,7 @@ private struct RequestsInspectorTiming: View {
             }
             if phases.isEmpty {
                 Text(tr("No timing yet", "Requests"))
-                    .font(.system(size: 11.5))
+                    .font(.design(11.5))
                     .foregroundStyle(Theme.ink3)
             } else {
                 TimingBar(phases: phases)
@@ -249,7 +249,7 @@ private struct RequestsInspectorStored: View {
     var record: RequestRecord
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6.px) {
             SectionLabel(text: tr("Stored", "Requests"))
             Group {
                 if let rowID = record.rowID {
@@ -261,9 +261,9 @@ private struct RequestsInspectorStored: View {
                     Text(tr("Not written yet", "Requests"))
                 }
             }
-            .font(.system(size: 12))
+            .font(.design(12))
             .foregroundStyle(Theme.ink2)
-            .lineSpacing(3)
+            .lineHeight(Theme.noteLineHeight)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -277,7 +277,7 @@ private struct RequestsInspectorActions: View {
     var identity: AppIdentity
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 8.px) {
             if let appID = identity.appID {
                 Button(trf("Open %@", "Requests", identity.name)) {
                     model.nav.open(.app(appID), tab: RequestsPresentation.openAppTab)
@@ -295,8 +295,8 @@ private struct RequestsInspectorActions: View {
         }
         .controlSize(.regular)
         .lineLimit(1)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 16.px)
+        .padding(.vertical, 12.px)
     }
 }
 

@@ -28,7 +28,7 @@ struct RequestsHistogramChart: View {
                 }
             }
         }
-        .chartPlotStyle { plot in plot.frame(height: 64) }
+        .chartPlotStyle { plot in plot.frame(height: 64.px) }
         .accessibilityLabel(tr("Requests over time", "Requests"))
     }
 
@@ -42,7 +42,7 @@ struct RequestsHistogramChart: View {
             yEnd: .value("Requests", bin.count)
         )
         .foregroundStyle(highlighted ? Theme.accent : Theme.accentTint)
-        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2))
+        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 2.px, topTrailingRadius: 2.px))
     }
 
     /// The first label starts at its tick when it sits at the left edge, the last ends at the right edge,

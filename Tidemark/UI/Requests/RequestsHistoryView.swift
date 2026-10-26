@@ -46,9 +46,9 @@ struct RequestsHistoryView: View {
         let results = opensPage && lastSearch == nil && !history.keeps(key.query) ? Self.unloaded : history
         VStack(spacing: 0) {
             RequestsHistoryFilterBar(history: results)
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 4)
+                .padding(.horizontal, 20.px)
+                .padding(.top, 12.px)
+                .padding(.bottom, 4.px)
 
             Group {
                 if let histogram = results.histogram, histogram.counts.contains(where: { $0 > 0 }) {
@@ -61,10 +61,10 @@ struct RequestsHistoryView: View {
                     Color.clear
                 }
             }
-            .frame(height: 86)
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 6)
+            .frame(height: 86.px)
+            .padding(.horizontal, 20.px)
+            .padding(.top, 8.px)
+            .padding(.bottom, 6.px)
 
             Divider()
 
@@ -127,7 +127,7 @@ private struct RequestsHistoryFilterBar: View {
     var body: some View {
         @Bindable var nav = model.nav
         let apps = model.catalog.active + model.catalog.archived
-        HStack(spacing: 8) {
+        HStack(spacing: 8.px) {
             RequestsFilterMenu(title: tr("Time range", "Requests"), label: RequestsHistoryLabels.range(nav.history.range), selection: $nav.history.range) {
                 ForEach(HistoryRange.allCases, id: \.self) { range in
                     Text(RequestsHistoryLabels.range(range)).tag(range)
@@ -156,7 +156,7 @@ private struct RequestsHistoryFilterBar: View {
                     Text(RequestsHistoryLabels.status(status)).tag(status)
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 8.px)
             if history.isLoading {
                 ProgressView().controlSize(.small)
             }
@@ -204,7 +204,7 @@ private struct RequestsHistogramUnavailable: View {
     var message: String
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 6.px) {
             Image(systemName: "chart.bar.xaxis")
                 .foregroundStyle(Theme.ink3)
                 .accessibilityHidden(true)
@@ -215,7 +215,7 @@ private struct RequestsHistogramUnavailable: View {
                 .foregroundStyle(Theme.ink3)
                 .truncationMode(.tail)
         }
-        .font(.system(size: 12))
+        .font(.design(12))
         .lineLimit(1)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .help(message)

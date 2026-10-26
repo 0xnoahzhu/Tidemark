@@ -25,16 +25,23 @@ struct RequestsTable: View {
     /// Called when the last row comes into view (History loads its next page).
     var onReachEnd: (() -> Void)?
 
-    /// Fits History's longest time, `10月24日 23:59:59.999` in Chinese, in 11 pt SF Mono with the cell's inset.
-    static let historyTimeWidth: CGFloat = 146
-    /// Fits the widest IPv4 address (`255.255.255.255`, about 102 pt in 11 pt SF Mono) with the cell's inset.
-    static let remoteIPWidth: CGFloat = 108
+    /// Fits History's longest time, `10月24日 23:59:59.999` in Chinese, in 11 px SF Mono with the cell's inset.
+    static let historyTimeWidth = historyTimeWidth(factor: UIScale.factor)
+    /// Fits the widest IPv4 address (`255.255.255.255`, about 102 px in 11 px SF Mono) with the cell's inset.
+    static let remoteIPWidth = remoteIPWidth(factor: UIScale.factor)
     /// The App · Process column never gets narrower than the tile and an app name like `Brave Browser` with
     /// the start of its process (`Brave Browser › …`).
-    static let appMinWidth: CGFloat = 130
+    static let appMinWidth = appMinWidth(factor: UIScale.factor)
     /// The Policy column never gets narrower than the group plus enough of the final policy to tell nodes
     /// apart (`AI › …kNerd-Hysteria2`).
-    static let policyMinWidth: CGFloat = 140
+    static let policyMinWidth = policyMinWidth(factor: UIScale.factor)
+
+    // The widths above at any UI scale. Text grows with the scale, and SF Pro a little less than its size, so a
+    // width in design px fits its text at every factor.
+    static func historyTimeWidth(factor: CGFloat) -> CGFloat { UIScale.length(146, factor: factor) }
+    static func remoteIPWidth(factor: CGFloat) -> CGFloat { UIScale.length(108, factor: factor) }
+    static func appMinWidth(factor: CGFloat) -> CGFloat { UIScale.length(130, factor: factor) }
+    static func policyMinWidth(factor: CGFloat) -> CGFloat { UIScale.length(140, factor: factor) }
 
     var body: some View {
         // How a table shares width out depends on how it was built. A table that grows with its window widens
@@ -56,7 +63,7 @@ struct RequestsTable: View {
         .alternatingRowBackgrounds()
         // A table reports the sum of its column widths as its minimum, which would push the split view past the
         // window once the inspector opens; below that width it scrolls horizontally instead.
-        .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 360.px, maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @TableColumnBuilder<RequestRecord, Never>
@@ -73,17 +80,17 @@ struct RequestsTable: View {
                     if let onReachEnd, record.key == rows.last?.key { onReachEnd() }
                 }
         }
-        .width(timeStyle == .clock ? 86 : Self.historyTimeWidth)
+        .width(timeStyle == .clock ? 86.px : Self.historyTimeWidth)
 
         TableColumn(Self.header(tr("App · Process", "Requests"))) { record in
             RequestsAppCell(model: model, record: record)
         }
-        .width(min: Self.appMinWidth, ideal: 180)
+        .width(min: Self.appMinWidth, ideal: 180.px)
 
         TableColumn(Self.header(tr("Host", "Requests"))) { record in
             RequestsHostCell(record: record, showsBadges: showsHostBadges)
         }
-        .width(min: 140, ideal: 220)
+        .width(min: 140.px, ideal: 220.px)
 
         TableColumn(Self.header(tr("Remote IP", "Requests"))) { record in
             RequestsRemoteIPCell(remoteIP: record.remoteIP)
@@ -94,12 +101,12 @@ struct RequestsTable: View {
             // The shared chip: a truncated policy keeps its group and the end of the final policy.
             PolicyChip(policyPath: record.policyPath, maxWidth: .infinity)
         }
-        .width(min: Self.policyMinWidth, ideal: 170, max: 200)
+        .width(min: Self.policyMinWidth, ideal: 170.px, max: 200.px)
 
         TableColumn(Self.header(tr("Size", "Requests"))) { record in
             RequestsSizeCell(record: record)
         }
-        .width(64)
+        .width(64.px)
         .alignment(.trailing)
     }
 
@@ -111,10 +118,10 @@ struct RequestsTable: View {
         return RequestsPresentation.isFresh(record, now: now)
     }
 
-    /// The design's header labels: 11 pt semibold in the secondary ink.
+    /// The design's header labels: 11 px semibold in the secondary ink.
     private static func header(_ title: String) -> Text {
         Text(title)
-            .font(.system(size: 11, weight: .semibold))
+            .font(.design(11, .semibold))
             .foregroundStyle(Theme.ink2)
     }
 }
@@ -147,13 +154,13 @@ struct RequestsAppCell: View {
         let identity = model.requestsIdentity(for: record)
         let process = RequestsPresentation.processName(of: record)
         let suffix = process.map { $0 != identity.name ? " › " + $0 : "" } ?? ""
-        HStack(spacing: 6) {
+        HStack(spacing: 6.px) {
             if model.devices.showsDeviceBadges {
                 DeviceBadge(shortName: model.devices.shortName(record.deviceID), hue: model.devices.hue(record.deviceID))
             }
-            AppTile(identity: identity, size: 16)
+            AppTile(identity: identity, size: 16.px)
             Text("\(Text(identity.name).fontWeight(.medium))\(Text(suffix).foregroundStyle(.secondary))")
-                .font(.system(size: 12))
+                .font(.design(12))
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
@@ -167,14 +174,14 @@ struct RequestsHostCell: View {
     var showsBadges = true
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 6.px) {
             Text(record.method.uppercased())
                 .font(Theme.mono(9.5, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(width: 46, alignment: .leading)
+                .frame(width: 46.px, alignment: .leading)
             Text(record.host)
-                .font(.system(size: 12))
+                .font(.design(12))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .layoutPriority(1)

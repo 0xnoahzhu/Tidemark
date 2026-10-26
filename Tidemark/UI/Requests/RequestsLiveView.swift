@@ -59,18 +59,18 @@ private struct RequestsLiveFooter: View {
     var shown: Int
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 8.px) {
             Text(trf("%1$@ most recent shown · %2$@ written this session", "Requests", Fmt.count(shown), Fmt.count(model.live.writtenThisSession)))
                 .contentTransition(.numericText())
-            Spacer(minLength: 8)
+            Spacer(minLength: 8.px)
             Text(verbatim: "surge-cli --raw watch request")
                 .font(Theme.mono(11))
         }
-        .font(.system(size: 11))
+        .font(.design(11))
         .foregroundStyle(Theme.ink3)
         .lineLimit(1)
-        .padding(.horizontal, 14)
-        .frame(height: 28)
+        .padding(.horizontal, 14.px)
+        .frame(height: 28.px)
         .overlay(alignment: .top) { Divider() }
     }
 }
