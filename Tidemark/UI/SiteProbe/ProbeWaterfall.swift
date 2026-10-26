@@ -178,22 +178,26 @@ private struct ProbeWaterfallBar: View {
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3, style: .continuous).fill(Theme.fill)
-                ForEach(Array(marks.enumerated()), id: \.offset) { _, mark in
-                    Rectangle()
-                        .fill(Theme.ink3.opacity(0.5))
-                        .frame(width: 1, height: 18)
-                        .offset(x: width * mark)
+            RoundedRectangle(cornerRadius: 3.px, style: .continuous)
+                .fill(Theme.fill)
+                // Overlays, so the 18 px markers stand out above and below the 10 px track without sizing it.
+                .overlay(alignment: .leading) {
+                    ForEach(Array(marks.enumerated()), id: \.offset) { _, mark in
+                        Rectangle()
+                            .fill(Theme.ink3.opacity(0.5))
+                            .frame(width: 1, height: 18.px)
+                            .offset(x: width * mark)
+                    }
                 }
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(row.sameSite ? Theme.accent : ProbeWaterfall.otherSite)
-                    .frame(width: max(2, width * min(row.width, 1 - row.start)))
-                    .offset(x: width * row.start)
-                    .animation(.linear(duration: 0.6), value: row.width)
-            }
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3.px, style: .continuous)
+                        .fill(row.sameSite ? Theme.accent : ProbeWaterfall.otherSite)
+                        .frame(width: max(2.px, width * min(row.width, 1 - row.start)))
+                        .offset(x: width * row.start)
+                        .animation(.linear(duration: 0.6), value: row.width)
+                }
         }
-        .frame(height: 10)
+        .frame(height: 10.px)
     }
 }
 
