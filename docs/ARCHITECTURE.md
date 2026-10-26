@@ -206,10 +206,11 @@ migration runner and every time limit.
 * **Credentials** — Settings › Database has one URL field, saved as typed, password included (in the user info
   or as libpq's `password` parameter), in `UserDefaults` (`db.url`). Tidemark keeps nothing in the Keychain:
   ad-hoc signed builds made every new build ask for access to it. The field shows the password masked
-  (`postgres://tide:••••••••@127.0.0.1:5432/tidemark`), and the mask left in place (or what is left of it) keeps
-  the saved password. Text that is not a `postgres://` or `postgresql://` URL is not stored at all, since it
-  could hold a password the mask cannot find. Logs and error messages name the server as `host:port/database`
-  (`PostgresConnectionURL.redacted`), and an invalid URL only with its password removed
+  (`postgres://tide:••••••••@127.0.0.1:5432/tidemark`), libpq's `sslpassword` too, and a mask left in place (or
+  what is left of it) keeps the saved one unless a new one is typed; the field left as shown saves nothing. Text
+  that is not a `postgres://` or `postgresql://` URL is not stored at all, since it could hold a password the mask
+  cannot find. Logs and error messages name the server as `host:port/database`
+  (`PostgresConnectionURL.redacted`), and an invalid URL only with its password and `sslpassword` removed
   (`PostgresConnectionURL.redact`). `TIDEMARK_DATABASE_URL` (environment) overrides the saved URL for
   development.
 
