@@ -344,10 +344,11 @@ and an inspector beside the Requests page's live and History tables. Native cont
 for switches, tables (`Table`), search fields and sheets; every segmented choice, though, is Tidemark's own
 `DesignSegmentedControl`, never the system's: on a rounded fill track with no dividers, each choice shows an SF
 Symbol, its title and, where the number is already at hand, a count in a small capsule, and the selected one is
-raised on a white cell (20% white in dark mode) with a hairline border. It is 40 px tall in page content and
-32 px (`.compact()`) in the window toolbar and Settings, the compact size in a toolbar growing with the UI scale no
-taller than the toolbar's 36 pt glass capsule (Settings' grows with the rest of its pane, `inToolbar: false`); a
-control with counts drops them, then its icons, where it has too little room. In a toolbar it sits outside the glass
+raised on a white cell (20% white in dark mode) with a hairline border. It is 26 px tall (`.small()`, the design's
+segmented size) in page content, such as Site Probe's Desktop / iPhone and an app page's Live / History and IP filter,
+beside the page's 12–13 px text, and 32 px (`.compact()`) in the window toolbar and Settings, the compact size in a
+toolbar growing with the UI scale no taller than the toolbar's 36 pt glass capsule (Settings' grows with the rest of
+its pane, `inToolbar: false`); a control with counts drops them, then its icons, where it has too little room. In a toolbar it sits outside the glass
 bubble, and VoiceOver and the overflow menu see a picker. Each page draws its title and subtitle in the toolbar's
 leading item at the design's size
 (`pageToolbar(_:subtitle:items:)`, 15 px bold over 11 px) in place of the system's title, whose size is fixed; it

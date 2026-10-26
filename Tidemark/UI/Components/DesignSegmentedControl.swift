@@ -4,7 +4,7 @@ import SwiftUI
 /// SF Symbol, its title and (where a number is at hand) a count in a small capsule, and the selected one is raised
 /// on a white cell (20% white in dark mode) with a hairline border, its title in ink rather than ink2.
 ///
-/// It comes in two sizes of the same look: `.small()` (26 px tall, the design's own segmented control) for tabs and
+/// It comes in two sizes of the same look: `.small()` (26 px tall, the design's segmented size) for tabs and
 /// filters in page content, beside the page's 12–13 px text, and `.compact()` (32 px) in the window toolbar and
 /// Settings rows. Both are drawn at the UI scale, the compact one in a toolbar no taller than a toolbar item holds.
 /// The control sizes to its content; a control with counts, in a place too narrow for it, drops the counts and then
