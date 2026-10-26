@@ -266,7 +266,9 @@ private struct InventoryList: View {
             let page = max(0, visible - InventoryTableMetrics.headerHeight - 10)
             let top = geometry.contentOffset.y + geometry.contentInsets.top
             let target = top + (key == .pageDown ? page : -page)
-            position.scrollTo(y: min(max(0, target), max(0, geometry.contentSize.height - visible)))
+            // Where the list is scrolled sideways stays as it is.
+            position.scrollTo(x: geometry.contentOffset.x + geometry.contentInsets.leading,
+                              y: min(max(0, target), max(0, geometry.contentSize.height - visible)))
         }
         return .handled
     }
