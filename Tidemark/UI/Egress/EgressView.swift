@@ -122,7 +122,7 @@ private struct EgressCurrentCard: View {
                         if let ipv6 = sample.hasIPv6 {
                             EgressChip(text: ipv6 ? tr("IPv6", "Egress") : tr("No IPv6", "Egress"))
                         }
-                        if let latency = sample.latencyMs { EgressChip(text: "\(latency) ms") }
+                        if let latency = sample.latencyMs { EgressChip(text: Fmt.ms(Double(latency))) }
                         if let error = sample.error {
                             Text(EgressFormat.error(error))
                                 .font(.design(11.5))
@@ -236,7 +236,8 @@ private struct EgressPolicyCard: View {
             }
             .lineLimit(1)
             .help(sample.error ?? network.joined(separator: " · "))
-            Text(isChecking ? "…" : sample.latencyMs.map { "\($0) ms" } ?? "—")
+            // A plain String, as the current egress's chip shows it: a localized key would group `9,999 ms`.
+            Text(isChecking ? "…" : sample.latencyMs.map { Fmt.ms(Double($0)) } ?? "—")
                 .font(Theme.mono(11))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }

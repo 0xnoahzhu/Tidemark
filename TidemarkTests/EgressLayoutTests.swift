@@ -65,7 +65,7 @@ struct EgressLayoutTests {
             for now in ["NOW", "当前"] {
                 #expect(address + UIScale.length(6, factor: factor) + Self.width(now, tag, tracking: 0.45 * factor) <= ip, "\(now) at \(factor)")
             }
-            #expect(Self.width("9999 ms", NSFont.monospacedSystemFont(ofSize: 11 * factor, weight: .regular)) <= latency, "at \(factor)")
+            #expect(Self.width(Fmt.ms(9999), NSFont.monospacedSystemFont(ofSize: 11 * factor, weight: .regular)) <= latency, "at \(factor)")
             for title in ["Latency", "延迟"] {
                 #expect(Self.width(title, NSFont.systemFont(ofSize: 11 * factor, weight: .semibold)) <= latency, "\(title) at \(factor)")
             }
