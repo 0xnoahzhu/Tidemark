@@ -23,17 +23,6 @@
         }
       }
     },
-    "%1$@ rows · query %2$@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ 行 · 查询 %2$@"
-          }
-        }
-      }
-    },
     "%1$@, %2$@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63,6 +52,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$lld 条 A，%2$lld 条 AAAA"
+          }
+        }
+      }
+    },
+    "%1$lld row · query %2$@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld 行 · 查询 %2$@"
+          }
+        }
+      }
+    },
+    "%1$lld rows · query %2$@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld 行 · 查询 %2$@"
           }
         }
       }

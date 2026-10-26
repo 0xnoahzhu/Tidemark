@@ -524,6 +524,20 @@ struct RequestsJourneyLabelTests {
         }
     }
 
+    /// History counts one row in the singular.
+    @Test func countsHistoryRows() {
+        withLanguage("en") {
+            #expect(RequestsHistoryLabels.rowCount(1, elapsed: .milliseconds(38)) == "1 row · query 38 ms")
+            #expect(RequestsHistoryLabels.rowCount(0, elapsed: .milliseconds(38)) == "0 rows · query 38 ms")
+            #expect(RequestsHistoryLabels.rowCount(12_345, elapsed: .milliseconds(3)) == "12,345 rows · query 3 ms")
+        }
+        withLanguage("zh-Hans") {
+            guard Localizer.shared.bundle != nil else { return }
+            #expect(RequestsHistoryLabels.rowCount(1, elapsed: .milliseconds(38)) == "1 行 · 查询 38 ms")
+            #expect(RequestsHistoryLabels.rowCount(12_345, elapsed: .milliseconds(38)) == "12,345 行 · 查询 38 ms")
+        }
+    }
+
     @Test func spellsSpansOfTime() {
         withLanguage("en") {
             #expect(RequestsJourneyLabels.relative(-180) == "3 min before the request")

@@ -177,7 +177,7 @@ private struct RequestsHistoryFilterBar: View {
                     ProgressView().controlSize(.small)
                 }
                 if history.errorMessage == nil, history.totalCount > 0 || !history.isLoading {
-                    Text(trf("%1$@ rows · query %2$@", "Requests", Fmt.count(history.totalCount), RequestsHistoryLabels.milliseconds(history.elapsed)))
+                    Text(RequestsHistoryLabels.rowCount(history.totalCount, elapsed: history.elapsed))
                         .font(Theme.mono(11))
                         .foregroundStyle(Theme.ink3)
                         .lineLimit(1)
@@ -313,6 +313,12 @@ enum RequestsHistoryLabels {
         case .state(let status): Self.status(status)
         case .endedWithError: tr("Ended with an error", "Requests")
         }
+    }
+
+    /// `1 row · query 38 ms`, `12,345 rows · query 38 ms`
+    @MainActor
+    static func rowCount(_ count: Int64, elapsed: Duration) -> String {
+        trn("%1$lld row · query %2$@", "%1$lld rows · query %2$@", Int(count), "Requests", milliseconds(elapsed))
     }
 
     /// `38 ms`
