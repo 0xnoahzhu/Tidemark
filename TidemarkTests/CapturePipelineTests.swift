@@ -465,10 +465,11 @@ struct CapturePipelineTests {
         let database = CaptureFakeDatabase()
         let surge = CaptureFakeSurge()
         let recorded = try SurgeOutputParser.proxyRuntimeStatus(from: SurgeFixtures.data("surge-proxy-runtime-status.json"), command: "proxy-runtime-status")
+        let hashes = ["US-Hysteria2": "POLICY::2ed45e4c", "JP-Snell": "POLICY::c7f4fe8c", "SG-Snell": "POLICY::0d10272d", "HK-AnyTLS": "POLICY::c9be5557"]
         surge.update {
-            $0.lineHashes = ["US-Hysteria2": "POLICY::2ed45e4c", "JP-Snell": "POLICY::c7f4fe8c"]
+            $0.lineHashes = hashes
+            for hash in hashes.values { $0.runtimeStatus[hash] = SurgeProxyRuntimeStatus(type: "Snell", errors: []) }
             $0.runtimeStatus["POLICY::2ed45e4c"] = SurgeProxyRuntimeStatus(type: "Hysteria 2", errors: Array(recorded.errors.suffix(2)))
-            $0.runtimeStatus["POLICY::c7f4fe8c"] = SurgeProxyRuntimeStatus(type: "Snell", errors: [])
             $0.dns["api.github.com"] = ["140.82.112.6"]
         }
         let pipeline = makePipeline(database: database, surge: surge, spoolDirectory: temp.url)
@@ -481,6 +482,7 @@ struct CapturePipelineTests {
                 await pipeline.ingest(request, now: now)
             }
         }
+        func asked(_ node: String) -> String { "proxy-runtime-status \(hashes[node] ?? node)" }
 
         // Fifty requests through one node, and DIRECT ones: no surge-cli process per request (one lookup for the host).
         await traffic(1, count: 50, via: "US-Hysteria2", at: base)
@@ -488,43 +490,47 @@ struct CapturePipelineTests {
         #expect(await eventually { surge.snapshot.dnsLookups == ["api.github.com"] })
         #expect(surge.snapshot.proxyCommands.isEmpty)
 
-        // First minute: the node's line hash; second: its errors. One process each.
+        // First minute: the line hashes, then the node's errors.
         await pipeline.pollProxyErrors(now: base.addingTimeInterval(30))
-        #expect(surge.snapshot.proxyCommands == ["dump traffic"])
-        await traffic(51, via: "US-Hysteria2", at: base.addingTimeInterval(50))
-        await pipeline.pollProxyErrors(now: base.addingTimeInterval(90))
-        #expect(surge.snapshot.proxyCommands == ["dump traffic", "proxy-runtime-status POLICY::2ed45e4c"])
-        await pipeline.tick(now: base.addingTimeInterval(91))
+        #expect(surge.snapshot.proxyCommands == ["dump traffic", asked("US-Hysteria2")])
+        await pipeline.tick(now: base.addingTimeInterval(31))
         let saved = await database.proxyErrorsSaved
         #expect(saved.map(\.targetHost) == ["encrypted-tbn0.gstatic.com", "collector.github.com"])
         #expect(saved.allSatisfy { $0.policy == "US-Hysteria2" && $0.lineHash == "POLICY::2ed45e4c" && $0.deviceID == device && $0.error == "Stream closed" })
 
-        // The node lists its last errors every time: only a new one is written.
-        let fresh = SurgeProxyRuntimeStatus.ProxyError(message: "Stream closed", time: base.addingTimeInterval(120), targetHost: "api.github.com")
+        // Every busy node is asked each minute, the one asked least recently first. A node lists its last errors every
+        // time: only a new one is written.
+        let fresh = SurgeProxyRuntimeStatus.ProxyError(message: "Stream closed", time: base.addingTimeInterval(80), targetHost: "api.github.com")
         surge.update { $0.runtimeStatus["POLICY::2ed45e4c"]?.errors.insert(fresh, at: 0) }
-        await traffic(52, via: "US-Hysteria2", at: base.addingTimeInterval(130))
-        await traffic(200, via: "JP-Snell", at: base.addingTimeInterval(140))
-        await pipeline.pollProxyErrors(now: base.addingTimeInterval(150))
-        await pipeline.pollProxyErrors(now: base.addingTimeInterval(160))
-        await pipeline.pollProxyErrors(now: base.addingTimeInterval(170))
-        #expect(surge.snapshot.proxyCommands.suffix(3) == ["proxy-runtime-status POLICY::c7f4fe8c", "proxy-runtime-status POLICY::2ed45e4c",
-                                                           "proxy-runtime-status POLICY::c7f4fe8c"], "the node asked least recently first")
-        await pipeline.tick(now: base.addingTimeInterval(171))
+        await traffic(51, via: "US-Hysteria2", at: base.addingTimeInterval(80))
+        await traffic(200, via: "JP-Snell", at: base.addingTimeInterval(85))
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(90))
+        #expect(surge.snapshot.proxyCommands.suffix(2) == [asked("JP-Snell"), asked("US-Hysteria2")])
+        await pipeline.tick(now: base.addingTimeInterval(91))
         #expect(await database.proxyErrorsSaved.count == 3)
         #expect(await database.proxyErrorsSaved.last?.at == fresh.time)
 
+        // More busy nodes than processes a minute (a load-balance group, say): three a minute, each in turn.
+        for (offset, node) in ["US-Hysteria2", "JP-Snell", "SG-Snell", "HK-AnyTLS"].enumerated() {
+            await traffic(300 + Int64(offset), via: node, at: base.addingTimeInterval(140))
+        }
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(150))
+        #expect(surge.snapshot.proxyCommands.suffix(3) == [asked("HK-AnyTLS"), asked("SG-Snell"), asked("JP-Snell")])
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(160))
+        #expect(surge.snapshot.proxyCommands.suffix(3).first == asked("US-Hysteria2"), "the one left out goes first")
+        #expect(surge.snapshot.proxyCommands.count == 10)
+
         // No requests through a proxy for a minute: nothing to ask.
         await pipeline.pollProxyErrors(now: base.addingTimeInterval(400))
-        #expect(surge.snapshot.proxyCommands.count == 5)
+        #expect(surge.snapshot.proxyCommands.count == 10)
 
         // A node Surge cannot report on (no line hash, unknown by name) waits ten minutes.
-        await traffic(300, via: "Gone-Node", at: base.addingTimeInterval(1_000))
+        await traffic(400, via: "Gone-Node", at: base.addingTimeInterval(1_000))
         await pipeline.pollProxyErrors(now: base.addingTimeInterval(1_010))
-        await pipeline.pollProxyErrors(now: base.addingTimeInterval(1_020))
         #expect(surge.snapshot.proxyCommands.suffix(2) == ["dump traffic", "proxy-runtime-status Gone-Node"])
-        await traffic(301, via: "Gone-Node", at: base.addingTimeInterval(1_050))
-        await pipeline.pollProxyErrors(now: base.addingTimeInterval(1_080))
-        #expect(surge.snapshot.proxyCommands.count == 7)
+        await traffic(401, via: "Gone-Node", at: base.addingTimeInterval(1_050))
+        await pipeline.pollProxyErrors(now: base.addingTimeInterval(1_070))
+        #expect(surge.snapshot.proxyCommands.count == 12)
     }
 
     @Test func asksAProxyNodeByAFreshLineHashAndQueuesEachErrorOnce() async throws {
@@ -550,8 +556,6 @@ struct CapturePipelineTests {
         // Asked by name, as `dump traffic` lists no hash for it.
         await traffic(1, at: 0)
         await poll(at: 10)
-        await traffic(2, at: 50)
-        await poll(at: 70)
         #expect(surge.snapshot.proxyCommands == ["dump traffic", "proxy-runtime-status US-Hysteria2"])
 
         // Ten minutes on, `dump traffic` lists its hash and the node is asked by it: the errors it lists again are its
@@ -560,31 +564,27 @@ struct CapturePipelineTests {
             $0.lineHashes = ["US-Hysteria2": "POLICY::2ed45e4c"]
             $0.runtimeStatus["POLICY::2ed45e4c"] = status
         }
-        await traffic(3, at: 690)
+        await traffic(2, at: 690)
         await poll(at: 700)
-        await traffic(4, at: 740)
-        await poll(at: 760)
         #expect(surge.snapshot.proxyCommands.suffix(2) == ["dump traffic", "proxy-runtime-status POLICY::2ed45e4c"])
-        await pipeline.tick(now: base.addingTimeInterval(761))
+        await pipeline.tick(now: base.addingTimeInterval(701))
         #expect(await database.proxyErrorsSaved.count == 3, "each error once")
         #expect(await database.proxyErrorsSaved.allSatisfy { $0.policy == "US-Hysteria2" && $0.lineHash == "US-Hysteria2" })
 
         // A policy-path subscription update gives the node another hash, and Surge no longer knows the old one. That
-        // hash was read more than ten minutes ago: the next minute reads them again, the one after asks by the new one.
+        // hash was read ten minutes ago or more: the next minute reads them again and asks by the new one.
         let fresh = SurgeProxyRuntimeStatus.ProxyError(message: "Stream closed", time: base.addingTimeInterval(1_300), targetHost: "api.github.com")
         surge.update {
             $0.lineHashes = ["US-Hysteria2": "POLICY::9f3a77c1"]
             $0.runtimeStatus["POLICY::2ed45e4c"] = nil
             $0.runtimeStatus["POLICY::9f3a77c1"] = SurgeProxyRuntimeStatus(type: "Hysteria 2", errors: [fresh] + status.errors)
         }
-        await traffic(5, at: 1_350)
+        await traffic(3, at: 1_350)
         await poll(at: 1_360)
-        await traffic(6, at: 1_400)
+        await traffic(4, at: 1_400)
         await poll(at: 1_420)
-        await traffic(7, at: 1_460)
-        await poll(at: 1_480)
         #expect(surge.snapshot.proxyCommands.suffix(3) == ["proxy-runtime-status POLICY::2ed45e4c", "dump traffic", "proxy-runtime-status POLICY::9f3a77c1"])
-        await pipeline.tick(now: base.addingTimeInterval(1_481))
+        await pipeline.tick(now: base.addingTimeInterval(1_421))
         #expect(await database.proxyErrorsSaved.count == 4)
         #expect(await database.proxyErrorsSaved.last.map { $0.at == fresh.time && $0.lineHash == "POLICY::9f3a77c1" } == true)
 
@@ -597,12 +597,10 @@ struct CapturePipelineTests {
         continuation.yield(.reload)
         continuation.finish()
         try await pipeline.consume(stream)
-        await traffic(8, at: 1_500)
-        await poll(at: 1_510)
-        await traffic(9, at: 1_530)
-        await poll(at: 1_540)
+        await traffic(5, at: 1_450)
+        await poll(at: 1_480)
         #expect(surge.snapshot.proxyCommands.suffix(2) == ["dump traffic", "proxy-runtime-status POLICY::5be0d218"])
-        await pipeline.tick(now: base.addingTimeInterval(1_541))
+        await pipeline.tick(now: base.addingTimeInterval(1_481))
         #expect(await database.proxyErrorsSaved.count == 4)
     }
 

@@ -170,6 +170,8 @@ actor CapturePipeline {
     let ownLookupWindow: TimeInterval = 10
     /// Proxy nodes that carried requests within this long are asked for their errors (`pollProxyErrors`).
     let proxyNodeRecency: TimeInterval = 60
+    /// surge-cli processes one `pollProxyErrors` runs at most: with more busy nodes, each is asked every few minutes.
+    let proxyPollProcesses = 3
     /// `dump traffic` is read again for a node it lacked at most this often, and a node Surge could not report on is
     /// asked again after this long.
     let proxyNodeRetryInterval: TimeInterval = 600
