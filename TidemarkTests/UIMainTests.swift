@@ -297,6 +297,19 @@ struct RequestsTableLayoutTests {
     @Test func openingAnAppShowsItsDomainsAndIPs() {
         #expect(RequestsPresentation.openAppTab == .inventory)
     }
+
+    /// The table asks for no width of its own, however wide its columns: the content beside the inspector already
+    /// holds the sidebar's and the inspector's widths, and with its 360 px minimum on top, opening the inspector in
+    /// a window narrower than about 1,164 px at 1.0 aborted the app. It scrolls sideways instead.
+    @Test func tableAsksForNoWidth() {
+        let defaults = TestDefaults()
+        let model = AppModel(preferences: Preferences(defaults: defaults.make()))
+        let rows = (1...20).map { UIMainFixtures.record(id: Int64($0), host: "host\($0).example.com") }
+        for style in [RequestsTable.TimeStyle.clock, .dayClock] {
+            let table = RequestsTable(model: model, rows: rows, selection: .constant(nil), timeStyle: style, now: .now)
+            #expect(NSHostingController(rootView: table).sizeThatFits(in: CGSize(width: 0, height: 600)).width == 0, "\(style)")
+        }
+    }
 }
 
 /// The toolbar search field of Requests and Domains & IPs hands every edit, and the clear button's empty
