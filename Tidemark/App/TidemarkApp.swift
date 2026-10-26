@@ -12,8 +12,10 @@ struct TidemarkApp: App {
     var body: some Scene {
         let model = delegate.model
 
+        // Each window's root sets the design's line height, so every text, sheet and dialog in it has it.
         Window("Tidemark", id: WindowID.main) {
             MainWindowView()
+                .lineHeight(Theme.lineHeight)
                 .environment(model)
                 .environment(Localizer.shared)
                 .modifier(TidemarkIntentsWindowBridge())
@@ -24,6 +26,7 @@ struct TidemarkApp: App {
 
         Window(Text(verbatim: tr("Site Probe", "SiteProbe")), id: WindowID.probeBrowser) {
             ProbeBrowserWindow()
+                .lineHeight(Theme.lineHeight)
                 .environment(model)
                 .environment(Localizer.shared)
         }
@@ -35,6 +38,7 @@ struct TidemarkApp: App {
 
         Settings {
             SettingsView()
+                .lineHeight(Theme.lineHeight)
                 .environment(model)
                 .environment(Localizer.shared)
                 .modifier(TidemarkIntentsWindowBridge())

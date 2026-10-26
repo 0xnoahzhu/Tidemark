@@ -88,3 +88,22 @@ struct UIScaleWindowTests {
         #expect(UIScale.minimumWindowSize(factor: 1, visibleSize: CGSize(width: 900, height: 600)) == CGSize(width: 900, height: 548))
     }
 }
+
+/// The design's sizes as the views draw them.
+@MainActor
+struct UIScaleDrawingTests {
+    private static func fittingHeight(_ view: some View) -> CGFloat {
+        NSHostingView(rootView: view).fittingSize.height
+    }
+
+    /// `line-height: 1.35` is a multiple of the font's size, as in CSS, so a single line is taller than SF's own
+    /// (about 1.19 of the size) too.
+    @Test func lineHeightIsAMultipleOfTheFontSize() {
+        let natural = Self.fittingHeight(Text(verbatim: "Requests").font(.design(13)))
+        let design = Self.fittingHeight(Text(verbatim: "Requests").font(.design(13)).lineHeight(Theme.lineHeight))
+        #expect(design == (13 * UIScale.factor * 1.35).rounded(.up))
+        #expect(design > natural)
+        let twoLines = Self.fittingHeight(Text(verbatim: "One\nTwo").font(.design(12)).lineHeight(Theme.noteLineHeight))
+        #expect(abs(twoLines - 2 * 12 * UIScale.factor * 1.5) <= 1)
+    }
+}

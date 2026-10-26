@@ -108,6 +108,7 @@ final class StatusItemController: NSObject {
     /// inherit SwiftUI environment objects.
     private func installContent() -> NSView {
         let root = MenuBarPanel(onDismiss: { [weak self] in self?.dismiss() })
+            .lineHeight(Theme.lineHeight)
             .fixedSize()
             .onGeometryChange(for: CGSize.self, of: { $0.size }) { [weak self] size in
                 self?.contentSizeChanged(size)

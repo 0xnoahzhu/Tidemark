@@ -101,4 +101,11 @@ enum Theme {
     static func mono(_ size: CGFloat = 12, weight: Font.Weight = .regular) -> Font {
         .designMono(size, weight)
     }
+
+    /// The design's CSS `line-height`, which, as in CSS, is a multiple of the font's size (SF's own line is about
+    /// 1.19 of it): 1.35 everywhere, set once at the root of each window, so single lines are as tall as the
+    /// design's too.
+    static let lineHeight = AttributedString.LineHeight.multiple(factor: 1.35)
+    /// Notes and dialog messages: `line-height: 1.5`.
+    static let noteLineHeight = AttributedString.LineHeight.multiple(factor: 1.5)
 }
