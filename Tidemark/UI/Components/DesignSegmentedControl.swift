@@ -4,10 +4,11 @@ import SwiftUI
 /// SF Symbol, its title and (where a number is at hand) a count in a small capsule, and the selected one is raised
 /// on a white cell (20% white in dark mode) with a hairline border, its title in ink rather than ink2.
 ///
-/// It comes in two sizes of the same look: `.regular()` (40 px tall) for page tabs and filters in page content,
-/// `.compact()` (32 px) where that is too tall, such as the window toolbar and Settings rows. Both are drawn at the
-/// UI scale, the compact one in a toolbar no taller than a toolbar item holds. The control sizes to its content; a
-/// control with counts, in a place too narrow for it, drops the counts and then the icons.
+/// It comes in two sizes of the same look: `.small()` (26 px tall, the design's own segmented control) for tabs and
+/// filters in page content, beside the page's 12–13 px text, and `.compact()` (32 px) in the window toolbar and
+/// Settings rows. Both are drawn at the UI scale, the compact one in a toolbar no taller than a toolbar item holds.
+/// The control sizes to its content; a control with counts, in a place too narrow for it, drops the counts and then
+/// the icons.
 ///
 /// Every choice is a button, so keyboard navigation reaches each one; VoiceOver reads the control as a
 /// segmented picker with its selected choice, and a toolbar's overflow menu lists the choices.
@@ -43,11 +44,11 @@ struct DesignSegmentedControl<Value: Hashable>: View {
             .system(size: px * factor, weight: weight)
         }
 
-        /// 14 px titles, 15 px icons and 12 px counts; `padding: 8px 14px; border-radius: 9px` in a 4 px track with
-        /// 12 px corners: 40 px tall.
-        static func regular(factor: CGFloat = UIScale.factor) -> Size {
-            Size(fontSize: 14, iconSize: 15, badgeFontSize: 12, contentHeight: 16, verticalPadding: 8,
-                 horizontalPadding: 14, spacing: 6, cornerRadius: 9, trackPadding: 4, trackCornerRadius: 12, factor: factor)
+        /// 12 px titles, 12 px icons and 10.5 px counts; the design's `padding: 3px 10px; border-radius: 6px` in a
+        /// 2 px track with 8 px corners: 26 px tall.
+        static func small(factor: CGFloat = UIScale.factor) -> Size {
+            Size(fontSize: 12, iconSize: 12, badgeFontSize: 10.5, contentHeight: 16, verticalPadding: 3,
+                 horizontalPadding: 10, spacing: 4, cornerRadius: 6, trackPadding: 2, trackCornerRadius: 8, factor: factor)
         }
 
         /// 13 px titles, 13 px icons and 11 px counts; `padding: 5px 11px; border-radius: 7px` in a 3 px track with
@@ -90,7 +91,7 @@ struct DesignSegmentedControl<Value: Hashable>: View {
     /// - Parameters:
     ///   - title: What the choice is about; VoiceOver reads it as the control's label.
     ///   - segments: Each choice, in order.
-    init(_ title: String, selection: Binding<Value>, size: Size = .regular(), segments: [Segment]) {
+    init(_ title: String, selection: Binding<Value>, size: Size = .small(), segments: [Segment]) {
         self.title = title
         _selection = selection
         self.size = size

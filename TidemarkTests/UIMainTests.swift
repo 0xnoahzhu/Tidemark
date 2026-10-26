@@ -387,8 +387,20 @@ struct DesignSegmentedControlTests {
         NSHostingController(rootView: control).sizeThatFits(in: CGSize(width: proposed, height: .infinity)).width
     }
 
-    private static func kinds(selected: Int, count: Int) -> DesignSegmentedControl<Int> {
-        DesignSegmentedControl("Kind", selection: .constant(selected), size: .compact(), segments: [
+    /// The control's two sizes, for the tests that hold at both.
+    enum SizeName: CaseIterable {
+        case small, compact
+
+        var size: DesignSegmentedControl<Int>.Size {
+            switch self {
+            case .small: .small()
+            case .compact: .compact()
+            }
+        }
+    }
+
+    private static func kinds(selected: Int, count: Int, size: SizeName = .compact) -> DesignSegmentedControl<Int> {
+        DesignSegmentedControl("Kind", selection: .constant(selected), size: size.size, segments: [
             .init(0, "All", systemImage: "list.bullet", count: count),
             .init(1, "Domains", systemImage: "globe", count: 128),
             .init(2, "IPs", systemImage: "number", count: 57),
@@ -397,22 +409,24 @@ struct DesignSegmentedControlTests {
 
     /// Selecting another choice, or a count changing without gaining a digit, keeps the control's width, so
     /// nothing after it moves.
-    @Test func widthHoldsAcrossSelectionsAndCounts() {
-        let width = Self.width(of: Self.kinds(selected: 0, count: 12))
+    @Test(arguments: SizeName.allCases)
+    func widthHoldsAcrossSelectionsAndCounts(_ size: SizeName) {
+        let width = Self.width(of: Self.kinds(selected: 0, count: 12, size: size))
         #expect(width > 0)
-        #expect(Self.width(of: Self.kinds(selected: 1, count: 12)) == width)
-        #expect(Self.width(of: Self.kinds(selected: 2, count: 12)) == width)
-        #expect(Self.width(of: Self.kinds(selected: 0, count: 85)) == width)
+        #expect(Self.width(of: Self.kinds(selected: 1, count: 12, size: size)) == width)
+        #expect(Self.width(of: Self.kinds(selected: 2, count: 12, size: size)) == width)
+        #expect(Self.width(of: Self.kinds(selected: 0, count: 85, size: size)) == width)
     }
 
-    /// The two sizes are 40 and 32 px tall. Both grow with the UI scale, the compact one in a toolbar only as far as a
-    /// toolbar item's capsule holds it; the control draws at its size's height.
+    /// The two sizes are 26 and 32 px tall. Both grow with the UI scale, the compact one in a toolbar only as far as a
+    /// toolbar item's capsule holds it; the control draws at its size's height, by default the small one.
     @Test func sizesFollowTheScaleUpToTheToolbarsHeight() {
         typealias Size = DesignSegmentedControl<Int>.Size
-        #expect(Size.regular(factor: 1).height == 40)
+        #expect(Size.small(factor: 1).height == 26)
         #expect(Size.compact(factor: 1).height == 32)
         for factor: CGFloat in [1, 1.1, 1.2, 1.3, 1.4, 1.5] {
-            #expect(Size.regular(factor: factor).height >= UIScale.length(40, factor: factor) - 1)
+            #expect(Size.small(factor: factor).factor == factor)
+            #expect(Size.small(factor: factor).height >= UIScale.length(26, factor: factor) - 1)
             #expect(Size.compact(factor: factor).height <= Size.toolbarItemHeight, "at \(factor)")
             #expect(Size.compact(factor: factor).height >= min(UIScale.length(32, factor: factor), Size.toolbarItemHeight) - 1)
         }
@@ -422,20 +436,27 @@ struct DesignSegmentedControlTests {
         #expect(Size.compact(factor: 1.2).factor < 1.2)
         #expect(Size.compact(factor: 1.2, inToolbar: false).factor == 1.2)
         #expect(Size.compact(factor: 1.2, inToolbar: false).height >= UIScale.length(32, factor: 1.2) - 1)
-        let drawn = NSHostingController(rootView: Self.kinds(selected: 0, count: 12)).sizeThatFits(in: CGSize(width: CGFloat.infinity, height: .infinity))
-        #expect(drawn.height == Size.compact().height)
+        func drawnHeight(_ control: DesignSegmentedControl<Int>) -> CGFloat {
+            NSHostingController(rootView: control).sizeThatFits(in: CGSize(width: CGFloat.infinity, height: .infinity)).height
+        }
+        for size in SizeName.allCases {
+            #expect(drawnHeight(Self.kinds(selected: 0, count: 12, size: size)) == size.size.height, "\(size)")
+        }
+        #expect(drawnHeight(DesignSegmentedControl("Source", selection: .constant(0), segments: [.init(0, "Live"), .init(1, "History")]))
+            == Size.small().height)
     }
 
     /// A place narrower than the control gets it without its counts, then without its icons as well.
-    @Test func countsAndThenIconsGiveWayWhenNarrow() {
-        let control = Self.kinds(selected: 0, count: 185)
+    @Test(arguments: SizeName.allCases)
+    func countsAndThenIconsGiveWayWhenNarrow(_ size: SizeName) {
+        let control = Self.kinds(selected: 0, count: 185, size: size)
         let ideal = Self.width(of: control)
         let withoutCounts = Self.width(of: control, proposed: ideal - 1)
         #expect(withoutCounts < ideal - 1)
         let withoutIcons = Self.width(of: control, proposed: withoutCounts - 1)
         #expect(withoutIcons < withoutCounts - 1)
         // Without counts to give up, the control keeps its icons and its width.
-        let plain = DesignSegmentedControl("Kind", selection: .constant(0), size: .compact(), segments: [
+        let plain = DesignSegmentedControl("Kind", selection: .constant(0), size: size.size, segments: [
             .init(0, "All", systemImage: "list.bullet"),
             .init(1, "Domains", systemImage: "globe"),
         ])
