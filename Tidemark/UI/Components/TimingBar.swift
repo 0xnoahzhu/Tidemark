@@ -10,10 +10,24 @@ struct TimingBar: View {
 
     static func color(_ kind: TimingPhase.Kind) -> Color {
         switch kind {
+        case .clientHello: Color(oklch: 0.64, 0.13, 295)
         case .dns: Color(oklch: 0.72, 0.11, 200)
         case .connect: Color(oklch: 0.66, 0.12, 245)
-        case .tls: Color(oklch: 0.64, 0.13, 295)
+        // Connect's hue, faded: Surge's own work where a connect would be.
+        case .local: Color(oklch: 0.74, 0.05, 245)
         case .transfer: Color(oklch: 0.68, 0.13, 150)
+        }
+    }
+
+    /// The legend's name of a phase.
+    @MainActor
+    static func label(_ kind: TimingPhase.Kind) -> String {
+        switch kind {
+        case .clientHello: tr("Client hello", "Common")
+        case .dns: tr("DNS", "Common")
+        case .connect: tr("Connect", "Common")
+        case .local: tr("Surge (local)", "Common")
+        case .transfer: tr("Transfer", "Common")
         }
     }
 
@@ -38,7 +52,7 @@ struct TimingBar: View {
                     ForEach(Array(phases.enumerated()), id: \.offset) { _, phase in
                         HStack(spacing: 5.px) {
                             RoundedRectangle(cornerRadius: 2.px).fill(Self.color(phase.kind)).frame(width: 7.px, height: 7.px)
-                            Text(phase.kind.rawValue).foregroundStyle(Theme.ink2)
+                            Text(Self.label(phase.kind)).foregroundStyle(Theme.ink2)
                             Text(Fmt.ms(phase.duration * 1000)).font(Theme.mono(11)).foregroundStyle(Theme.ink3)
                         }
                         .font(.design(11))

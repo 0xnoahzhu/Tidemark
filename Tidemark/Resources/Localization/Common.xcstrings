@@ -10,6 +10,31 @@
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 行" } }
       }
+    },
+    "Client hello" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Client Hello" } }
+      }
+    },
+    "Connect" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接" } }
+      }
+    },
+    "DNS" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "DNS" } }
+      }
+    },
+    "Surge (local)" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surge（本机）" } }
+      }
+    },
+    "Transfer" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "传输" } }
+      }
     }
   },
   "version" : "1.0"

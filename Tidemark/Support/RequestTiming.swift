@@ -2,24 +2,32 @@ import Foundation
 
 /// A phase of a request's lifetime for the inspector's timing bar.
 struct TimingPhase: Hashable, Sendable {
-    /// The design's phases, in its order. Surge reports no time to first byte, so there is no Wait phase.
-    enum Kind: String, CaseIterable, Sendable {
-        case dns = "DNS"
-        case connect = "Connect"
-        case tls = "TLS"
-        case transfer = "Transfer"
+    /// The phases Surge's record can time, in the order they happen. Surge reports no time to first byte, so there
+    /// is no Wait phase.
+    enum Kind: CaseIterable, Sendable {
+        /// Surge waiting for the client's TLS Client Hello, which it reads for the SNI (it does no handshake of its own).
+        case clientHello
+        /// The DNS lookup rule matching waited for (rule mode, on a cache miss).
+        case dns
+        /// Rule evaluation and Surge's outbound connection.
+        case connect
+        /// The same stretch in global proxy mode, where the request rides the proxy's shared connection: Surge's own
+        /// work on this Mac, not a connect on the network.
+        case local
+        case transfer
     }
 
     var kind: Kind
     var duration: TimeInterval
 }
 
-/// Builds timing phases from Surge's timestamps and its per-request notes.
+/// Builds timing phases from Surge's timestamps, its per-phase timings and its per-request notes.
 ///
-/// Notes look like `12:07:22.102428 [TLS] TLS Client Hello SNI: api2.cursor.sh`. The first note of each
-/// category marks where that phase starts; the setup ends at `setupCompletedDate` and the transfer runs
-/// until `completedDate` (or now, for active connections). Each phase gets one segment, in the design's
-/// order, with the time of all its stretches.
+/// Notes look like `12:07:22.102428 [TLS] TLS Client Hello SNI: api2.cursor.sh`. The setup runs from the start to
+/// `setupCompletedDate` and the transfer until `completedDate` (or now, for active connections). Within the setup,
+/// the wait for the Client Hello runs up to its note when Surge read it before evaluating any rule, the DNS lookup
+/// takes the time Surge timed (`DNS Lookup`, or its `completed in 318.4ms` note), and the rest is the connect. The
+/// DNS lookup is noted when it completes, so its note only marks where it ended.
 enum RequestTiming {
     struct Note: Hashable, Sendable {
         /// Seconds since midnight (local), as printed by Surge.
@@ -48,43 +56,66 @@ enum RequestTiming {
         return date < start.addingTimeInterval(-60) ? date.addingTimeInterval(86400) : date
     }
 
-    /// The rule decides which outbound connection Surge opens, so its notes start the Connect phase (the
-    /// design has no Rule phase).
-    static func kind(forTag tag: String) -> TimingPhase.Kind? {
-        switch tag.lowercased() {
-        case "dns": .dns
-        case "tls": .tls
-        case "rule", "connector", "connection-pool", "socket", "proxy", "connect": .connect
-        default: nil
-        }
-    }
-
     static func phases(for record: RequestRecord, now: Date = .now) -> [TimingPhase] {
         let start = record.startedAt
-        let setupEnd = record.setupCompletedAt ?? start
+        let setupEnd = max(start, record.setupCompletedAt ?? start)
         let end = record.completedAt ?? (record.state == .active ? now : setupEnd)
+        let setup = setupEnd.timeIntervalSince(start)
 
-        // First timestamp of each phase, as absolute dates.
-        var marks: [(TimingPhase.Kind, Date)] = []
-        var seen = Set<TimingPhase.Kind>()
-        for raw in record.notes {
-            guard let note = parse(note: raw), let kind = kind(forTag: note.tag), !seen.contains(kind) else { continue }
-            seen.insert(kind)
-            marks.append((kind, max(start, min(date(of: note, near: start), setupEnd))))
-        }
-        marks.sort { $0.1 < $1.1 }
-
-        var durations: [TimingPhase.Kind: TimeInterval] = [:]
-        // Before the first note Surge is still taking the connection in.
-        durations[.connect, default: 0] += max(0, (marks.first?.1 ?? setupEnd).timeIntervalSince(start))
-        for (i, mark) in marks.enumerated() {
-            let next = i + 1 < marks.count ? marks[i + 1].1 : setupEnd
-            durations[mark.0, default: 0] += max(0, next.timeIntervalSince(mark.1))
-        }
-        durations[.transfer] = end.timeIntervalSince(setupEnd)
+        let hello = clientHelloDate(of: record).map { min(max(0, $0.timeIntervalSince(start)), setup) } ?? 0
+        let dns = min(dnsLookupDuration(of: record) ?? 0, setup - hello)
+        let durations: [TimingPhase.Kind: TimeInterval] = [
+            .clientHello: hello,
+            .dns: dns,
+            isGlobalProxy(record) ? .local : .connect: setup - hello - dns,
+            .transfer: end.timeIntervalSince(setupEnd),
+        ]
         return TimingPhase.Kind.allCases.compactMap { kind in
             guard let duration = durations[kind], duration > 0 else { return nil }
             return TimingPhase(kind: kind, duration: duration)
+        }
+    }
+
+    /// When Surge read the client's TLS Client Hello, if it did before evaluating any rule (a hello read later is
+    /// not part of the wait before the connect).
+    static func clientHelloDate(of record: RequestRecord) -> Date? {
+        for raw in record.notes {
+            guard let note = parse(note: raw) else { continue }
+            if note.tag.caseInsensitiveCompare("Rule") == .orderedSame { return nil }
+            if note.tag.caseInsensitiveCompare("TLS") == .orderedSame, note.text.localizedCaseInsensitiveContains("Client Hello") {
+                return date(of: note, near: record.startedAt)
+            }
+        }
+        return nil
+    }
+
+    /// How long Surge's DNS lookup for rule matching took, in seconds: its `DNS Lookup` timing, else its
+    /// `[DNS] DNS lookup for … completed in 318.4ms` note. Nil when Surge looked nothing up (a cached answer, global
+    /// proxy mode).
+    static func dnsLookupDuration(of record: RequestRecord) -> TimeInterval? {
+        if let timed = record.timing?.first(where: { $0.name == "DNS Lookup" }) { return timed.duration }
+        for raw in record.notes {
+            guard let note = parse(note: raw), note.tag.caseInsensitiveCompare("DNS") == .orderedSame,
+                  let milliseconds = lookupMilliseconds(in: note.text) else { continue }
+            return milliseconds / 1000
+        }
+        return nil
+    }
+
+    /// `318.4` from `DNS lookup for api.example.com completed in 318.4ms. A record count: 2, …`.
+    static func lookupMilliseconds(in text: String) -> Double? {
+        guard let range = text.range(of: "completed in ") else { return nil }
+        let number = text[range.upperBound...].prefix { $0.isNumber || $0 == "." }
+        return Double(number)
+    }
+
+    /// The request was routed in global proxy mode (`[Rule] Global proxy outbound mode: AI`): Surge evaluated no
+    /// rule, looked nothing up and sent it over the global policy.
+    static func isGlobalProxy(_ record: RequestRecord) -> Bool {
+        if record.rule?.hasPrefix("Global · ") == true { return true }
+        return record.notes.contains { raw in
+            guard let note = parse(note: raw) else { return false }
+            return note.tag.caseInsensitiveCompare("Rule") == .orderedSame && note.text.hasPrefix("Global proxy outbound mode")
         }
     }
 }

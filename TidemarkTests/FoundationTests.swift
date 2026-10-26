@@ -49,11 +49,11 @@ struct FoundationTests {
             isNew: false, writtenAt: nil, probeSessionID: nil
         )
         let phases = RequestTiming.phases(for: record)
-        // No Rule phase: the rule counts as Connect, as does the wait for the Client Hello before it.
-        #expect(phases.map(\.kind) == [.connect, .tls, .transfer])
-        let connect = try #require(phases.first)
-        #expect(abs(connect.duration - 0.003) < 0.0005)
-        #expect(abs(phases[1].duration - 0.001) < 0.0005)
+        // No Rule phase: the rule counts as Connect. The wait for the Client Hello comes first.
+        #expect(phases.map(\.kind) == [.clientHello, .connect, .transfer])
+        let hello = try #require(phases.first)
+        #expect(abs(hello.duration - 0.002) < 0.0005)
+        #expect(abs(phases[1].duration - 0.002) < 0.0005)
         #expect(abs(phases[2].duration - 0.1) < 0.0005)
     }
 
