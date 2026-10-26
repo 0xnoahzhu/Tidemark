@@ -197,17 +197,16 @@ private struct InventoryList: View {
         .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { _, geometry in
             scrolled.geometry = geometry
         }
-        .onScrollGeometryChange(for: CGFloat.self, of: { InventoryTableMetrics.scrollerWidth($0) }) { _, new in
-            scrollerWidth = new
-        }
-        .onScrollGeometryChange(for: CGFloat.self, of: { InventoryTableMetrics.visibleWidth($0) }) { _, new in
-            resized(to: new)
+        .onScrollGeometryChange(for: InventoryTableMetrics.ListWidth.self, of: { InventoryTableMetrics.ListWidth($0) }) { old, new in
+            scrollerWidth = new.scroller
+            resized(to: new.visible, scrollerOnly: new.container == old.container)
         }
         // Plugging in a mouse or changing Show scroll bars switches between legacy and overlay scrollers.
         .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
             guard let geometry = scrolled.geometry else { return }
-            scrollerWidth = InventoryTableMetrics.scrollerWidth(geometry)
-            resized(to: InventoryTableMetrics.visibleWidth(geometry))
+            let width = InventoryTableMetrics.ListWidth(geometry)
+            scrollerWidth = width.scroller
+            resized(to: width.visible, scrollerOnly: true)
         }
         .background(InventoryTableMetrics.background)
         // A new table, like the one grouping used to build, starts at the top with its columns as a new table's.
@@ -232,12 +231,19 @@ private struct InventoryList: View {
     }
 
     /// The list is `visible` points wide now: a new list takes a new table's widths, and a resized one fits its
-    /// columns to the new width as the native table does.
-    private func resized(to visible: CGFloat) {
+    /// columns to the new width as the native table does. A legacy scroller that shows or hides (`scrollerOnly`, as
+    /// the rows outgrow the list or fit it again) is no resize: a new table's columns stay a new table's at the width
+    /// it leaves, and only columns already resized or dragged are fitted to it.
+    private func resized(to visible: CGFloat, scrollerOnly: Bool = false) {
         guard visible > 0 else { return }
         defer { scrolled.visibleWidth = visible }
         guard let old = scrolled.visibleWidth, old != visible else {
             if scrolled.visibleWidth == nil, let created = newTableWidths(visible: visible) { widths = created }
+            return
+        }
+        if scrollerOnly, widths == newTableWidths(visible: old) {
+            let created = newTableWidths(visible: visible)
+            if created != widths { widths = created }
             return
         }
         let space = InventoryTableMetrics.columnSpace(visible, columns: columns.count)
@@ -313,11 +319,20 @@ private enum InventoryTableMetrics {
     /// The space between the header and the first row.
     static var topInset: some View { Color.clear.frame(height: verticalInset) }
 
-    /// The width the list shows: its container's, which leaves out the scroll view's insets (such as the sidebar's)
-    /// but not a legacy vertical scroller, less that scroller.
-    @MainActor
-    static func visibleWidth(_ geometry: ScrollGeometry) -> CGFloat {
-        geometry.containerSize.width - scrollerWidth(geometry)
+    /// The list's width: its container's, which leaves out the scroll view's insets (such as the sidebar's) but not
+    /// a legacy vertical scroller, and the part of it that scroller takes.
+    struct ListWidth: Equatable {
+        var container: CGFloat
+        var scroller: CGFloat
+
+        /// The width the list shows: its container's, less the scroller.
+        var visible: CGFloat { container - scroller }
+
+        @MainActor
+        init(_ geometry: ScrollGeometry) {
+            container = geometry.containerSize.width
+            scroller = InventoryTableMetrics.scrollerWidth(geometry)
+        }
     }
 
     /// The width the vertical scroller takes from the list: a legacy (always shown) scroller's while the rows are
