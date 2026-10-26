@@ -741,7 +741,7 @@ Status: Typechecked. The survey typechecked `rateMarks`.
 - `View.alert(error:actions:)` and `alert(error:actions:message:)` bound to `Binding<E?>`.
 
 **Where and why**
-- **`.tabs` is only for pickers that switch views:** Domains/IPs in Domains & IPs; Current/History/Lookup on Egress IP; inspector sections; Waterfall/Hosts in Site Probe. It reads as tab navigation, and VoiceOver announces it as tabs. Value filters (All/Alerts/Blocked, time range) stay `.segmented`.
+- **`.tabs` is only for pickers that switch views:** Domains/IPs in Domains & IPs; Current/History/Lookup on Egress IP; inspector sections; Waterfall/Hosts in Site Probe. It reads as tab navigation, and VoiceOver announces it as tabs. Value filters (All/Alerts/Blocked, time range) stay `.segmented`. *Superseded:* Tidemark draws every segmented choice, tabs and filters alike, with its own `DesignSegmentedControl` (icon, title and count; see `docs/ARCHITECTURE.md`), which VoiceOver reads as a segmented picker, so neither style is used.
 - **`.bordered` with a border shape** is for fields inside content and Settings: DB host/port/user, `surge-cli` path and the Egress lookup field. `RoundedBorderTextFieldStyle` is deprecated in 27. The Requests search stays `.searchable` in the toolbar.
 - **`alert(error:)`** replaces "isPresented + stored error" pairs. It covers Settings "Test connection", migration failures, probe listener bind errors and IP lookup failures. `DatabaseError` is already `LocalizedError`, so the title comes from `errorDescription`.
 

@@ -297,9 +297,13 @@ a notification's View, the App Intents (`TidemarkIntents.showMainWindow`) and th
 The window follows the "Three-pane · Native" direction of the design: a Liquid Glass sidebar (Mac menu,
 Capture, Analyze, Monitored Apps, Archived, Surge/PostgreSQL status footer), a content column per page,
 and an inspector beside the Requests page's live table (History has none). Native controls are preferred
-for switches, tables (`Table`), search fields and sheets; every segmented choice, though, is the design's own
-`DesignSegmentedControl` (a raised white or grey segment on the fill track, no dividers), never the system's:
-in a toolbar it sits outside the glass bubble, and VoiceOver and the overflow menu see a picker. The pause /
+for switches, tables (`Table`), search fields and sheets; every segmented choice, though, is Tidemark's own
+`DesignSegmentedControl`, never the system's: on a rounded fill track with no dividers, each choice shows an SF
+Symbol, its title and, where the number is already at hand, a count in a small capsule, and the selected one is
+raised on a white cell (20% white in dark mode) with a hairline border. It is 40 pt tall in page content and
+32 pt (`.compact()`) in the window toolbar and Settings; a control with counts drops them, then its icons, where
+it has too little room. In a toolbar it sits outside the glass bubble, and VoiceOver and the overflow menu see a
+picker. The pause /
 resume and Stop monitoring confirmations are the design's glass dialogs (`GlassDialog`), laid over the whole
 window. Colors come from `Theme` (exact OKLCH conversions of the design tokens); app tiles use the real app
 icon when the bundle exists locally. The window chrome is the system's: the sidebar draws its rows on the split
