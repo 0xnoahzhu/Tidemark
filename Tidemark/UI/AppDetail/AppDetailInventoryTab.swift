@@ -222,21 +222,10 @@ struct AppDetailInventoryTab: View {
         ])
         return VStack(spacing: 0) {
             // One row when the pane is wide enough, otherwise the filter moves under the title.
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    title
-                    Spacer(minLength: 8)
-                    filter
-                    showAllButton(selected)
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        title
-                        Spacer(minLength: 0)
-                        showAllButton(selected)
-                    }
-                    filter
-                }
+            AppDetailIPHeaderLayout {
+                title
+                filter
+                showAllButton(selected)
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
@@ -247,7 +236,7 @@ struct AppDetailInventoryTab: View {
                         if nav.appIPFilter != .resolved {
                             ipGroupHeader(tr("Direct", "AppDetail"), count: summary.directIPs.count,
                                           note: tr("reached by IP, no hostname", "AppDetail"))
-                            ForEach(summary.directIPs) { AppDetailIPRow(ip: $0, selectedHost: selected) }
+                            ForEach(summary.directIPs) { ipRow($0, selected: selected) }
                             if summary.directIPs.isEmpty {
                                 Text(tr("Nothing reached by IP alone.", "AppDetail"))
                                     .font(.system(size: 11.5))
@@ -260,7 +249,7 @@ struct AppDetailInventoryTab: View {
                         if nav.appIPFilter != .direct {
                             ipGroupHeader(tr("Resolved from domains", "AppDetail"), count: summary.resolvedIPs.count,
                                           note: tr("the domains on the left resolved to these", "AppDetail"))
-                            ForEach(summary.resolvedIPs) { AppDetailIPRow(ip: $0, selectedHost: selected) }
+                            ForEach(summary.resolvedIPs) { ipRow($0, selected: selected) }
                         }
                     } header: {
                         AnalyzeHeaderRow(columns: Self.ipColumns, height: 26, horizontalPadding: 16) {
@@ -273,6 +262,11 @@ struct AppDetailInventoryTab: View {
                 }
             }
         }
+    }
+
+    private func ipRow(_ ip: AppHost, selected: String?) -> some View {
+        let highlighted = selected.map { ip.hosts.contains($0) } ?? false
+        return AppDetailIPRow(ip: ip, highlighted: highlighted, dimmed: selected != nil && !highlighted)
     }
 
     @ViewBuilder
@@ -404,13 +398,17 @@ private struct AppDetailDomainRow: View {
 }
 
 /// An IP with its network and the domains that resolved to it; dimmed when another domain is selected.
+///
+/// It takes its highlight as plain flags rather than the selection, so selecting another domain only redraws the
+/// rows whose state changes.
 private struct AppDetailIPRow: View {
     var ip: AppHost
-    var selectedHost: String?
+    /// A domain that resolved to it is selected.
+    var highlighted: Bool
+    /// Another domain is selected.
+    var dimmed: Bool
 
     var body: some View {
-        let highlighted = selectedHost.map { ip.hosts.contains($0) } ?? false
-        let dimmed = selectedHost != nil && !highlighted
         AnalyzeColumnsLayout(columns: AppDetailInventoryTab.ipColumns) {
             HStack(spacing: 6) {
                 Text(ip.value).font(Theme.mono(11.5)).lineLimit(1).textSelection(.enabled)
@@ -441,6 +439,82 @@ private struct AppDetailIPRow: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
         .opacity(dimmed ? 0.35 : 1)
         .animation(.easeOut(duration: 0.2), value: dimmed)
+    }
+}
+
+/// The IP pane's header: the title, the Direct / From domains switch and "Show all" (when a domain is selected)
+/// on one row when they all fit at their ideal widths, otherwise the switch on a row of its own under the title.
+/// It lays out what a `ViewThatFits` of those two arrangements did, with each view built and measured once.
+///
+/// Subviews: the title, the switch, then "Show all" if present.
+private struct AppDetailIPHeaderLayout: Layout {
+    private let spacing: CGFloat = 8
+    private let rowSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let frames = arrange(width: proposal.width, subviews: subviews)
+        return CGSize(width: frames.width, height: frames.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let frames = arrange(width: bounds.width, subviews: subviews)
+        for (subview, frame) in zip(subviews, frames.items) {
+            subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: frame.width, height: nil))
+        }
+    }
+
+    private struct Arrangement {
+        var items: [CGRect]
+        var width: CGFloat
+        var height: CGFloat
+    }
+
+    /// A subview at its x and width in a row.
+    private struct Cell {
+        var subview: LayoutSubview
+        var x: CGFloat
+        var width: CGFloat
+    }
+
+    private func arrange(width proposed: CGFloat?, subviews: Subviews) -> Arrangement {
+        guard subviews.count >= 2 else { return Arrangement(items: [], width: proposed ?? 0, height: 0) }
+        let title = subviews[0], filter = subviews[1]
+        let showAll = subviews.count > 2 ? subviews[2] : nil
+        let titleWidth = title.sizeThatFits(.unspecified).width
+        let filterWidth = filter.sizeThatFits(.unspecified).width
+        let showAllWidth = showAll?.sizeThatFits(.unspecified).width ?? 0
+        let trailing = showAll == nil ? 0 : spacing + showAllWidth
+        // title, a spacer of at least 8, the switch and "Show all", 8 apart.
+        let oneRow = titleWidth + spacing + spacing + spacing + filterWidth + trailing
+        let width = proposed ?? oneRow
+
+        if oneRow <= width {
+            var cells = [Cell(subview: title, x: 0, width: titleWidth),
+                         Cell(subview: filter, x: width - trailing - filterWidth, width: filterWidth)]
+            if let showAll { cells.append(Cell(subview: showAll, x: width - showAllWidth, width: showAllWidth)) }
+            let row = Self.row(cells)
+            return Arrangement(items: row.frames, width: width, height: row.height)
+        }
+        // The title (cut if needed) and "Show all" on the first row, the switch under them.
+        var cells = [Cell(subview: title, x: 0, width: min(titleWidth, max(0, width - spacing - trailing)))]
+        if let showAll { cells.append(Cell(subview: showAll, x: width - showAllWidth, width: showAllWidth)) }
+        let first = Self.row(cells)
+        let filterSize = filter.sizeThatFits(ProposedViewSize(width: filterWidth, height: nil))
+        var frames = first.frames
+        frames.insert(CGRect(x: 0, y: first.height + rowSpacing, width: filterWidth, height: filterSize.height), at: 1)
+        return Arrangement(items: frames, width: width, height: first.height + rowSpacing + filterSize.height)
+    }
+
+    /// Cells at their x and width, aligned on their first text baselines like an `HStack(alignment: .firstTextBaseline)`.
+    private static func row(_ cells: [Cell]) -> (frames: [CGRect], height: CGFloat) {
+        let dimensions = cells.map { $0.subview.dimensions(in: ProposedViewSize(width: $0.width, height: nil)) }
+        let ascent = dimensions.map { $0[VerticalAlignment.firstTextBaseline] }.max() ?? 0
+        let descent = dimensions.map { $0.height - $0[VerticalAlignment.firstTextBaseline] }.max() ?? 0
+        let frames = zip(cells, dimensions).map { cell, size in
+            CGRect(x: cell.x, y: ascent - size[VerticalAlignment.firstTextBaseline], width: cell.width, height: size.height)
+        }
+        return (frames, ascent + descent)
     }
 }
 
