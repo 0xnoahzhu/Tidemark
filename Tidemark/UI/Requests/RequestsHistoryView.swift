@@ -77,7 +77,7 @@ struct RequestsHistoryView: View {
                 Task { await history.loadMore(database: model.database) }
             }
             .scrollEdgeEffectStyle(.hard, for: .top)
-            .overlay { RequestsHistoryOverlay(history: results, search: key.search, host: key.host) }
+            .overlay { RequestsHistoryOverlay(history: results, search: key.search, host: key.host, endedWithError: key.endedWithError) }
         }
         .task {
             guard !showsRows else { return }
@@ -258,16 +258,20 @@ private struct RequestsHistoryOverlay: View {
     var history: RequestsHistoryModel
     var search: String
     var host: String?
+    var endedWithError: Bool
 
     var body: some View {
         if let message = history.errorMessage {
             EmptyState(systemImage: "exclamationmark.triangle", title: tr("Can't load history", "Requests"), message: message)
         } else if history.rows.isEmpty, !history.isLoading {
-            if let host, search.isEmpty {
-                EmptyState(systemImage: "clock", title: trf("No requests to %@ in this range", "Requests", host),
-                           message: tr("Try a longer time range or fewer filters.", "Requests"))
-            } else if search.isEmpty {
-                EmptyState(systemImage: "clock", title: tr("No requests in this range", "Requests"), message: tr("Try a longer time range or fewer filters.", "Requests"))
+            if search.isEmpty {
+                let title = host.map { trf("No requests to %@ in this range", "Requests", $0) } ?? tr("No requests in this range", "Requests")
+                // How a request ended is stored since schema v4: older requests tell it only in their notes, which the
+                // query does not read, though the inspector does.
+                let message = endedWithError
+                    ? tr("“Ended with an error” finds only requests recorded since Tidemark began storing how requests end. Try a longer time range or fewer filters.", "Requests")
+                    : tr("Try a longer time range or fewer filters.", "Requests")
+                EmptyState(systemImage: "clock", title: title, message: message)
             } else {
                 EmptyState(systemImage: "magnifyingglass", title: trf("No requests match “%@”", "Requests", search), message: tr("The filter looks at host, remote IP, process and app.", "Requests"))
             }

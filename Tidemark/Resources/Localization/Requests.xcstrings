@@ -1903,6 +1903,17 @@
           }
         }
       }
+    },
+    "“Ended with an error” finds only requests recorded since Tidemark began storing how requests end. Try a longer time range or fewer filters." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“以错误结束”只能找到 Tidemark 开始记录请求结束方式之后录下的请求。试试更长的时间范围，或减少筛选条件。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
