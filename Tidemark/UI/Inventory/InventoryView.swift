@@ -106,48 +106,10 @@ struct InventoryView: View {
 
     // MARK: Loading
 
-    /// A list fetched this recently is shown as it is when the page opens; an older one is fetched again at once.
-    private static let revalidateAfter: Duration = .seconds(5)
-    private static let refreshInterval: Duration = .seconds(30)
-
     private func load(_ key: InventoryCache.Key) async {
-        let cache = model.inventory
-        if !key.search.isEmpty {
-            // Narrow the cached list at once; the database's answer, when one is needed, waits for the typing to stop.
-            cache.filterLocally(key, replacing: false)
-            cache.show(key)
-            if cache.snapshot(for: key) != nil {
-                try? await Task.sleep(for: .milliseconds(300))
-                if Task.isCancelled { return }
-            }
+        await model.inventory.keepCurrent(key) { source in
+            try await model.database.inventory(kind: nil, search: source.search, scope: source.scope)
         }
-        // A search the complete unsearched list answers refreshes that list instead of running a query of its own.
-        var source = cache.answersLocally(key) ? key.base : key
-        if let age = cache.age(of: source), age < Self.revalidateAfter {
-            cache.show(key)
-        } else {
-            await fetch(source, for: key)
-        }
-        while !Task.isCancelled {
-            try? await Task.sleep(for: Self.refreshInterval - min(cache.age(of: source) ?? .zero, Self.refreshInterval))
-            if Task.isCancelled { return }
-            source = cache.answersLocally(key) ? key.base : key
-            await fetch(source, for: key)
-        }
-    }
-
-    private func fetch(_ source: InventoryCache.Key, for key: InventoryCache.Key) async {
-        let cache = model.inventory
-        do {
-            let fresh = try await model.database.inventory(kind: nil, search: source.search, scope: source.scope)
-            if Task.isCancelled { return }
-            cache.store(fresh, for: source)
-        } catch {
-            if Task.isCancelled { return }
-            cache.storeFailure(for: source)
-        }
-        if source != key { cache.filterLocally(key, replacing: true) }
-        cache.show(key)
     }
 }
 

@@ -604,6 +604,29 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(try #require(cache.snapshot(for: otherMac)).all.isEmpty)
         #expect(cache.age(of: otherMac) == nil)
     }
+
+    @Test func asksAFailingDatabaseAgainOnlyOncePerInterval() async {
+        struct Unreachable: Error {}
+        final class Calls { var count = 0 }
+        let cache = InventoryCache()
+        cache.refreshInterval = .milliseconds(100)
+        let calls = Calls()
+        let list = entries
+        // The first query answers; every later one fails, as while the database reconnects.
+        let task = Task {
+            await cache.keepCurrent(all) { _ in
+                calls.count += 1
+                if calls.count == 1 { return list }
+                throw Unreachable()
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(650))
+        task.cancel()
+        await task.value
+        // One query, then one per interval: never one failed query straight after another.
+        #expect((2...7).contains(calls.count), "\(calls.count) queries")
+        #expect(cache.snapshot(for: all)?.all.count == entries.count)
+    }
 }
 
 @Suite @MainActor struct EgressOrderingTests {

@@ -55,8 +55,17 @@ final class InventoryCache {
     /// Searches whose lists are kept besides the unsearched ones.
     static let keptSearches = 4
 
+    /// A list fetched this recently is shown as it is when the page opens; an older one is fetched again at once.
+    @ObservationIgnored var revalidateAfter: Duration = .seconds(5)
+    /// How long the shown list waits after the database's last answer, or failure, before it is fetched again.
+    @ObservationIgnored var refreshInterval: Duration = .seconds(30)
+    /// The pause in typing after which a search is sent to the database.
+    @ObservationIgnored var searchDelay: Duration = .milliseconds(300)
+
     private var snapshots: [Key: Snapshot] = [:]
     @ObservationIgnored private var fetchedAt: [Key: ContinuousClock.Instant] = [:]
+    /// When the database last answered, or failed to, for each key.
+    @ObservationIgnored private var attemptedAt: [Key: ContinuousClock.Instant] = [:]
     /// Searched keys, the most recently stored last.
     @ObservationIgnored private var searches: [Key] = []
     /// The key the page last showed: its list stays on screen while a new search or scope has none yet.
@@ -88,11 +97,13 @@ final class InventoryCache {
     /// answer redraws nothing.
     func store(_ fetched: [InventoryEntry], for key: Key) {
         fetchedAt[key] = .now
+        attemptedAt[key] = .now
         assign(Snapshot(sorted: InventoryPresentation.visible(fetched, kind: nil), isTruncated: fetched.count >= Self.queryLimit), to: key)
     }
 
     /// A query that failed leaves a key without a list with an empty one, so the page stops waiting for it.
     func storeFailure(for key: Key) {
+        attemptedAt[key] = .now
         if snapshots[key] == nil { assign(.empty, to: key) }
     }
 
@@ -117,6 +128,53 @@ final class InventoryCache {
         assign(Snapshot(sorted: matches, isTruncated: base.isTruncated), to: key)
     }
 
+    // MARK: Loading
+
+    /// Keeps `key`'s list current while the page shows it, until the task is cancelled: a list fetched within
+    /// `revalidateAfter` is shown as it is, an older one is fetched again at once, and the shown list is fetched
+    /// again `refreshInterval` after each answer or failure. A search narrows the cached list at once and goes to
+    /// the database once the typing pauses, unless the cached list answers it, which is then the list refreshed.
+    func keepCurrent(_ key: Key, fetch: (Key) async throws -> [InventoryEntry]) async {
+        if !key.search.isEmpty {
+            // Narrow the cached list at once; the database's answer, when one is needed, waits for the typing to stop.
+            filterLocally(key, replacing: false)
+            show(key)
+            if snapshot(for: key) != nil {
+                try? await Task.sleep(for: searchDelay)
+                if Task.isCancelled { return }
+            }
+        }
+        // A search the complete unsearched list answers refreshes that list instead of running a query of its own.
+        var source = answersLocally(key) ? key.base : key
+        if let age = age(of: source), age < revalidateAfter {
+            show(key)
+        } else {
+            await refresh(source, for: key, fetch: fetch)
+        }
+        while !Task.isCancelled {
+            // Counted from the last attempt, not the last answer: a failing database is asked again only as often.
+            let waited = attemptedAt[source].map { ContinuousClock.now - $0 } ?? .zero
+            try? await Task.sleep(for: refreshInterval - min(waited, refreshInterval))
+            if Task.isCancelled { return }
+            source = answersLocally(key) ? key.base : key
+            await refresh(source, for: key, fetch: fetch)
+        }
+    }
+
+    /// Fetches `source`'s list for the page showing `key` (the same key, or the unsearched list that answers it).
+    private func refresh(_ source: Key, for key: Key, fetch: (Key) async throws -> [InventoryEntry]) async {
+        do {
+            let fresh = try await fetch(source)
+            if Task.isCancelled { return }
+            store(fresh, for: source)
+        } catch {
+            if Task.isCancelled { return }
+            storeFailure(for: source)
+        }
+        if source != key { filterLocally(key, replacing: true) }
+        show(key)
+    }
+
     /// The site (domains) and network (IPs) groups of the entries of `kind` shown for `key`, computed once per list.
     func groups(for key: Key, kind: HostKind?, unknownNetwork: String, site: (String) -> String) -> [InventoryGroup] {
         let listed = snapshots[key] != nil ? key : (shown ?? key)
@@ -139,6 +197,7 @@ final class InventoryCache {
             searches.removeAll { $0 == dropped }
             snapshots[dropped] = nil
             fetchedAt[dropped] = nil
+            attemptedAt[dropped] = nil
             groupCache = groupCache.filter { $0.key.key != dropped }
         }
     }
