@@ -28,7 +28,7 @@ engine start time in milliseconds.
 | 1 | Initial tables. |
 | 2 | `egress_checks.network_type` / `has_ipv6`; `requests` fillfactor 80; the btree on `requests.updated_at` replaced by a BRIN index (so rewriting a request row can stay a HOT update on PostgreSQL 16+); one trigram index over host, process name, remote IP and bundle path for searches, replacing the separate `host`, host-trigram and remote-IP indexes; `host_sources_last_seen_idx` dropped (no query used it); `schema_migrations.requires_version`. |
 | 3 | `requests_active_idx`, a partial index on `requests (device_id, surge_session) WHERE state = 'active'`, so closing the requests left active by an ended Surge session or by a crash reads only the rows still active; `autosummarize = on` for the BRIN index on `requests.updated_at`, so block ranges are summarized as they fill instead of at the next vacuum. Index changes only: every older Tidemark keeps writing. |
-| 4 | What happened to a request on its way ([Request details](#request-details)): `requests.timing`, `entry_mode`, `original_policy`, `modified`, `end_reason`, `remote_ip_source` and `remote_ip_resolved_at` (nullable, no default: a catalog-only change); the tables `dns_answers` and `proxy_errors`; `requests_host_started_idx` on `requests (host, started_at DESC)` and an index by host on each new table, built concurrently. Additive only (`requires_version` 1): every older Tidemark keeps writing, and its writes never touch the new columns. |
+| 4 | What happened to a request on its way ([Request details](#request-details)): `requests.timing`, `entry_mode`, `original_policy`, `modified`, `end_reason`, `remote_ip_source` and `remote_ip_resolved_at` (nullable, no default: a catalog-only change); the tables `dns_answers` and `proxy_errors`; `requests_host_started_idx` on `requests (host, started_at DESC)`, `requests_ended_error_idx` on `requests (started_at DESC)` for the requests that ended with an error (a partial index whose predicate is History's "ended with an error" filter, so that filter over all time never reads the rows before v4) and an index by host on each new table, built concurrently. Additive only (`requires_version` 1): every older Tidemark keeps writing, and its writes never touch the new columns. |
 
 Indexes are built and dropped `CONCURRENTLY`, so an upgrade does not block reads or writes (v3's BRIN
 setting locks that index for a moment and gives up after 3 s, to try again). Tidemark builds whose schema
@@ -332,11 +332,13 @@ WHERE host = 'api.github.com'
 ORDER BY started_at DESC LIMIT 50;
 ```
 
-Requests of the last day that ended with an error, although Surge reported them completed:
+Requests of the last day that ended with an error, although Surge reported them completed (served by
+`requests_ended_error_idx` (v4) when the condition is written exactly as its predicate):
 
 ```sql
 SELECT started_at, host, policy, end_reason FROM requests
-WHERE end_reason NOT IN ('Closed by remote', 'Closed by client', 'Connection closed', 'Closed for inactivity')
+WHERE end_reason IS NOT NULL
+  AND end_reason NOT IN ('Closed by client', 'Closed by remote', 'Closed for inactivity', 'Connection closed')
   AND started_at > now() - interval '1 day'
 ORDER BY started_at DESC;
 ```
@@ -361,11 +363,12 @@ GROUP BY host ORDER BY requests DESC LIMIT 25;
 ## Maintenance
 
 * **Retention** — requests are kept forever: Tidemark never deletes them.
-* **Size** — `requests` grows by roughly 2–3 KB per row including its indexes (about 1.3 KB of row data). Check it with
-  `SELECT pg_size_pretty(pg_total_relation_size('requests'));`. At about 60,000 requests a day, v4's columns add
-  15–25 B a row in global-proxy mode and 60–80 B in rule mode (1–5 MB a day) and `requests_host_started_idx` about
-  3 MB a day; `dns_answers` gets about 1,000 rows a day in global-proxy mode (about 0.25 MB; more in rule mode, bounded
-  by the re-resolutions of the hosts in use) and `proxy_errors` about 100.
+* **Size** — `requests` grows by roughly 2–3 KB per row including its indexes (about 1.3 KB of row data). Check it
+  with `SELECT pg_size_pretty(pg_total_relation_size('requests'));`. At about 60,000 requests a day, v4's columns add
+  15–25 B a row in global-proxy mode and 60–80 B in rule mode (1–5 MB a day), `requests_host_started_idx` about 3 MB a
+  day and `requests_ended_error_idx` about 0.1 MB (about 6% of requests end with an error); `dns_answers` gets about
+  1,000 rows a day in global-proxy mode (about 0.25 MB; more in rule mode, bounded by the re-resolutions of the hosts
+  in use) and `proxy_errors` about 100.
 * **Schema changes** — never edit the tables by hand while Tidemark runs; new versions of the app add
   migrations instead of changing existing ones.
 * **Index builds** — after an upgrade on a large database, `pg_stat_progress_create_index` shows a

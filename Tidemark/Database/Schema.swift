@@ -128,10 +128,19 @@ enum Schema {
     ///   exact host). `host` and `started_at` never change once written, so progress rewrites stay HOT.
     /// * `dns_answers_domain_idx`, `proxy_errors_target_idx`: a host's answers and errors on every Mac (the primary
     ///   keys lead with the Mac).
+    /// * `requests_ended_error_idx`: the requests that ended with an error (`RequestQuery.endedWithError`), newest
+    ///   first, so their count, histogram and pages over all time read only them, not every row before v4 (whose
+    ///   `end_reason` is NULL). Its predicate is `PostgresDatabase.endedWithErrorCondition`. `end_reason` is set once,
+    ///   in the rewrite that completes a request, which leaves `requests_active_idx` anyway, so no HOT update is lost.
     private static let v4Indexes: [ConcurrentStep] = [
         .createIndex(name: "requests_host_started_idx", table: "requests", definition: "(host, started_at DESC)"),
         .createIndex(name: "dns_answers_domain_idx", table: "dns_answers", definition: "(domain, resolved_at DESC)"),
         .createIndex(name: "proxy_errors_target_idx", table: "proxy_errors", definition: "(target_host, at DESC)"),
+        .createIndex(
+            name: "requests_ended_error_idx", table: "requests",
+            definition: "(started_at DESC) WHERE end_reason IS NOT NULL AND end_reason NOT IN "
+                + "('Closed by client', 'Closed by remote', 'Closed for inactivity', 'Connection closed')"
+        ),
     ]
 
     /// v3 — index changes only, so every older Tidemark keeps writing (`requiresVersion` 1).

@@ -304,7 +304,12 @@ struct DatabaseUnitTests {
         let added = v4Statements[0].components(separatedBy: "ADD COLUMN IF NOT EXISTS").dropFirst()
         #expect(added.count == 7 && added.allSatisfy { !$0.uppercased().contains("DEFAULT") && !$0.uppercased().contains("NOT NULL") })
         #expect(v4.requiresVersion == 1)
-        #expect(v4.concurrentSteps.map(\.indexName) == ["requests_host_started_idx", "dns_answers_domain_idx", "proxy_errors_target_idx"])
+        #expect(v4.concurrentSteps.map(\.indexName) == ["requests_host_started_idx", "dns_answers_domain_idx", "proxy_errors_target_idx",
+                                                         "requests_ended_error_idx"])
+        // The partial index serves `RequestQuery.endedWithError` only while its predicate is the query's condition.
+        guard case .createIndex(_, "requests", let errorIndex)? = v4.concurrentSteps.last else { Issue.record("no index of errors"); return }
+        let condition = PostgresDatabase.endedWithErrorCondition.dropFirst().dropLast().replacingOccurrences(of: "r.", with: "")
+        #expect(errorIndex == "(started_at DESC) WHERE " + condition)
         // Shipped migrations never change.
         #expect(Schema.migrations.map(\.name) == ["initial", "write path and egress details", "active requests and brin autosummarize",
                                                   "request details, dns answers and proxy errors"])
@@ -351,7 +356,7 @@ struct DatabaseUnitTests {
         #expect(!Schema.pendingSteps(of: all + [later], catalog: withoutActive).contains { $0.indexName == "requests_active_idx" })
         #expect(Schema.pendingSteps(of: all + [later], catalog: v2Catalog) == [.dropIndex(name: "requests_active_idx")])
 
-        // v4 on a finished v3 schema: its three indexes, until they are in effect.
+        // v4 on a finished v3 schema: its indexes, until they are in effect.
         let v4 = Schema.migrations[3]
         #expect(Schema.pendingSteps(of: all + [v4], catalog: v2Catalog) == v4.concurrentSteps)
         var v4Catalog = v2Catalog

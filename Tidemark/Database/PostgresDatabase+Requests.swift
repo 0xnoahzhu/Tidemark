@@ -424,7 +424,8 @@ extension PostgresDatabase {
         return trimmed.hasPrefix("[") && trimmed.hasSuffix("]") ? String(trimmed.dropFirst().dropLast()) : trimmed
     }
 
-    /// `RequestRecord.endedWithError` in SQL: an end reason that is not one of `RequestEndReason.normal`.
+    /// `RequestRecord.endedWithError` in SQL: an end reason that is not one of `RequestEndReason.normal`. It is the
+    /// predicate of `requests_ended_error_idx` (schema v4), which serves it only while the two stay the same.
     static let endedWithErrorCondition: String = {
         let normal = RequestEndReason.normal.sorted().map { "'" + $0.replacingOccurrences(of: "'", with: "''") + "'" }
         return "(r.end_reason IS NOT NULL AND r.end_reason NOT IN (\(normal.joined(separator: ", "))))"

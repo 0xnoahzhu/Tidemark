@@ -42,7 +42,7 @@ struct DatabaseLiveTests {
             // Every index step is in effect.
             let built = try await indexes(db)
             for name in ["requests_active_idx", "requests_updated_brin_idx", "requests_search_trgm_idx", "requests_host_started_idx",
-                         "dns_answers_domain_idx", "proxy_errors_target_idx"] {
+                         "dns_answers_domain_idx", "proxy_errors_target_idx", "requests_ended_error_idx"] {
                 #expect(built[name] == true, "\(name)")
             }
             #expect(try await indexOptions(db, "requests_updated_brin_idx") == ["pages_per_range=16", "autosummarize=on"])
@@ -1373,10 +1373,11 @@ struct DatabaseLiveTests {
 
             #expect(try await db.migrate() == 4)
             let upgraded = try await indexes(db)
-            for name in ["requests_host_started_idx", "dns_answers_domain_idx", "proxy_errors_target_idx", "dns_answers_pkey", "proxy_errors_pkey"] {
+            for name in ["requests_host_started_idx", "dns_answers_domain_idx", "proxy_errors_target_idx", "requests_ended_error_idx",
+                         "dns_answers_pkey", "proxy_errors_pkey"] {
                 #expect(upgraded[name] == true, "\(name)")
             }
-            #expect(upgraded.count == before.count + 5)
+            #expect(upgraded.count == before.count + 6)
             let rows = try await db.queryRequests(RequestQuery(range: .all)).rows
             #expect(rows.count == 3)
             #expect(rows.allSatisfy { $0.remoteIP == "140.82.112.6" && $0.endReason == nil && $0.timing == nil && $0.remoteIPSource == nil })
@@ -1487,6 +1488,18 @@ struct DatabaseLiveTests {
                     .map { try $0.makeRandomAccess()[0].decode(String.self) }.joined(separator: "\n")
             }
             #expect(planned.contains("requests_host_started_idx"), "\(planned)")
+            // So are the requests that ended with an error, over all time: their count, the histogram's start and pages.
+            for statement in ["SELECT count(*) FROM requests r", "SELECT min(r.started_at) FROM requests r", "SELECT 1 FROM requests r"] {
+                let plannedErrors = try await db.withTransaction { connection in
+                    _ = try await connection.query("SET LOCAL enable_seqscan = off", logger: PostgresDatabase.logger).collect()
+                    var sql = PostgresDatabase.SQL("EXPLAIN " + statement)
+                    PostgresDatabase.appendFilters(RequestQuery(range: .all, endedWithError: true), window: .init(lower: nil), to: &sql)
+                    if statement.hasPrefix("SELECT 1") { sql.append(" ORDER BY r.started_at DESC, r.id DESC LIMIT 50") }
+                    return try await connection.query(sql.query, logger: PostgresDatabase.logger).collect()
+                        .map { try $0.makeRandomAccess()[0].decode(String.self) }.joined(separator: "\n")
+                }
+                #expect(plannedErrors.contains("requests_ended_error_idx"), "\(plannedErrors)")
+            }
 
             // DNS answers: the watch event first, then completed from `dump dns`, under the same key.
             let resolved = start.addingTimeInterval(-30)
