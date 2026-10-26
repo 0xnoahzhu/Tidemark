@@ -140,6 +140,8 @@ private struct InventoryList: View {
     /// The columns' widths once they differ from those a new table gives them at the list's width (after the window
     /// was resized or a divider dragged, or in a window too narrow for every column); nil until then.
     @State private var widths: InventoryColumnWidths?
+    /// The width a legacy vertical scroller takes from the list, which the scroll view's container still includes.
+    @State private var scrollerWidth: CGFloat = 0
 
     private var columns: [InventoryColumnsLayout.Column] {
         groups == nil ? InventoryColumnsLayout.entryColumns : InventoryColumnsLayout.groupColumns
@@ -188,15 +190,24 @@ private struct InventoryList: View {
             }
             .padding(.bottom, InventoryTableMetrics.verticalInset)
             // As wide as the list, or as the columns when they do not fit it (then the list scrolls sideways).
-            .containerRelativeFrame(.horizontal) { visible, _ in max(visible, tableWidth) }
+            .containerRelativeFrame(.horizontal) { visible, _ in max(visible - scrollerWidth, tableWidth) }
         }
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .scrollPosition($position)
         .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { _, geometry in
             scrolled.geometry = geometry
         }
+        .onScrollGeometryChange(for: CGFloat.self, of: { InventoryTableMetrics.scrollerWidth($0) }) { _, new in
+            scrollerWidth = new
+        }
         .onScrollGeometryChange(for: CGFloat.self, of: { InventoryTableMetrics.visibleWidth($0) }) { _, new in
             resized(to: new)
+        }
+        // Plugging in a mouse or changing Show scroll bars switches between legacy and overlay scrollers.
+        .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
+            guard let geometry = scrolled.geometry else { return }
+            scrollerWidth = InventoryTableMetrics.scrollerWidth(geometry)
+            resized(to: InventoryTableMetrics.visibleWidth(geometry))
         }
         .background(InventoryTableMetrics.background)
         // A new table, like the one grouping used to build, starts at the top with its columns as a new table's.
@@ -302,9 +313,19 @@ private enum InventoryTableMetrics {
     /// The space between the header and the first row.
     static var topInset: some View { Color.clear.frame(height: verticalInset) }
 
-    /// The width the list shows: its container's, which leaves out the scroll view's insets (such as the sidebar's).
+    /// The width the list shows: its container's, which leaves out the scroll view's insets (such as the sidebar's)
+    /// but not a legacy vertical scroller, less that scroller.
+    @MainActor
     static func visibleWidth(_ geometry: ScrollGeometry) -> CGFloat {
-        geometry.containerSize.width
+        geometry.containerSize.width - scrollerWidth(geometry)
+    }
+
+    /// The width the vertical scroller takes from the list: a legacy (always shown) scroller's while the rows are
+    /// taller than the list, which AppKit then shows inside the container; overlay scrollers take none.
+    @MainActor
+    static func scrollerWidth(_ geometry: ScrollGeometry) -> CGFloat {
+        guard NSScroller.preferredScrollerStyle == .legacy, geometry.contentSize.height > geometry.containerSize.height else { return 0 }
+        return NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
     }
 
     /// The width `count` columns share in a list `width` points wide: less the padding and the gaps between them.
