@@ -486,8 +486,55 @@ struct RequestsTableRowHeightTests {
             #expect(table.rect(ofRow: 0).height == RequestsTable.rowHeight)
             #expect(table.rect(ofRow: rows.count - 1).height == RequestsTable.rowHeight)
             #expect(RequestsTable.rowHeight == 28.px)
+            // The header gets its height after the update that added the first row.
+            try await Self.waitUntil { table.headerView?.frame.height == RequestsTable.headerHeight }
             #expect(table.headerView?.frame.height == RequestsTable.headerHeight)
         }
+    }
+
+    /// The first row's cell gives its table's header the design's height wherever AppKit's differs, and only that
+    /// cell holds the view that does it.
+    @Test func firstRowGivesTheHeaderTheDesignsHeight() async throws {
+        let rows = (1...20).map { F.record(id: $0) }
+        let host = NSHostingView(rootView: HeaderAnchorTable(rows: []))
+        // Never ordered in: the table lays out off screen.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 500), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        try await Self.waitUntil { host.layoutSubtreeIfNeeded(); return Self.table(in: host) != nil }
+        let table = try #require(Self.table(in: host))
+        let header = try #require(table.headerView)
+        // A header AppKit drew at another height than the design's.
+        header.frame.size.height = RequestsTable.headerHeight - 6
+
+        host.rootView = HeaderAnchorTable(rows: rows)
+        try await Self.waitUntil { host.layoutSubtreeIfNeeded(); return header.frame.height == RequestsTable.headerHeight }
+        #expect(table.numberOfRows == rows.count)
+        #expect(header.frame.height == RequestsTable.headerHeight)
+        #expect(Self.count(RequestsTableHeaderAnchor.self, in: table) == 1)
+        #expect(RequestsTableHeaderHeight.isNeeded == (RequestsTable.headerHeight != NSTableHeaderView().frame.height))
+    }
+
+    /// A table whose first row holds the header's anchor, as the request table's does where its header needs it.
+    private struct HeaderAnchorTable: View {
+        var rows: [RequestRecord]
+
+        var body: some View {
+            Table(rows) {
+                TableColumn("Host") { (record: RequestRecord) in
+                    Text(record.host)
+                        .background {
+                            if record.key == rows.first?.key { RequestsTableHeaderHeight() }
+                        }
+                }
+            }
+        }
+    }
+
+    private static func count<T: NSView>(_ type: T.Type, in view: NSView) -> Int {
+        (view is T ? 1 : 0) + view.subviews.reduce(0) { $0 + count(type, in: $1) }
     }
 
     /// The header gets the design's height from a cell of its table, which AppKit would leave at its own.

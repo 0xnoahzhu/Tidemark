@@ -5,9 +5,13 @@ import SwiftUI
 ///
 /// AppKit keeps a table header 28 pt tall whatever the size of the labels SwiftUI puts in it, so at a larger UI
 /// scale the header would crowd its labels and look shorter than the rows. `Table` has no API for the header, so
-/// this invisible view sits in a cell, finds its table and sets the header's height. It does so after the update
-/// that added the cell, never from inside the table's own row loading.
+/// this invisible view sits in the first row's cell, finds its table and sets the header's height. It does so after
+/// the update that added the cell, never from inside the table's own row loading. Where the design's height is
+/// AppKit's own (at a factor of 1.0) the table goes without it.
 struct RequestsTableHeaderHeight: NSViewRepresentable {
+    /// Whether the header needs a height other than the one AppKit gives it.
+    static let isNeeded = RequestsTable.headerHeight != NSTableHeaderView().frame.height
+
     func makeNSView(context: Context) -> RequestsTableHeaderAnchor {
         RequestsTableHeaderAnchor()
     }

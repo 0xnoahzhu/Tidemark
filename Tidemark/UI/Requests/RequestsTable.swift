@@ -84,7 +84,10 @@ struct RequestsTable: View {
                     if now != nil {
                         RequestsRowTint(key: record.key, isFresh: isFresh(record), isSelected: record.key == selectedKey)
                     }
-                    RequestsTableHeaderHeight()
+                    // One cell sets the header's height for its table, the first row's, which every table loads.
+                    if RequestsTableHeaderHeight.isNeeded, record.key == rows.first?.key {
+                        RequestsTableHeaderHeight()
+                    }
                 }
                 .onAppear {
                     if let onReachEnd, record.key == rows.last?.key { onReachEnd() }
