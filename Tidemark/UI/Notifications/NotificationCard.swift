@@ -8,27 +8,38 @@ struct NotificationCard: View {
     /// Today's cards show only the time; older ones show the day above it.
     var isToday: Bool
 
+    /// Fits today's `23:59` in 11 px.
+    static let todayTimeWidth = timeWidth(isToday: true, factor: UIScale.factor)
+    /// Fits an older card's day above its time (`Yesterday`, `Sep 28`, `12月28日`) in 11 px.
+    static let earlierTimeWidth = timeWidth(isToday: false, factor: UIScale.factor)
+
+    /// The time column at any UI scale: the design's 40 and 64 px. Text grows with the scale, and SF Pro a little
+    /// less than its size, so the widths fit their labels at every factor.
+    static func timeWidth(isToday: Bool, factor: CGFloat) -> CGFloat {
+        UIScale.length(isToday ? 40 : 64, factor: factor)
+    }
+
     var body: some View {
         let app = model.catalog.app(alert.appID)
         let appName = app?.name ?? tr("Deleted app", "Notifications")
-        HStack(spacing: 12) {
+        HStack(spacing: 12.px) {
             tile(app: app)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 3.px) {
+                HStack(spacing: 8.px) {
                     Text(tr("New", "Notifications"))
-                        .font(.system(size: 10, weight: .semibold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Theme.tint(75).background, in: .rect(cornerRadius: 4, style: .continuous))
+                        .font(.design(10, .semibold))
+                        .padding(.horizontal, 6.px)
+                        .padding(.vertical, 1.px)
+                        .background(Theme.tint(75).background, in: .rect(cornerRadius: 4.px, style: .continuous))
                         .foregroundStyle(Theme.tint(75).foreground)
                     Text(headline(appName: appName))
-                        .font(.system(size: 13, weight: alert.isUnread ? .semibold : .medium))
+                        .font(.design(13, alert.isUnread ? .semibold : .medium))
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
                 Text(subtitle)
-                    .font(.system(size: 11.5))
+                    .font(.design(11.5))
                     .foregroundStyle(Theme.ink2)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -36,28 +47,28 @@ struct NotificationCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(tr("View", "Notifications")) { view() }
-                .controlSize(.small)
+                .buttonStyle(DesignButtonStyle(height: 24, fontSize: 11.5, cornerRadius: 7, horizontalPadding: 9))
                 .disabled(app == nil)
 
             timeLabel
-                .font(.system(size: 11))
+                .font(.design(11))
                 .foregroundStyle(Theme.ink3)
                 .multilineTextAlignment(.trailing)
-                .frame(width: isToday ? 40 : 64, alignment: .trailing)
+                .frame(width: isToday ? Self.todayTimeWidth : Self.earlierTimeWidth, alignment: .trailing)
 
             Circle()
                 .fill(alert.isUnread ? Theme.accent : .clear)
-                .frame(width: 7, height: 7)
+                .frame(width: 7.px, height: 7.px)
                 .accessibilityHidden(true)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(alert.isUnread ? Theme.fresh : Theme.card, in: .rect(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 14.px)
+        .padding(.vertical, 11.px)
+        .background(alert.isUnread ? Theme.fresh : Theme.card, in: .rect(cornerRadius: 12.px, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 12.px, style: .continuous)
                 .strokeBorder(Theme.line, lineWidth: 0.5)
         }
-        .contentShape(.rect(cornerRadius: 12))
+        .contentShape(.rect(cornerRadius: 12.px))
         .onTapGesture { markRead() }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)

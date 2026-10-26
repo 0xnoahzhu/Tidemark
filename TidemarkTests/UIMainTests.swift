@@ -1306,6 +1306,37 @@ struct NotificationsPresentationTests {
 }
 
 @MainActor
+struct NotificationCardLayoutTests {
+    /// The time column fits today's time and an older card's day, `Yesterday` or a date, in both languages and at
+    /// every factor the UI scale offers.
+    @Test func timeColumnFitsItsLabels() {
+        let saved = Localizer.shared.override
+        defer { Localizer.shared.override = saved }
+        let calendar = Calendar(identifier: .gregorian)
+        let dates = (1...12).compactMap { calendar.date(from: DateComponents(year: 2026, month: $0, day: 28)) }
+        var days: [String] = []
+        for language in ["en", "zh-Hans"] {
+            Localizer.shared.override = language
+            days.append(tr("Yesterday", "Notifications"))
+            days += dates.map { Fmt.monthDay($0, locale: Localizer.shared.locale) }
+        }
+        #expect(days.contains("Sep 28"))
+        func width(_ text: String, _ font: NSFont) -> CGFloat {
+            (text as NSString).size(withAttributes: [.font: font]).width
+        }
+        for factor in RequestsTableLayoutTests.factors {
+            let font = NSFont.systemFont(ofSize: 11 * factor)
+            #expect(width("23:59", font) <= NotificationCard.timeWidth(isToday: true, factor: factor), "at \(factor)")
+            for day in days {
+                #expect(width(day, font) <= NotificationCard.timeWidth(isToday: false, factor: factor), "\(day) at \(factor)")
+            }
+        }
+        #expect(NotificationCard.todayTimeWidth == NotificationCard.timeWidth(isToday: true, factor: UIScale.factor))
+        #expect(NotificationCard.earlierTimeWidth == NotificationCard.timeWidth(isToday: false, factor: UIScale.factor))
+    }
+}
+
+@MainActor
 struct ShellTests {
     /// Each glass surface takes the design's `max(floor, .16 + .76·g)`: the menu bar panel .85, the Mac menu .88, the
     /// dialogs .6 and .85 and the Settings window .72 at the Clear end and at the default 40, more past their floor,
