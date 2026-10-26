@@ -866,21 +866,63 @@ struct NotificationsPresentationTests {
 
 @MainActor
 struct ShellTests {
-    /// Each glass surface takes the design's `max(floor, .16 + .76·g)`: the sidebar .42, the menu bar panel .85, the
-    /// Mac menu .88 and the dialogs .6 and .85 at the Clear end and at the default 40, all of them .92 at Tinted.
+    /// Each glass surface takes the design's `max(floor, .16 + .76·g)`: the menu bar panel .85, the Mac menu .88, the
+    /// dialogs .6 and .85 and the Settings window .72 at the Clear end and at the default 40, more past their floor,
+    /// all of them .92 at Tinted.
     @Test func mapsTheGlassPreference() {
-        #expect(GlassSurface.sidebar.opacity(preference: 0) == 0.42)
-        #expect(abs(GlassSurface.sidebar.opacity(preference: 40) - 0.464) < 0.0001)
+        #expect(abs(GlassSurface.glassAlpha(preference: 40) - 0.464) < 0.0001)
+        #expect(abs(GlassSurface.dialog.opacity(preference: 80) - 0.768) < 0.0001)
         #expect(GlassSurface.panel.opacity(preference: 0) == 0.85)
         #expect(GlassSurface.panel.opacity(preference: 40) == 0.85)
         #expect(GlassSurface.menu.opacity(preference: 40) == 0.88)
         #expect(GlassSurface.dialog.opacity(preference: 40) == 0.6)
         #expect(GlassSurface.appDialog.opacity(preference: 40) == 0.85)
-        for surface in [GlassSurface.sidebar, .panel, .menu, .dialog, .appDialog] {
+        #expect(GlassSurface.settings.opacity(preference: 40) == 0.72)
+        for surface in [GlassSurface.panel, .menu, .dialog, .appDialog, .settings] {
             #expect(abs(surface.opacity(preference: 100) - 0.92) < 0.0001)
             #expect(surface.opacity(preference: 250) == surface.opacity(preference: 100))
             #expect(surface.opacity(preference: -5) == surface.floor)
         }
+    }
+
+    /// The sidebar keeps the system's glass at the Clear end; above it the glass itself is tinted with the design's
+    /// glass color at `--glassA`, and its own tint comes back at the Clear end and when the sidebar goes away.
+    @Test func tintsTheSidebarGlass() throws {
+        #expect(SidebarGlassTint.alpha(preference: 0) == nil)
+        #expect(SidebarGlassTint.alpha(preference: -5) == nil)
+        #expect(abs(try #require(SidebarGlassTint.alpha(preference: 40)) - 0.464) < 0.0001)
+        #expect(abs(try #require(SidebarGlassTint.alpha(preference: 250)) - 0.92) < 0.0001)
+
+        func resolved(_ color: NSColor?, _ appearance: NSAppearance.Name) -> NSColor? {
+            var result: NSColor?
+            NSAppearance(named: appearance)?.performAsCurrentDrawingAppearance { result = color?.usingColorSpace(.sRGB) }
+            return result
+        }
+        let glass = NSGlassEffectView()
+        let ownTint = NSColor.systemPink
+        glass.tintColor = ownTint
+        let column = NSView()
+        glass.contentView = column
+        let anchor = SidebarGlassTintAnchor()
+        column.addSubview(anchor)
+
+        anchor.apply(alpha: 0.5)
+        let light = try #require(resolved(glass.tintColor, .aqua))
+        #expect(abs(light.redComponent - 242 / 255) < 0.001)
+        #expect(abs(light.blueComponent - 246 / 255) < 0.001)
+        #expect(abs(light.alphaComponent - 0.5) < 0.001)
+        let dark = try #require(resolved(glass.tintColor, .darkAqua))
+        #expect(abs(dark.redComponent - 40 / 255) < 0.001)
+        #expect(abs(dark.alphaComponent - 0.5) < 0.001)
+
+        anchor.apply(alpha: nil)
+        #expect(glass.tintColor == ownTint)
+        anchor.apply(alpha: 0.92)
+        anchor.restore()
+        #expect(glass.tintColor == ownTint)
+
+        // Outside any glass it does nothing.
+        SidebarGlassTintAnchor().apply(alpha: 0.5)
     }
 
     @Test func listsMacsWithThisMacFirst() {

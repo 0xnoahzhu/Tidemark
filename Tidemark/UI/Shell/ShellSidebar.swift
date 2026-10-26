@@ -5,6 +5,10 @@ import SwiftUI
 ///
 /// Laid out like the page rather than as a system sidebar list: 30 pt rows one point apart, and the selected
 /// row on the accent wash with its text in ink. The Mac menu and the footer stay put while the rows scroll.
+///
+/// The column itself is the system's: nothing is painted behind the rows, so the split view's own sidebar glass,
+/// which holds the traffic lights, shows as in any other macOS 27 window (full height, edge to edge). Settings ›
+/// General › Liquid Glass tints that glass itself (`SidebarGlassTint`), leaving it untouched at the Clear end.
 struct ShellSidebar: View {
     @Environment(AppModel.self) private var model
     @SceneStorage("sidebar.archivedExpanded") private var archivedExpanded = true
@@ -33,7 +37,7 @@ struct ShellSidebar: View {
                 }
         }
         .foregroundStyle(Theme.ink)
-        .background { SidebarGlassWash(opacity: GlassSurface.sidebar.opacity(preference: model.preferences.glass)) }
+        .background { SidebarGlassTint(preference: model.preferences.glass) }
         .animation(.smooth(duration: 0.25), value: model.catalog.apps.map(\.id))
     }
 
@@ -84,19 +88,6 @@ struct ShellSidebar: View {
                 }
             }
         }
-    }
-}
-
-/// The design's sidebar glass color, laid over the system sidebar glass at the sidebar's opacity.
-private struct SidebarGlassWash: View {
-    var opacity: Double
-
-    var body: some View {
-        Rectangle()
-            .fill(GlassSurface.color.opacity(opacity))
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-            .animation(.easeInOut(duration: 0.2), value: opacity)
     }
 }
 

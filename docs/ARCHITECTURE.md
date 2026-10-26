@@ -298,10 +298,15 @@ for switches, tables (`Table`), search fields and sheets; every segmented choice
 in a toolbar it sits outside the glass bubble, and VoiceOver and the overflow menu see a picker. The pause /
 resume and Stop monitoring confirmations are the design's glass dialogs (`GlassDialog`), laid over the whole
 window. Colors come from `Theme` (exact OKLCH conversions of the design tokens); app tiles use the real app
-icon when the bundle exists locally. The sidebar, its Mac menu, the menu bar panel and the dialogs lay the
-design's glass color over the system glass at an opacity of their own (`GlassSurface`: at least .42 for the
-sidebar, .88 for the Mac menu, .85 for the panel, .6 for the pause dialog and .85 for the monitoring one, more
-as Settings › General › Liquid Glass moves toward Tinted), so their text stays legible over any background.
+icon when the bundle exists locally. The window chrome is the system's: the sidebar draws its rows on the split
+view's own sidebar glass with nothing behind them, and on macOS 27 that glass runs the full height of the window,
+edge to edge, with the traffic lights on it (`NSSplitViewItem` draws no floating, inset sidebar pane there).
+Settings › General › Liquid Glass tints that glass itself (`SidebarGlassTint` sets its `NSGlassEffectView.tintColor`
+to the design's glass color at `--glassA`, with no tint at the Clear end). The Mac menu, the menu bar panel, the
+dialogs and the Settings window lay the design's glass color over the system's glass or blur at an opacity of their
+own (`GlassSurface`: at least .88 for the Mac menu, .85 for the panel, .6 for the pause dialog, .85 for the
+monitoring one and .72 for the Settings window, more as the slider moves toward Tinted), so their text stays legible
+over any background.
 History runs its page query and its histogram side by side: the rows appear as soon as the page arrives, a
 histogram that fails leaves them in place (the chart area says it is unavailable and why), and a newer query
 cancels the older one's histogram.

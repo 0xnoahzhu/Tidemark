@@ -7,9 +7,10 @@ import SwiftUI
 /// The page paints each surface with `rgba(--glassRGB, max(floor, --glassA))` over a backdrop blur, where
 /// `--glassA = .16 + .76·g`: the floor keeps text legible at the Clear end, and each surface has its own. Tidemark
 /// lays the same color at the same opacity over the system's Liquid Glass, which provides the blur.
+///
+/// The main window's sidebar is not one of them: a color laid over its full-height system glass would flatten it,
+/// so the same color tints that glass itself instead (`SidebarGlassTint`).
 enum GlassSurface {
-    /// The main window's sidebar: `max(.42, glassA)`.
-    case sidebar
     /// The menu bar panel: `max(.85, glassA)`. The page's panel is at least .6 over a backdrop blur; over the
     /// system's Liquid Glass and a dark desktop, .6 leaves its gray labels hard to read in light mode.
     case panel
@@ -25,7 +26,6 @@ enum GlassSurface {
     /// The opacity the surface never goes below.
     var floor: Double {
         switch self {
-        case .sidebar: 0.42
         case .panel: 0.85
         case .menu: 0.88
         case .dialog: 0.6

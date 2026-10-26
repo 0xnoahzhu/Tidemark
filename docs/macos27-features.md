@@ -48,7 +48,7 @@ Features that would only add decoration are left out, and section 7 explains why
 - **Pending rows.** Shutdown, recording pause and sleep each drain the write buffer inside a cancellation shield. If the drain fails, the rows go to the existing spool.
 - **Settings changes.** Services are reconfigured through `withContinuousObservation`. A view's `onChange` would not work here, because it runs only while that view exists, and the menu-bar app often has no window open.
 - **UI refresh rate.** The live UI slows down when the system asks it to or when nothing is visible. Capture, database writes and alerts never slow down.
-- **Where glass goes.** Glass stays on the control layer: the sidebar, toolbar, menu-bar popover header and floating controls. The glass slider uses `.clear` at 0 and tinted `.regular` above that, because the API has no continuous "clearness" value.
+- **Where glass goes.** Glass stays on the control layer: the sidebar, toolbar, menu-bar popover header and floating controls. The sidebar keeps the split view's own glass, and the glass slider tints that glass (`NSGlassEffectView.tintColor`, none at Clear) instead of laying `.clear` or tinted `.regular` glass over it, which stacks on the system glass (section 8, item 1).
 - **Site Probe.** It moves to `WebPage` and `NetworkListener`. macOS 27 adds GPC, referrer and cache-bypass options, plus a hardened WebContent process.
 - **Host insights.** They run on-device only, are opt-in, are labelled as generated, and are never on the alert path. Private Cloud Compute is rejected.
 - **Menu bar.** `MenuBarExtra` stays for now. A status item using the macOS 27 AppKit expanded-interface API is the planned upgrade (section 5.1).
@@ -381,17 +381,9 @@ Status: Typechecked.
 
 **Why.** This is the look users see on every page, and it is the system's own material. Glass belongs only on the navigation and control layer. Table rows, inspector cards and charts stay on solid content backgrounds.
 
-**Sidebar glass amount.** `Preferences.glass` runs from 0 (Clear) to 100 (Tinted), default 40. `Glass` has no continuous clearness, so 0 maps to `.clear` and anything above maps to `.regular` with a growing accent tint.
+**Sidebar glass amount.** `Preferences.glass` runs from 0 (Clear) to 100 (Tinted), default 40. Superseded for the sidebar (section 8, item 1): a `glassEffect` or color background in the sidebar column lies over the split view's own glass and covers it, so the sidebar keeps the system glass and `SidebarGlassTint` sets that glass's `tintColor` to the design's glass color at `--glassA`, with no tint at Clear. The slider row:
 
 ```swift
-enum SidebarGlass {
-    /// `amount` is Preferences.glass, 0 (Clear) … 100 (Tinted).
-    static func glass(amount: Double, tint: Color = .accentColor) -> Glass {
-        let t = min(max(amount / 100, 0), 1)
-        return t < 0.02 ? .clear : .regular.tint(tint.opacity(t * 0.6))
-    }
-}
-
 struct GlassAmountRow: View {
     @Binding var amount: Double
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -410,13 +402,6 @@ struct GlassAmountRow: View {
         .disabled(reduceTransparency)   // the system replaces glass then; say so in the footer
     }
 }
-
-// Sidebar column
-SidebarList(selection: $nav.selection)
-    .scrollContentBackground(.hidden)
-    .background {
-        Color.clear.glassEffect(SidebarGlass.glass(amount: prefs.glass), in: .rect(cornerRadius: 12))
-    }
 ```
 
 **Main toolbar.** Use three glass groups. Recording stays visible longest, the live-rate pill fills its capsule edge to edge, and export and the inspector toggle are the first to move into overflow.
@@ -477,7 +462,7 @@ GlassEffectContainer(spacing: 10) {
 
 **Floating actions.** Use `.glassProminent` for the primary action of a page, such as Site Probe "Probe". Use `.glass` for secondary actions, such as Egress "Refresh".
 
-Status: Typechecked. The visual result is unverified, especially sidebar glass stacking on top of the system sidebar (section 8).
+Status: Typechecked. Sidebar glass stacking is settled: the sidebar keeps the system glass and the slider tints it (section 8, item 1). The rest of the visual result is unverified.
 
 ### 4.6 Site Probe on WebPage with a per-session proxy
 
@@ -1109,6 +1094,14 @@ These findings are uncertain, or their signatures typecheck but their behaviour 
 1. **Sidebar glass stacking (4.5).** On macOS 26 and 27 the NavigationSplitView sidebar is already system glass, and adding `glassEffect` inside it may stack two layers. If it does, keep the Clear end as the untouched system sidebar and apply only a tint layer above it (`Color.accentColor.opacity(t * 0.25)`). Also check:
    - `Theme.inkGlass` legibility at `.clear` on bright wallpapers.
    - That Reduce Transparency and Increase Contrast take over cleanly.
+
+   Checked on macOS 27.0.1: the sidebar column is one full-height `NSGlassEffectView` (corner radius 0) under the traffic lights, in SwiftUI and AppKit alike; `NSSplitViewItem`'s private `wantsFloatingAppearance` returns NO and its setter does nothing, so there is no floating, inset pane. A color laid over the column covers that glass, so Tidemark lays nothing there and tints the glass itself: `SidebarGlassTint` finds the glass among the sidebar content's ancestors (`_NSSplitViewItemViewWrapper › NSGlassEffectView › … › NSHostingView`) and sets its public `tintColor` to the design's glass color at `--glassA`, with no tint at the Clear end. Window captures (`screencapture -l`) showed:
+   - In an active window the tinted glass takes the color at that alpha: at Tinted (.92), 242,242,246 in light mode and 42,42,46 in dark mode, against 253 and 64,63,61 untinted. Tidemark itself could not be brought to the front from the test session, so this was measured on an AppKit split view sidebar in a key, non-activating panel.
+   - In an inactive window the system draws tinted glass desaturated and nearer mid-gray: in light mode 243 untinted, 231 at the default 40 and 219 at Tinted; in dark mode 44, 56 and 66.
+   - AppKit did not reset the tint: it stayed through key and main changes, appearance changes and hiding and showing the sidebar, and the dynamic color followed the appearance.
+   - These captures leave out what lies behind the window, so they cannot show how much of the desktop the tinted glass lets through.
+
+   Still unchecked: the `Theme.inkGlass` legibility and the Reduce Transparency and Increase Contrast items above.
 2. **`withContinuousObservation` has no SDK documentation (4.2).** The survey's runtime checks covered the initial event, per-transaction coalescing and read tracking. Re-check after each SDK update, and add a unit test that toggles two properties in one turn and expects one event.
 3. **Site Probe proxy coverage (4.6).** Compare a probe's recorded hosts against Surge's own log for the same session. Check that:
    - cleartext `http://` loads also arrive as `CONNECT`. If they arrive as absolute-form requests (`GET http://…`), the relay must handle them.
