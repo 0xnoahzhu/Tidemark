@@ -594,6 +594,23 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(cache.snapshot(for: search) == nil)
     }
 
+    @Test func leavesASingleMacsSearchToTheDatabase() throws {
+        let cache = InventoryCache()
+        let mac = InventoryCache.Key(search: "", scope: .device(UUID()))
+        cache.store(entries, for: mac)
+        // The database also matches the apps that reached a domain or IP on another Mac, which this Mac's list does
+        // not name: the narrowed list is shown until the database answers, and "Mail" waits for it.
+        let raycast = InventoryCache.Key(search: "raycast", scope: mac.scope)
+        let mail = InventoryCache.Key(search: "Mail", scope: mac.scope)
+        #expect(!cache.answersLocally(raycast))
+        cache.filterLocally(raycast, replacing: false)
+        cache.filterLocally(mail, replacing: false)
+        #expect(try #require(cache.snapshot(for: raycast)).all.map(\.value) == ["104.18.19.125", "notion.so"])
+        #expect(cache.snapshot(for: mail) == nil)
+        cache.store([entry("api.github.com", minutesAgo: 5)], for: mail)
+        #expect(try #require(cache.snapshot(for: mail)).all.map(\.value) == ["api.github.com"])
+    }
+
     @Test func showsTheLastListWhileAnotherHasNoneYet() throws {
         let cache = InventoryCache()
         cache.store(entries, for: all)

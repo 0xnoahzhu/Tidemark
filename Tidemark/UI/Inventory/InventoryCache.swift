@@ -107,16 +107,18 @@ final class InventoryCache {
         if snapshots[key] == nil { assign(.empty, to: key) }
     }
 
-    /// Whether the cached unsearched list holds every entry of the scope, so narrowing it answers `key`'s search
-    /// exactly and the database need not be asked.
+    /// Whether the cached unsearched list answers `key`'s search exactly, so the database need not be asked: it
+    /// holds every entry, and of every Mac (the database matches a search against the apps and probes that reached
+    /// a domain or IP on any Mac, while a single Mac's list names only that Mac's).
     func answersLocally(_ key: Key) -> Bool {
-        guard !key.search.isEmpty, let base = snapshots[key.base] else { return false }
+        guard !key.search.isEmpty, key.scope == .all, let base = snapshots[key.base] else { return false }
         return !base.isTruncated
     }
 
-    /// Narrows the cached unsearched list to `key`'s search as the database does: the domains and IPs that contain
-    /// the text and those an app or probe whose name contains it reached. A key that has a list keeps it unless
-    /// `replacing` (the database's own answer is the better one when the cached list is incomplete).
+    /// Narrows the cached unsearched list to `key`'s search as the database does (for a single Mac, to part of what
+    /// it answers): the domains and IPs that contain the text and those an app or probe whose name contains it
+    /// reached. A key that has a list keeps it unless
+    /// `replacing` (the database's own answer is the better one when the cached list cannot answer the search).
     func filterLocally(_ key: Key, replacing: Bool) {
         guard !key.search.isEmpty, replacing || snapshots[key] == nil, let base = snapshots[key.base] else { return }
         let term = key.search.lowercased()
@@ -124,7 +126,7 @@ final class InventoryCache {
             entry.value.lowercased().contains(term) || entry.sources.contains { $0.title.lowercased().contains(term) }
         }
         // Entries the cached list lacks may still match: no "nothing matches" before the database has answered.
-        if matches.isEmpty, base.isTruncated, !replacing { return }
+        if matches.isEmpty, !answersLocally(key), !replacing { return }
         assign(Snapshot(sorted: matches, isTruncated: base.isTruncated), to: key)
     }
 
