@@ -91,6 +91,8 @@ final class ProbeProxyServer: Sendable {
         var buffer = Data()
         while true {
             let message = try await client.receive(atLeast: 1, atMost: 65_536)
+            // A cancelled receive returns an empty end of stream; the browser did not close.
+            try Task.checkCancellation()
             buffer.append(message.content)
             if let end = ProbeHTTPHead.headEnd(in: buffer) { return .head(buffer, end: end) }
             if message.metadata.endOfStream { return .closed }
@@ -123,11 +125,16 @@ final class ProbeProxyServer: Sendable {
     }
 
     private func handle(_ client: NetworkConnection<TCP>) async {
+        var connections = [client]
+        // Set when an operation on either connection may have been cancelled (see `retire`).
+        var interrupted = false
+        defer { if interrupted || Task.isCancelled { Self.retire(connections) } }
         do {
             let (head, reader) = try await Self.readHead(from: client, timeout: headTimeout)
             guard let read = head else {
                 try? await client.send(ProbeHTTPHead.response(status: 408, reason: "Request Timeout"), endOfStream: true)
                 reader.cancel()
+                interrupted = true
                 return
             }
             let buffer: Data, end: Int
@@ -146,15 +153,21 @@ final class ProbeProxyServer: Sendable {
                 return
             }
             let early = buffer.dropFirst(end)
+            // A stopped proxy records and opens nothing.
+            try Task.checkCancellation()
             registry.connectionOpened(host: head.host)
 
             guard let port = NWEndpoint.Port(rawValue: upstreamPort) else { return }
             let upstream = NetworkConnection(to: .hostPort(host: NWEndpoint.Host(upstreamHost), port: port)) { TCP() }
+            connections.append(upstream)
             do {
                 // An empty send establishes the connection, so its source port is known before Surge sees
                 // the request head.
                 try await CaptureTimeout.run(connectTimeout) { try await upstream.send(Data()) }
             } catch {
+                interrupted = true
+                // A stopped proxy answers nothing.
+                try Task.checkCancellation()
                 try? await client.send(ProbeHTTPHead.response(status: 502, reason: "Bad Gateway"), endOfStream: true)
                 return
             }
@@ -176,9 +189,25 @@ final class ProbeProxyServer: Sendable {
                 try await group.waitForAll()
             }
         } catch {
-            // The browser or Surge closed the connection; both sides are released with this task.
+            // The browser or Surge failed the connection, or the proxy stopped; a pipe may have been cancelled.
+            interrupted = true
         }
     }
+
+    /// Keeps connections a while before releasing them. `NetworkConnection` starts itself in a task that holds
+    /// it weakly, and an operation issued once a cancellation has torn the connection down (or from a
+    /// cancelled task) queues that start again. The start traps ("Neither nw nor nwGroup is initialized") when
+    /// the connection is gone by the time it runs, so a connection that may have been cancelled outlives it.
+    /// Connections that ended on their own are released at once and close their sockets.
+    static func retire(_ connections: [NetworkConnection<TCP>]) {
+        Task.detached {
+            try? await Task.sleep(for: retirement)
+            withExtendedLifetime(connections) {}
+        }
+    }
+
+    /// Far longer than a start queued on the cooperative pool waits to run.
+    private static let retirement = Duration.seconds(5)
 
     /// `127.0.0.1`, `::1`: the textual form Surge uses for a record's `sourceAddress`.
     static func address(_ host: NWEndpoint.Host) -> String {
@@ -194,6 +223,9 @@ final class ProbeProxyServer: Sendable {
     private static func pipe(from source: NetworkConnection<TCP>, to sink: NetworkConnection<TCP>, host: String, registry: ProbeRegistry) async throws {
         while true {
             let message = try await source.receive(atLeast: 1, atMost: 65_536)
+            // A cancelled receive returns an empty end of stream that the peer never sent, and has cancelled
+            // `source`; nothing more goes to either side.
+            try Task.checkCancellation()
             if !message.content.isEmpty {
                 try await sink.send(message.content)
                 registry.activity(host: host)

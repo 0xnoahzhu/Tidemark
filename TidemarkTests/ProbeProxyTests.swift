@@ -27,7 +27,11 @@ final class ProbeFakeUpstream: Sendable {
                 if case .failed(let error) = state { ready.resume(throwing: error) }
             }
             let run = Task { [self] in
-                do { try await listener.run { connection in await self.serve(connection) } } catch {}
+                do {
+                    try await listener.run { connection in await self.serve(connection) }
+                } catch {
+                    ready.resume(throwing: error)
+                }
             }
             task.withLock { $0 = run }
         }
@@ -35,12 +39,15 @@ final class ProbeFakeUpstream: Sendable {
 
     func stop() { task.withLock { $0?.cancel() } }
 
+    /// Stopping cancels the operations of open connections, so they are retired like the proxy's.
     private func serve(_ connection: NetworkConnection<TCP>) async {
+        defer { ProbeProxyServer.retire([connection]) }
         do {
             var buffer = Data()
             var end: Int?
             while end == nil {
                 let message = try await connection.receive(atLeast: 1, atMost: 65_536)
+                try Task.checkCancellation()
                 buffer.append(message.content)
                 end = ProbeHTTPHead.headEnd(in: buffer)
                 if end == nil, message.metadata.endOfStream { return }
@@ -55,6 +62,7 @@ final class ProbeFakeUpstream: Sendable {
                 while true {
                     if !pending.isEmpty { try await connection.send(Data(pending)) }
                     let message = try await connection.receive(atLeast: 1, atMost: 65_536)
+                    try Task.checkCancellation()
                     pending = message.content[...]
                     if message.metadata.endOfStream {
                         if !pending.isEmpty { try await connection.send(Data(pending)) }
@@ -69,13 +77,16 @@ final class ProbeFakeUpstream: Sendable {
     }
 }
 
-/// A browser-side client of the probe proxy.
-struct ProbeTestClient {
+/// A browser-side client of the probe proxy. A read that times out cancels its connection, so the connection
+/// is retired rather than dropped.
+final class ProbeTestClient: Sendable {
     let connection: NetworkConnection<TCP>
 
     init(port: UInt16) {
         connection = NetworkConnection(to: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!)) { TCP() }
     }
+
+    deinit { ProbeProxyServer.retire([connection]) }
 
     func send(_ text: String) async throws { try await connection.send(Data(text.utf8)) }
 
@@ -92,6 +103,91 @@ struct ProbeTestClient {
             return String(decoding: data, as: UTF8.self)
         }
     }
+
+    /// Sends data through a tunnel and reads the echo every millisecond until the connection ends or the task is
+    /// cancelled.
+    func pump() async {
+        let chunk = Data(repeating: 0x61, count: 4_096)
+        while !Task.isCancelled {
+            do {
+                try await connection.send(chunk)
+                let message = try await connection.receive(atLeast: 1, atMost: 65_536)
+                if message.metadata.endOfStream { return }
+                try await Task.sleep(for: .milliseconds(1))
+            } catch {
+                return
+            }
+        }
+    }
+}
+
+/// Runs jobs on one thread of its own, outside the cooperative pool.
+final class ProbeThreadExecutor: TaskExecutor, @unchecked Sendable {
+    static let shared = ProbeThreadExecutor()
+
+    private let condition = NSCondition()
+    private var jobs: [UnownedJob] = []
+
+    private init() {
+        Thread { [self] in
+            while true { next().runSynchronously(on: asUnownedTaskExecutor()) }
+        }.start()
+    }
+
+    func enqueue(_ job: consuming ExecutorJob) {
+        let job = UnownedJob(job)
+        condition.withLock {
+            jobs.append(job)
+            condition.signal()
+        }
+    }
+
+    private func next() -> UnownedJob {
+        condition.withLock {
+            while jobs.isEmpty { condition.wait() }
+            return jobs.removeFirst()
+        }
+    }
+}
+
+/// Blocks every thread the cooperative pool runs `priority`'s jobs on until thawed, so nothing queued there at
+/// that priority runs. The pool has as many threads for each priority, so jobs at others go on.
+final class ProbePoolFreeze: Sendable {
+    let priority: TaskPriority
+    private let blocked = Mutex(0)
+    private let canaryRan = Mutex(false)
+    private let gate = DispatchSemaphore(value: 0)
+    private let width = ProcessInfo.processInfo.activeProcessorCount
+
+    init(priority: TaskPriority) {
+        self.priority = priority
+    }
+
+    /// Whether the pool still holds: a job queued once every thread was blocked has not run.
+    var holds: Bool { !canaryRan.withLock { $0 } }
+
+    /// Returns once every thread is blocked, or false after a few seconds. Called off the pool.
+    func freeze() -> Bool {
+        for _ in 0..<width {
+            Task.detached(priority: priority) { [self] in
+                blocked.withLock { $0 += 1 }
+                Self.wait(for: gate)
+            }
+        }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while blocked.withLock({ $0 }) < width {
+            guard ContinuousClock.now < deadline else { return false }
+            usleep(100)
+        }
+        Task.detached(priority: priority) { [self] in canaryRan.withLock { $0 = true } }
+        return true
+    }
+
+    func thaw() {
+        for _ in 0..<width { gate.signal() }
+    }
+
+    private static func wait(for gate: DispatchSemaphore) { gate.wait() }
 }
 
 struct ProbeHTTPHeadTests {
@@ -218,6 +314,72 @@ struct ProbeProxyTests {
         try await client.send("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
         #expect(try await client.read(until: "\r\n\r\n").hasPrefix("HTTP/1.1 400"))
         #expect(registry.snapshot().hosts.isEmpty)
+    }
+
+    /// `NetworkConnection` starts itself in a task on the cooperative pool that holds it weakly, and an operation
+    /// from a cancelled task queues that start again. Here that operation runs off the pool while every pool
+    /// thread for its priority is blocked, so the start runs only after the connection was let go: dropped, it
+    /// traps the test host every time; retired, it outlives the start.
+    @Test func retiredConnectionsOutliveTheStartsTheyQueue() async throws {
+        let upstream = ProbeFakeUpstream()
+        let upstreamPort = try await upstream.start()
+        defer { upstream.stop() }
+        let executor = ProbeThreadExecutor.shared
+        try await withTaskExecutorPreference(executor) {
+            var connection: NetworkConnection<TCP>? = NetworkConnection(to: .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: upstreamPort)!)) { TCP() }
+            try await connection?.send(Data("CONNECT a.test:443 HTTP/1.1\r\n\r\n".utf8))
+            _ = try await connection?.receive(atLeast: 1, atMost: 65_536)
+
+            // Background, which no other test's jobs wait on.
+            let pool = ProbePoolFreeze(priority: .background)
+            guard pool.freeze() else {
+                pool.thaw()
+                Issue.record("the cooperative pool could not be blocked")
+                return
+            }
+            if let connection { await Self.sendFromCancelledTask(connection, on: executor, priority: pool.priority) }
+            #expect(pool.holds, "nothing on the pool ran meanwhile")
+            if let connection { ProbeProxyServer.retire([connection]) }
+            connection = nil
+            pool.thaw()
+            try await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    /// A send from a task cancelled before it runs, on `executor`; it queues the connection's start again.
+    private static func sendFromCancelledTask(_ connection: NetworkConnection<TCP>, on executor: any TaskExecutor, priority: TaskPriority) async {
+        let task = Task(executorPreference: executor, priority: priority) { _ = try? await connection.send(Data("late".utf8)) }
+        task.cancel()
+        await task.value
+    }
+
+    /// Stopping cancels both pipes of every tunnel, and a cancelled receive returns an empty end of stream.
+    /// The proxy used to pass that on to the connection the other pipe's cancellation had torn down, which
+    /// queued the start of a connection the proxy then released, and the start trapped the test host.
+    @Test func stopsWhileTunnelsCarryData() async throws {
+        let upstream = ProbeFakeUpstream()
+        let upstreamPort = try await upstream.start()
+        defer { upstream.stop() }
+        for _ in 0..<40 {
+            let registry = ProbeRegistry()
+            registry.begin(sessionID: UUID(), startedAt: .now)
+            let proxy = ProbeProxyServer(upstreamPort: upstreamPort, registry: registry)
+            let port = try await proxy.start()
+            var pumps: [Task<Void, Never>] = []
+            for _ in 0..<4 {
+                let client = ProbeTestClient(port: port)
+                try await client.send("CONNECT flow.test:443 HTTP/1.1\r\n\r\n")
+                #expect(try await client.read(until: "\r\n\r\n").hasPrefix("HTTP/1.1 200"))
+                pumps.append(Task { await client.pump() })
+            }
+            try await Task.sleep(for: .milliseconds(Int.random(in: 2...15)))
+            proxy.stop()
+            try await Task.sleep(for: .milliseconds(5))
+            for pump in pumps {
+                pump.cancel()
+                await pump.value
+            }
+        }
     }
 }
 
