@@ -366,9 +366,12 @@ GROUP BY host ORDER BY requests DESC LIMIT 25;
 * **Size** — `requests` grows by roughly 2–3 KB per row including its indexes (about 1.3 KB of row data). Check it
   with `SELECT pg_size_pretty(pg_total_relation_size('requests'));`. At about 60,000 requests a day, v4's columns add
   15–25 B a row in global-proxy mode and 60–80 B in rule mode (1–5 MB a day), `requests_host_started_idx` about 3 MB a
-  day and `requests_ended_error_idx` about 0.1 MB (about 6% of requests end with an error); `dns_answers` gets about
-  1,000 rows a day in global-proxy mode (about 0.25 MB; more in rule mode, bounded by the re-resolutions of the hosts
-  in use) and `proxy_errors` about 100.
+  day and `requests_ended_error_idx` about 0.1 MB (about 6% of requests end with an error); `dns_answers` gets a row
+  per resolution: in global-proxy mode nearly all are Tidemark's own lookups, about one per hostname in use per TTL of
+  its answer, so roughly 3,000–10,000 rows a day on a busy Mac (1–4 MB at about 400 B a row with its indexes; the
+  1,000 a day measured before Tidemark honoured Surge's expiry counted almost none of them), more in rule mode,
+  bounded by the re-resolutions of the hosts in use. They are kept at full rate, since each is the answer a
+  `tidemark-lookup` address came from. `proxy_errors` gets about 100 rows a day.
 * **Schema changes** — never edit the tables by hand while Tidemark runs; new versions of the app add
   migrations instead of changing existing ones.
 * **Index builds** — after an upgrade on a large database, `pg_stat_progress_create_index` shows a

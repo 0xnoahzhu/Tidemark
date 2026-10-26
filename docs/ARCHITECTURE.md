@@ -84,8 +84,12 @@ delete it in Keychain Access. A stream that ends or fails is always restarted, w
   answers count only until Surge's own `expiresTime` (Surge keeps expired answers listed for hours, and an answer
   without one is not used), and `dns lookup <host>` for the rest. A lookup reports no TTL (`expires-in` 0), so its
   answer counts for a minute, or for as long as Surge's cache holds the same addresses, and keeps its label meanwhile.
-  A proxy resolves the host again on its side, out of sight, so every request records
-  where its address came from and when (`remote_ip_source`: `literal`, `surge`, `rule-dns`, `tidemark-lookup`,
+  A hostname in use is therefore looked up about once per TTL of its answer (mostly 1–5 minutes; Surge caches some for
+  hours). In global-proxy mode Surge resolves nothing itself for proxied requests, so nearly every proxied hostname is
+  Tidemark's to look up: on a Mac sending about 60 requests a minute to 40–60 hostnames, roughly 3–10 lookups a minute
+  while it is busy (at most 4 at a time), each a short surge-cli process, a query to Surge's DNS server (DoH on the
+  sampled Mac) and a `dns_answers` row. A proxy resolves the host again on its side, out of sight, so every request
+  records where its address came from and when (`remote_ip_source`: `literal`, `surge`, `rule-dns`, `tidemark-lookup`,
   `surge-cache`). IP-literal hosts (`149.154.175.60:443`) are *direct* IPs ("by IP, no hostname").
 * **GeoIP** — `geoip <ip>` → `{country, asn, organization}`; cached in `ip_info`.
 * **Policies** — `policy-group list` / `dump policy-group-sub-policies` give options with a `lineHash`
