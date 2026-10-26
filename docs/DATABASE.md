@@ -28,6 +28,7 @@ engine start time in milliseconds.
 | 1 | Initial tables. |
 | 2 | `egress_checks.network_type` / `has_ipv6`; `requests` fillfactor 80; the btree on `requests.updated_at` replaced by a BRIN index (so rewriting a request row can stay a HOT update on PostgreSQL 16+); one trigram index over host, process name, remote IP and bundle path for searches, replacing the separate `host`, host-trigram and remote-IP indexes; `host_sources_last_seen_idx` dropped (no query used it); `schema_migrations.requires_version`. |
 | 3 | `requests_active_idx`, a partial index on `requests (device_id, surge_session) WHERE state = 'active'`, so closing the requests left active by an ended Surge session or by a crash reads only the rows still active; `autosummarize = on` for the BRIN index on `requests.updated_at`, so block ranges are summarized as they fill instead of at the next vacuum. Index changes only: every older Tidemark keeps writing. |
+| 4 | What happened to a request on its way ([Request details](#request-details)): `requests.timing`, `entry_mode`, `original_policy`, `modified`, `end_reason`, `remote_ip_source` and `remote_ip_resolved_at` (nullable, no default: a catalog-only change); the tables `dns_answers` and `proxy_errors`; `requests_host_started_idx` on `requests (host, started_at DESC)` and an index by host on each new table, built concurrently. Additive only (`requires_version` 1): every older Tidemark keeps writing, and its writes never touch the new columns. |
 
 Indexes are built and dropped `CONCURRENTLY`, so an upgrade does not block reads or writes (v3's BRIN
 setting locks that index for a moment and gives up after 3 s, to try again). Tidemark builds whose schema
@@ -99,6 +100,8 @@ loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`)
 | `host_insights` | (host, language) | no longer used: it held on-device explanations of hosts, a feature Tidemark removed; the table stays because migrations are never edited |
 | `probe_sessions`, `probe_hosts` | site probe, and each host it reached | `first_ms` / `last_ms` are relative to the probe start |
 | `egress_checks`, `egress_changes` | egress IP per policy per check, and changes of the current egress | |
+| `dns_answers` | (Mac, domain, time) | a resolution Surge's DNS made, from its `dns` watch event, completed from `dump dns` ([Request details](#request-details)) |
+| `proxy_errors` | (Mac, proxy node, time, target host) | an error a proxy node reported (`proxy-runtime-status`) |
 | `schema_migrations` | applied migration | |
 
 ### `requests` columns worth knowing
@@ -119,6 +122,61 @@ loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`)
 | `app_id`, `is_new` | the monitored app it rolled up to, and whether it was that app's first contact with the host or IP |
 | `probe_session_id` | set when the request came from a site probe |
 | `written_at`, `updated_at` | first and latest write by Tidemark, set by the server (`now()`, the writing transaction's start) |
+| `timing` | Surge's `timingRecords`, `[{"duration":0.318429,"name":"DNS Lookup"}]` (seconds); only rule mode times anything, so NULL in global-proxy mode |
+| `entry_mode` | how the request reached Surge (`takeoverMode`): 1 = HTTP proxy listener, 20 = virtual interface (UDP), 40 = virtual interface (TCP) |
+| `original_policy`, `modified` | Surge's `originalPolicyName` (only when it differs from the final policy) and `modified` flag |
+| `end_reason` | why the connection ended, in Surge's words without a trailing period: the last `Disconnect:` note (`Closed by remote`, `Closed by client`, `Connection closed`, `TCP error: Connection reset`, `Broken pipe (POSIX:32)`) or the UDP close note (`Closed for inactivity`, `ICMP closed`). Surge reports resets and broken pipes as completed, so `state` says `completed` for them; anything but the first three and `Closed for inactivity` counts as ended with an error. `notes` stay the source of truth |
+| `remote_ip_source` | where `remote_ip` came from: `literal` (the host is an IP), `surge` (Surge's remote address of a DIRECT connection), `rule-dns` (the address Surge resolved to match IP rules, `[Rule] DNS completed…`), `tidemark-lookup` (Tidemark's own `dns lookup` through Surge) or `surge-cache` (an unexpired entry of Surge's DNS cache, or a static mapping of its profile). Only `literal` and `surge` are the address the connection used: a proxy resolves the host again on its side, out of sight |
+| `remote_ip_resolved_at` | when that address was resolved or reported: the `[Rule] DNS completed` note, Tidemark's lookup, the `dns` event of a cached answer (when Tidemark saw it; otherwise when Tidemark first read the entry, never older than its TTL), the connection's setup for `surge`; NULL for `literal` |
+
+A rewrite merges into the stored row as before: values that settle never regress, and a v4 column keeps its stored
+value when a write has none (rows an earlier build spooled carry none; an earlier build's own upserts never name the
+v4 columns). `remote_ip_source` and `remote_ip_resolved_at` follow `remote_ip`: a write of the same address keeps them
+unless it names new ones, and a write of another address without a source leaves them NULL rather than describing the
+previous address.
+
+### Request details
+
+Surge keeps only its last ~200 finished requests (a few minutes on a busy Mac) and no history, so Tidemark records
+what it can learn about a request's way while it happens. Neither table below carries a request ID: a request joins
+them by host and time, always on its own Mac (`device_id`; each Mac has its own Surge).
+
+* **DNS answers** (`dns_answers`) — Surge's `dns` watch event (`{"domain","server","interface","data":[IPs]}`) is
+  stored once the next `dump dns` read (every 30 s) completes it with the CNAME `path`, the lookup's `log` line,
+  `time_cost_ms` and `expires_at`; an answer no read matches (re-resolved meanwhile) is stored as the event had it,
+  about a minute later. `resolved_at` is when the event arrived. `by_tidemark` marks answers Tidemark's own
+  `dns lookup` caused. In global-proxy mode Surge resolves nothing locally for proxied requests (the proxy does), so
+  the answers there are Tidemark's lookups and DIRECT traffic's.
+
+  A request's answer is the latest for its host on its Mac at or before the moment it needed one: when its
+  `remote_ip` was resolved (`remote_ip_resolved_at`, at most a minute after the start), or else its start, plus a
+  second for the event to arrive.
+
+  ```sql
+  SELECT * FROM dns_answers
+  WHERE device_id = :'device' AND domain = :'host' AND resolved_at <= :'moment'
+  ORDER BY resolved_at DESC LIMIT 1;
+  ```
+
+* **Proxy errors** (`proxy_errors`) — `proxy-runtime-status <line hash>` lists a proxy node's last 15 errors
+  (`{"error":"Stream closed","time":…,"targetHostname":…}`). Tidemark asks about the nodes (final policies) that carried
+  requests in the last minute, one node a minute (the one asked least recently) and never per request; a node's line
+  hash comes from `dump traffic`, read instead of a poll when a node is missing from it (at most every 10 minutes).
+  `line_hash` is the node's `POLICY::…` hash, or its name when Surge lists none. A burst of more than 15 errors on a
+  node between two of its polls loses the oldest ones.
+
+  A request's errors are its host's (or IP literal's) on its Mac within a second of its completion
+  (`|completed_at - at| < 1 s`).
+
+  ```sql
+  SELECT * FROM proxy_errors
+  WHERE device_id = :'device' AND target_host = :'host'
+    AND at > :'completed_at'::timestamptz - interval '1 second' AND at < :'completed_at'::timestamptz + interval '1 second';
+  ```
+
+`relatedRecords(of:)` also finds a request's first-contact alert (`alerts.request_id`), its site probe
+(`probe_session_id`), the current egress check of its Mac nearest its start and the latest change of the current
+egress at or before its start (`egress_checks` are kept for 30 days, `egress_changes` for good).
 
 ### Rows other Macs write
 
@@ -224,8 +282,9 @@ transaction fails and is tried again (three times, 1 s apart) rather than captur
      counts added) merge the same way. A request both IDs recorded may count twice in a merged `request_count`:
      only when the second ID saw it live, since a launch never counts a request it read back from Surge's recent
      list. (`processes.request_count` is not maintained.)
-   * `alerts`, `probe_sessions`, `egress_checks`, `egress_changes` move, `app_hosts.first_device_id` follows, and
-     `from` is deleted.
+   * `alerts`, `probe_sessions`, `egress_checks`, `egress_changes`, `dns_answers` and `proxy_errors` move (a DNS answer
+     or proxy error `into` has too, same key, is dropped first), `app_hosts.first_device_id` follows, and `from` is
+     deleted.
 
 Every step only touches what is still `from`'s, so a merge that stopped half way finishes when it runs again, and
 merging twice does nothing. By hand, in psql, once nothing writes under `from` any more: `\set from …` and
@@ -255,19 +314,22 @@ WHERE h.first_seen > now() - interval '24 hours'
 ORDER BY h.first_seen DESC;
 ```
 
-There is no index on `requests.host` (v2 dropped it): filter hosts through the search expression below,
-which the trigram index `requests_search_trgm_idx` serves, and add an exact condition when needed. A plain
-`WHERE host = …` reads the table newest first until it has found enough rows, which for a rare host means
-most of the table.
-
-Every process (and its parents) that talked to a host:
+An exact host is served newest first by `requests_host_started_idx` (v4). Every process (and its parents) that talked
+to a host, and how each connection ended:
 
 ```sql
-SELECT started_at, process_name, chain, remote_ip, policy_path FROM requests
-WHERE (host || E'\n' || COALESCE(process_name, '') || E'\n' || COALESCE(host(remote_ip), '') || E'\n' || COALESCE(bundle_path, ''))
-      ILIKE '%api.github.com%'
-  AND host = 'api.github.com'
+SELECT started_at, process_name, chain, remote_ip, remote_ip_source, policy_path, end_reason FROM requests
+WHERE host = 'api.github.com'
 ORDER BY started_at DESC LIMIT 50;
+```
+
+Requests of the last day that ended with an error, although Surge reported them completed:
+
+```sql
+SELECT started_at, host, policy, end_reason FROM requests
+WHERE end_reason NOT IN ('Closed by remote', 'Closed by client', 'Connection closed', 'Closed for inactivity')
+  AND started_at > now() - interval '1 day'
+ORDER BY started_at DESC;
 ```
 
 Every request that touched a host, by name, process, IP or bundle path (the same index):
@@ -291,7 +353,10 @@ GROUP BY host ORDER BY requests DESC LIMIT 25;
 
 * **Retention** — requests are kept forever: Tidemark never deletes them.
 * **Size** — `requests` grows by roughly 2–3 KB per row including its indexes (about 1.3 KB of row data). Check it with
-  `SELECT pg_size_pretty(pg_total_relation_size('requests'));`.
+  `SELECT pg_size_pretty(pg_total_relation_size('requests'));`. At about 60,000 requests a day, v4's columns add
+  15–25 B a row in global-proxy mode and 60–80 B in rule mode (1–5 MB a day) and `requests_host_started_idx` about
+  3 MB a day; `dns_answers` gets about 1,000 rows a day in global-proxy mode (about 0.25 MB; more in rule mode, bounded
+  by the re-resolutions of the hosts in use) and `proxy_errors` about 100.
 * **Schema changes** — never edit the tables by hand while Tidemark runs; new versions of the app add
   migrations instead of changing existing ones.
 * **Index builds** — after an upgrade on a large database, `pg_stat_progress_create_index` shows a

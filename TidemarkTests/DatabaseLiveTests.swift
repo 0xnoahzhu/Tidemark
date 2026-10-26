@@ -25,7 +25,8 @@ struct DatabaseLiveTests {
 
             let tables = try await db.tableNames()
             for table in ["devices", "apps", "app_installs", "processes", "requests", "app_hosts", "host_sources", "ip_info",
-                          "alerts", "mutes", "probe_sessions", "probe_hosts", "host_insights", "egress_checks", "egress_changes"] {
+                          "alerts", "mutes", "probe_sessions", "probe_hosts", "host_insights", "egress_checks", "egress_changes",
+                          "dns_answers", "proxy_errors"] {
                 #expect(tables.contains(table), "missing table \(table)")
             }
             #expect(!tables.contains("schema_migrations"))
@@ -36,11 +37,12 @@ struct DatabaseLiveTests {
                 let read = PostgresRowReader(row)
                 return "\(try read("version", as: Int.self)):\(try read("requires_version", as: Int?.self).map(String.init) ?? "-")"
             }
-            #expect(requires == ["1:-", "2:1", "3:1"])
+            #expect(requires == ["1:-", "2:1", "3:1", "4:1"])
 
             // Every index step is in effect.
             let built = try await indexes(db)
-            for name in ["requests_active_idx", "requests_updated_brin_idx", "requests_search_trgm_idx"] {
+            for name in ["requests_active_idx", "requests_updated_brin_idx", "requests_search_trgm_idx", "requests_host_started_idx",
+                         "dns_answers_domain_idx", "proxy_errors_target_idx"] {
                 #expect(built[name] == true, "\(name)")
             }
             #expect(try await indexOptions(db, "requests_updated_brin_idx") == ["pages_per_range=16", "autosummarize=on"])
@@ -484,6 +486,13 @@ struct DatabaseLiveTests {
             full.notes = ["12:07:22.102428 [TLS] TLS Client Hello SNI: 例子.测试", "{\"json\": [1, 2]}", ""]
             full.isNew = true
             full.probeSessionID = probe
+            full.timing = [RequestTimingRecord(name: "DNS Lookup", duration: 0.318429), RequestTimingRecord(name: "Rule Evaluating", duration: 0.000407)]
+            full.entryMode = 40
+            full.originalPolicy = "AT&T-RackNerd-SNELL"
+            full.modified = false
+            full.endReason = "TCP error: Connection reset"
+            full.remoteIPSource = .ruleDNS
+            full.remoteIPResolvedAt = full.startedAt.addingTimeInterval(0.319)
 
             let empty = Fixture.request(device: device.id, id: 43, host: "149.154.175.60")
             let ids = try await db.upsertRequests([full, empty])
@@ -525,12 +534,20 @@ struct DatabaseLiveTests {
             #expect(Fixture.close(completed.0, completed.1))
             #expect(Fixture.close(setup.0, setup.1))
             #expect(stored.writtenAt != nil)
+            #expect(stored.timing == full.timing)
+            #expect(stored.entryMode == 40 && stored.entry == .virtualInterface(udp: false))
+            #expect(stored.originalPolicy == "AT&T-RackNerd-SNELL" && stored.modified == false)
+            #expect(stored.endReason == "TCP error: Connection reset" && stored.endedWithError)
+            #expect(stored.remoteIPSource == .ruleDNS)
+            #expect(stored.remoteIPResolvedAt.map { Fixture.close($0, full.startedAt.addingTimeInterval(0.319)) } == true)
 
             let bare = try #require(page.rows.first { $0.key == empty.key })
             #expect(bare.isIPLiteral)
             #expect(bare.remoteIP == nil && bare.geo == nil && bare.url == nil && bare.port == nil && bare.pid == nil)
             #expect(bare.policyPath.isEmpty && bare.notes.isEmpty && bare.chain.isEmpty)
             #expect(bare.appID == nil && bare.probeSessionID == nil && bare.setupCompletedAt == nil && bare.completedAt == nil)
+            #expect(bare.timing == nil && bare.entryMode == nil && bare.originalPolicy == nil && bare.modified == nil && bare.endReason == nil)
+            #expect(bare.remoteIPSource == nil && bare.remoteIPResolvedAt == nil)
         }
     }
 
@@ -1172,7 +1189,8 @@ struct DatabaseLiveTests {
                 row.chain = [ProcessLink(name: "Cursor Helper", pid: 851, path: "/Applications/Cursor.app/Contents/MacOS/Cursor Helper", startTime: Fixture.now)]
                 rows.append(row)
             }
-            let ids = try await db.upsertRequests(rows)
+            var ids: [RequestKey: Int64] = [:]
+            for row in rows { ids[row.key] = try await Self.olderBuildUpsert(db, row) }
             _ = try await db.insertAppHosts([Fixture.host(app: app.id, "svc0.cursor.sh")])
             let alert = try #require(try await db.insertAlerts([Fixture.alert(device: mac.id, app: app.id, value: "svc0.cursor.sh")]).first)
             try await db.touchHostSources([Fixture.source(.domain, "svc0.cursor.sh", device: mac.id, app: app.id)])
@@ -1184,12 +1202,7 @@ struct DatabaseLiveTests {
             #expect(try await db.migrate(upTo: 2) == 2)
             #expect(try await db.schemaVersion() == 2)
 
-            // Every row survived.
-            let page = try await db.queryRequests(RequestQuery(range: .all, limit: 100))
-            #expect(page.rows.count == 50 && page.totalCount == 50)
-            #expect(Dictionary(uniqueKeysWithValues: page.rows.map { ($0.key, $0.rowID) }) == ids.mapValues { Optional($0) })
-            let first = try #require(page.rows.first { $0.key.surgeID == 0 })
-            #expect(first.appID == app.id && first.remoteIP == "104.18.0.0" && first.chain.count == 1)
+            // Everything else survived (this build reads requests with v4's columns: see the end).
             #expect(try await db.devices().first?.rowCount == 50)
             #expect(try await db.appHosts(app.id, scope: .all).map(\.value) == ["svc0.cursor.sh"])
             #expect(try await db.alerts(filter: .all, appID: nil, scope: .all, limit: 10).map(\.id) == [alert.id])
@@ -1211,15 +1224,13 @@ struct DatabaseLiveTests {
                 """).first.map { try PostgresRowReader($0)("options", as: String?.self) }
             #expect(options == "fillfactor=80")
 
-            // Writes and searches work on the upgraded schema.
+            // Writes work on the upgraded schema.
             try await db.saveEgressSamples([
                 EgressSample(policyPath: ["DIRECT"], ip: "203.0.113.8", location: nil, network: nil, latencyMs: 4, isCurrent: true,
                              checkedAt: Fixture.now.addingTimeInterval(60), error: nil, networkType: "residential", hasIPv6: false),
             ], deviceID: mac.id)
             let checked = try #require(try await db.latestEgress(deviceID: mac.id).first)
             #expect(checked.networkType == "residential" && checked.hasIPv6 == false)
-            #expect(try await db.queryRequests(RequestQuery(range: .all, search: "SVC4")).totalCount == 11)
-            #expect(try await db.queryRequests(RequestQuery(range: .all, search: "104.18.0.7")).rows.map(\.key.surgeID) == [7])
 
             // A migration whose record is missing simply runs again.
             try await db.execute("DELETE FROM schema_migrations WHERE version = 2")
@@ -1227,13 +1238,23 @@ struct DatabaseLiveTests {
             #expect(try await indexes(db) == upgraded)
 
             // v3: the active-request index and BRIN autosummarize; closing old sessions uses the new index.
-            #expect(try await db.migrate() == 3)
+            #expect(try await db.migrate(upTo: 3) == 3)
             let v3 = try await indexes(db)
             #expect(v3["requests_active_idx"] == true)
             #expect(v3.count == upgraded.count + 1)
             #expect(try await indexOptions(db, "requests_updated_brin_idx") == ["pages_per_range=16", "autosummarize=on"])
             #expect(try await db.closeActiveRequests(deviceID: mac.id, before: Fixture.session + 1, at: Fixture.now) == 50)
+
+            // Up to date: every row the v1 build wrote survived, and searches work on the upgraded schema.
+            #expect(try await db.migrate() == Schema.latestVersion)
+            let page = try await db.queryRequests(RequestQuery(range: .all, limit: 100))
+            #expect(page.rows.count == 50 && page.totalCount == 50)
+            #expect(Dictionary(uniqueKeysWithValues: page.rows.map { ($0.key, $0.rowID) }) == ids.mapValues { Optional($0) })
+            let first = try #require(page.rows.first { $0.key.surgeID == 0 })
+            #expect(first.appID == app.id && first.remoteIP == "104.18.0.0" && first.chain.count == 1)
             #expect(try await db.queryRequests(RequestQuery(range: .all, status: .active)).totalCount == 0)
+            #expect(try await db.queryRequests(RequestQuery(range: .all, search: "SVC4")).totalCount == 11)
+            #expect(try await db.queryRequests(RequestQuery(range: .all, search: "104.18.0.7")).rows.map(\.key.surgeID) == [7])
         }
     }
 
@@ -1241,7 +1262,7 @@ struct DatabaseLiveTests {
         try await withTestDatabase(upTo: 2) { db in
             let mac = Fixture.device("MacBook Pro")
             try await db.upsertDevice(mac)
-            try await db.upsertRequests([Fixture.request(device: mac.id, id: 1), Fixture.request(device: mac.id, id: 2)])
+            for id: Int64 in 1...2 { try await Self.olderBuildUpsert(db, Fixture.request(device: mac.id, id: id)) }
 
             // A build that failed half-way (here: a unique index over duplicates) leaves an invalid index behind.
             await #expect(throws: DatabaseError.self) {
@@ -1250,8 +1271,8 @@ struct DatabaseLiveTests {
             #expect(try await indexes(db)["requests_active_idx"] == false)
 
             // The transaction part is recorded at once; the index steps follow in the background.
-            #expect(try await db.migrate(upTo: nil, indexBuilds: .background) == 3)
-            #expect(try await db.schemaVersion() == 3)
+            #expect(try await db.migrate(upTo: nil, indexBuilds: .background) == Schema.latestVersion)
+            #expect(try await db.schemaVersion() == Schema.latestVersion)
             await db.indexMaintenanceFinished()
             #expect(try await indexes(db)["requests_active_idx"] == true)
             let unique = try await db.rows("""
@@ -1270,7 +1291,7 @@ struct DatabaseLiveTests {
                 ).collect()
                 let clock = ContinuousClock()
                 let start = clock.now
-                #expect(try await db.migrate() == 3)
+                #expect(try await db.migrate() == Schema.latestVersion)
                 #expect(start.duration(to: clock.now) < .seconds(2))
                 #expect(try await indexes(db)["requests_active_idx"] == nil)
                 _ = try await connection.query("SELECT pg_advisory_unlock_all()", logger: PostgresDatabase.logger).collect()
@@ -1333,6 +1354,291 @@ struct DatabaseLiveTests {
             #expect(waited >= .milliseconds(600))
             #expect(try await db.schemaVersion() == Schema.latestVersion)
         }
+    }
+
+    @Test func upgradeFromV3AddsRequestDetailsThatOlderWritesKeep() async throws {
+        try await withTestDatabase(upTo: 3) { db in
+            let mac = Fixture.device("MacBook Pro")
+            try await db.upsertDevice(mac)
+            // Rows a v3 build wrote.
+            func olderRow(_ id: Int64, state: RequestState = .active, remoteIP: String = "140.82.112.6", inBytes: Int64 = 0) -> RequestRecord {
+                var row = Fixture.request(device: mac.id, id: id, host: "api.github.com")
+                row.state = state
+                row.remoteIP = remoteIP
+                row.inBytes = inBytes
+                return row
+            }
+            for id: Int64 in 1...3 { try await Self.olderBuildUpsert(db, olderRow(id)) }
+            let before = try await indexes(db)
+
+            #expect(try await db.migrate() == 4)
+            let upgraded = try await indexes(db)
+            for name in ["requests_host_started_idx", "dns_answers_domain_idx", "proxy_errors_target_idx", "dns_answers_pkey", "proxy_errors_pkey"] {
+                #expect(upgraded[name] == true, "\(name)")
+            }
+            #expect(upgraded.count == before.count + 5)
+            let rows = try await db.queryRequests(RequestQuery(range: .all)).rows
+            #expect(rows.count == 3)
+            #expect(rows.allSatisfy { $0.remoteIP == "140.82.112.6" && $0.endReason == nil && $0.timing == nil && $0.remoteIPSource == nil })
+
+            // A migration whose record is lost runs again without changing anything.
+            try await db.execute("DELETE FROM schema_migrations WHERE version = 4")
+            #expect(try await db.migrate() == 4)
+            #expect(try await indexes(db) == upgraded)
+            let columns = try await db.rows("""
+                SELECT count(*) AS n FROM information_schema.columns WHERE table_schema = \(db.schema) AND table_name = 'requests'
+                  AND column_name IN ('timing', 'entry_mode', 'original_policy', 'modified', 'end_reason', 'remote_ip_source', 'remote_ip_resolved_at')
+                """).first.map { try PostgresRowReader($0)("n", as: Int.self) }
+            #expect(columns == 7)
+
+            // This build records the details.
+            let resolvedAt = Fixture.now.addingTimeInterval(-0.5)
+            var detailed = Fixture.request(device: mac.id, id: 1, host: "api.github.com")
+            detailed.remoteIP = "140.82.112.6"
+            detailed.remoteIPSource = .surgeCache
+            detailed.remoteIPResolvedAt = resolvedAt
+            detailed.timing = [RequestTimingRecord(name: "Rule Evaluating", duration: 0.0004)]
+            detailed.entryMode = 1
+            detailed.originalPolicy = "Proxy"
+            detailed.modified = true
+            detailed.endReason = "Broken pipe (POSIX:32)"
+            try await db.upsertRequests([detailed])
+
+            func stored() async throws -> RequestRecord {
+                try #require(try await db.queryRequests(RequestQuery(range: .all, host: "api.github.com")).rows.first { $0.key == detailed.key })
+            }
+            func keepsDetails(_ row: RequestRecord) -> Bool {
+                row.timing == detailed.timing && row.entryMode == 1 && row.originalPolicy == "Proxy" && row.modified == true
+                    && row.endReason == "Broken pipe (POSIX:32)"
+            }
+            #expect(keepsDetails(try await stored()))
+
+            // An older build rewriting the row names none of the new columns.
+            try await Self.olderBuildUpsert(db, olderRow(1, state: .completed, inBytes: 900))
+            var row = try await stored()
+            #expect(keepsDetails(row) && row.state == .completed && row.inBytes == 900)
+            #expect(row.remoteIPSource == .surgeCache && row.remoteIPResolvedAt.map { Fixture.close($0, resolvedAt) } == true)
+
+            // A row an earlier build spooled, replayed by this one: the same address keeps its source.
+            var spooled = Fixture.request(device: mac.id, id: 1, host: "api.github.com")
+            spooled.remoteIP = "140.82.112.6"
+            try await db.upsertRequests([spooled])
+            row = try await stored()
+            #expect(keepsDetails(row) && row.state == .completed)
+            #expect(row.remoteIPSource == .surgeCache && row.remoteIPResolvedAt != nil)
+
+            // Another address without a source: where it came from is unknown, not the earlier address's source.
+            spooled.remoteIP = "140.82.112.7"
+            try await db.upsertRequests([spooled])
+            row = try await stored()
+            #expect(row.remoteIP == "140.82.112.7" && row.remoteIPSource == nil && row.remoteIPResolvedAt == nil)
+            #expect(keepsDetails(row))
+            // A later write with a source names it again.
+            spooled.remoteIPSource = .tidemarkLookup
+            spooled.remoteIPResolvedAt = Fixture.now
+            try await db.upsertRequests([spooled])
+            #expect(try await stored().remoteIPSource == .tidemarkLookup)
+        }
+    }
+
+    @Test func requestDetailsJoinRequestsByHostAndTime() async throws {
+        try await withTestDatabase { db in
+            let mac = Fixture.device("MacBook Pro")
+            let mini = Fixture.device("Mac mini")
+            try await db.upsertDevice(mac)
+            try await db.upsertDevice(mini)
+            let start = Fixture.now.addingTimeInterval(-600)
+
+            // Seven requests to api.github.com (five here, two on the mini), one elsewhere.
+            var rows: [RequestRecord] = []
+            for index in 0..<7 {
+                var row = Fixture.request(device: index < 5 ? mac.id : mini.id, id: Int64(index + 1), host: "api.github.com")
+                row.startedAt = start.addingTimeInterval(Double(index) * 10)
+                row.completedAt = row.startedAt.addingTimeInterval(2)
+                row.state = .completed
+                row.endReason = index.isMultiple(of: 3) ? "TCP error: Connection reset" : "Closed by remote"
+                rows.append(row)
+            }
+            var udp = Fixture.request(device: mac.id, id: 20, host: "stun.l.google.com")
+            udp.endReason = "ICMP closed"
+            udp.state = .completed
+            rows.append(udp)
+            let ids = try await db.upsertRequests(rows)
+
+            let first = try await db.requests(forHost: "API.GitHub.com", query: RequestQuery(range: .all, limit: 3))
+            #expect(first.totalCount == 7 && first.rows.map(\.key.surgeID) == [7, 6, 5])
+            let second = try await db.requests(forHost: "api.github.com", query: RequestQuery(range: .all, limit: 3, offset: 3))
+            #expect(second.rows.map(\.key.surgeID) == [4, 3, 2])
+            #expect(try await db.requests(forHost: "api.github.com", query: RequestQuery(scope: .device(mini.id), range: .all)).totalCount == 2)
+            let errors = try await db.queryRequests(RequestQuery(range: .all, endedWithError: true))
+            #expect(Set(errors.rows.map(\.key.surgeID)) == [1, 4, 7, 20], "resets and ICMP closes, though Surge said completed")
+            #expect(try await db.requests(forHost: "api.github.com", query: RequestQuery(range: .all, endedWithError: true)).totalCount == 3)
+            #expect(try await db.queryRequests(RequestQuery(range: .all, status: .failed)).totalCount == 0, "the state stays Surge's")
+            #expect(try await db.histogram(RequestQuery(range: .all, host: "api.github.com"), buckets: 4).counts.reduce(0, +) == 7)
+
+            // The exact host is served by its index.
+            try await db.execute("ANALYZE requests")
+            let planned = try await db.withTransaction { connection in
+                _ = try await connection.query("SET LOCAL enable_seqscan = off", logger: PostgresDatabase.logger).collect()
+                var sql = PostgresDatabase.SQL("EXPLAIN SELECT 1 FROM requests r")
+                PostgresDatabase.appendFilters(RequestQuery(range: .all, host: "api.github.com"), window: .init(lower: nil), to: &sql)
+                sql.append(" ORDER BY r.started_at DESC LIMIT 50")
+                return try await connection.query(sql.query, logger: PostgresDatabase.logger).collect()
+                    .map { try $0.makeRandomAccess()[0].decode(String.self) }.joined(separator: "\n")
+            }
+            #expect(planned.contains("requests_host_started_idx"), "\(planned)")
+
+            // DNS answers: the watch event first, then completed from `dump dns`, under the same key.
+            let resolved = start.addingTimeInterval(-30)
+            var answer = DNSAnswer(deviceID: mac.id, domain: "api.github.com", resolvedAt: resolved, server: "https://cloudflare-dns.com/dns-query",
+                                   interface: nil, addresses: ["140.82.112.6"], byTidemark: true)
+            try await db.saveDNSAnswers([answer])
+            var completed = answer
+            completed.server = nil
+            completed.byTidemark = false
+            completed.path = "api.github.com -> 140.82.112.6"
+            completed.log = "160.59ms Receive an A answer from https://cloudflare-dns.com/dns-query"
+            completed.timeCostMs = 160.6
+            completed.expiresAt = resolved.addingTimeInterval(60)
+            let earlier = DNSAnswer(deviceID: mac.id, domain: "api.github.com", resolvedAt: start.addingTimeInterval(-3_600), addresses: ["140.82.112.5"])
+            let later = DNSAnswer(deviceID: mac.id, domain: "api.github.com", resolvedAt: start.addingTimeInterval(45), addresses: ["140.82.112.4"])
+            let elsewhere = DNSAnswer(deviceID: mini.id, domain: "api.github.com", resolvedAt: start.addingTimeInterval(1), addresses: ["140.82.112.3"])
+            try await db.saveDNSAnswers([completed, earlier, later, elsewhere, completed])
+            answer.path = completed.path
+            answer.log = completed.log
+            answer.timeCostMs = 160.6
+            answer.expiresAt = completed.expiresAt
+            let answers = try await db.dnsAnswers(forHost: "api.github.com", from: start.addingTimeInterval(-60), to: nil, scope: .device(mac.id), limit: 10)
+            #expect(answers.map(\.addresses) == [["140.82.112.4"], ["140.82.112.6"]])
+            let merged = try #require(answers.last)
+            #expect(merged.server == answer.server && merged.byTidemark && merged.path == answer.path && merged.log == answer.log)
+            #expect(merged.timeCostMs.map { abs($0 - 160.6) < 0.01 } == true && merged.expiresAt.map { Fixture.close($0, resolved.addingTimeInterval(60)) } == true)
+            #expect(try await db.dnsAnswers(forHost: "api.github.com", from: nil, to: nil, scope: .all, limit: 10).count == 4)
+
+            // Proxy errors: a node lists its last errors every time it is asked.
+            func error(_ at: Date, _ host: String = "api.github.com", device: DeviceID? = nil) -> ProxyNodeError {
+                ProxyNodeError(deviceID: device ?? mac.id, policy: "US-Hysteria2", lineHash: "POLICY::0123", at: at, targetHost: host, error: "Stream closed")
+            }
+            let request4 = try #require(rows.first { $0.key.surgeID == 4 })
+            let end = try #require(request4.completedAt)
+            let errorList = [error(end.addingTimeInterval(0.0001)), error(end.addingTimeInterval(1.5)), error(end, "collector.github.com"),
+                             error(end, device: mini.id)]
+            try await db.saveProxyErrors(errorList)
+            try await db.saveProxyErrors(errorList)
+            #expect(try await db.proxyErrors(forHost: "api.github.com", from: nil, to: nil, scope: .all, limit: 10).count == 3)
+            let found = try await db.proxyErrors(for: request4)
+            #expect(found.count == 1 && found.allSatisfy { Fixture.close($0.at, end) }, "same Mac and host, within a second")
+            #expect(try await db.proxyErrors(for: udp).isEmpty)
+
+            // Everything else Tidemark knows about request 4.
+            var stored4 = try #require(try await db.requests(forHost: "api.github.com", query: RequestQuery(range: .all)).rows.first { $0.key.surgeID == 4 })
+            #expect(stored4.rowID == ids[request4.key])
+            let app = Fixture.app("GitHub Desktop", path: "/Applications/GitHub Desktop.app")
+            try await db.insertApp(app)
+            var alert = Fixture.alert(device: mac.id, app: app.id, value: "api.github.com")
+            alert.requestRowID = stored4.rowID
+            let inserted = try #require(try await db.insertAlerts([alert]).first)
+            let probe = ProbeSession(id: UUID(), deviceID: mac.id, url: "https://github.com", host: "github.com", mode: .desktop, startedAt: start,
+                                     endedAt: nil, steps: [], hosts: [ProbeHost(host: "api.github.com", firstAt: 1, lastAt: 2, requestCount: 1, ips: [], step: 0)])
+            try await db.saveProbeSession(probe)
+            stored4.probeSessionID = probe.id
+            func check(_ at: Date, ip: String) -> EgressSample {
+                EgressSample(policyPath: ["AI", "US-Hysteria2"], ip: ip, location: nil, network: nil, latencyMs: 80, isCurrent: true, checkedAt: at, error: nil)
+            }
+            let checkedNear = stored4.startedAt.addingTimeInterval(100)
+            try await db.saveEgressSamples([check(stored4.startedAt.addingTimeInterval(-500), ip: "198.51.100.1"), check(checkedNear, ip: "198.51.100.2")],
+                                           deviceID: mac.id)
+            try await db.insertEgressChange(EgressChange(id: 0, changedAt: stored4.startedAt.addingTimeInterval(-50), ip: "198.51.100.2",
+                                                         policyPath: ["AI", "US-Hysteria2"], reason: "Network changed"), deviceID: mac.id)
+            try await db.insertEgressChange(EgressChange(id: 0, changedAt: stored4.startedAt.addingTimeInterval(50), ip: "198.51.100.3",
+                                                         policyPath: ["AI", "US-Hysteria2"], reason: "Surge restarted"), deviceID: mac.id)
+
+            let related = try await db.relatedRecords(of: stored4)
+            #expect(related.alert?.id == inserted.id)
+            #expect(related.probeSession?.id == probe.id && related.probeSession?.hosts.map(\.host) == ["api.github.com"])
+            #expect(related.egressCheck?.ip == "198.51.100.2", "the nearer check, after the start")
+            #expect(related.egressChange?.ip == "198.51.100.2", "the change in effect at the start")
+            #expect(related.dnsAnswer?.addresses == ["140.82.112.6"], "the latest answer before the start on its Mac")
+            #expect(related.proxyErrors == found)
+            // An IP literal has no DNS answer, and a request nothing else refers to has nothing related.
+            #expect(try await db.relatedRecords(of: Fixture.request(device: mini.id, id: 99, host: "203.0.113.1")) == RequestRelatedRecords())
+        }
+    }
+
+    @Test func mergingADeviceKeepsRequestDetailsAnswersAndErrors() async throws {
+        try await withTestDatabase { db in
+            let old = Fixture.device("Mac mini")
+            let new = Fixture.device("Mac mini")
+            for device in [old, new] { try await db.upsertDevice(device) }
+
+            // Request 1 under both IDs (only the old row has the details), request 2 only under the old one.
+            var old1 = Fixture.request(device: old.id, id: 1, host: "api.github.com")
+            old1.remoteIP = "140.82.112.6"
+            old1.remoteIPSource = .ruleDNS
+            old1.remoteIPResolvedAt = Fixture.now
+            old1.timing = [RequestTimingRecord(name: "DNS Lookup", duration: 0.3)]
+            old1.entryMode = 40
+            old1.endReason = "TCP error: Connection reset"
+            var new1 = Fixture.request(device: new.id, id: 1, host: "api.github.com")
+            new1.remoteIP = "140.82.112.6"
+            var old2 = Fixture.request(device: old.id, id: 2, host: "github.com")
+            old2.endReason = "Closed by client"
+            old2.originalPolicy = "Proxy"
+            try await db.upsertRequests([old1, new1, old2])
+
+            let answer = DNSAnswer(deviceID: old.id, domain: "api.github.com", resolvedAt: Fixture.now, addresses: ["140.82.112.6"])
+            var both = answer
+            both.deviceID = new.id
+            let onlyOld = DNSAnswer(deviceID: old.id, domain: "github.com", resolvedAt: Fixture.now, addresses: ["140.82.112.3"])
+            try await db.saveDNSAnswers([answer, both, onlyOld])
+            let error = ProxyNodeError(deviceID: old.id, policy: "US", lineHash: "POLICY::1", at: Fixture.now, targetHost: "api.github.com", error: "Stream closed")
+            var sameError = error
+            sameError.deviceID = new.id
+            var otherError = error
+            otherError.targetHost = "github.com"
+            try await db.saveProxyErrors([error, sameError, otherError])
+
+            #expect(try await db.mergeDevice(old.id, into: new.id) == DeviceMergeResult(merged: true, requestsMoved: 1, duplicatesDropped: 1))
+            let rows = try await db.queryRequests(RequestQuery(range: .all)).rows
+            #expect(rows.count == 2 && rows.allSatisfy { $0.deviceID == new.id })
+            let duplicate = try #require(rows.first { $0.key.surgeID == 1 })
+            #expect(duplicate.timing == old1.timing && duplicate.entryMode == 40 && duplicate.endReason == "TCP error: Connection reset")
+            #expect(duplicate.remoteIPSource == .ruleDNS && duplicate.remoteIPResolvedAt != nil, "the same address, so its source too")
+            let moved = try #require(rows.first { $0.key.surgeID == 2 })
+            #expect(moved.endReason == "Closed by client" && moved.originalPolicy == "Proxy")
+
+            let answers = try await db.dnsAnswers(forHost: "api.github.com", from: nil, to: nil, scope: .all, limit: 10)
+                + (try await db.dnsAnswers(forHost: "github.com", from: nil, to: nil, scope: .all, limit: 10))
+            #expect(answers.count == 2 && answers.allSatisfy { $0.deviceID == new.id })
+            let errors = try await db.proxyErrors(forHost: "api.github.com", from: nil, to: nil, scope: .all, limit: 10)
+                + (try await db.proxyErrors(forHost: "github.com", from: nil, to: nil, scope: .all, limit: 10))
+            #expect(errors.count == 2 && errors.allSatisfy { $0.deviceID == new.id })
+            #expect(try await db.devices().map(\.id) == [new.id])
+        }
+    }
+
+    /// An upsert the way builds before schema v4 write: their statements name none of v4's columns (a few of the
+    /// older ones are enough here). An inserted row counts in `devices.row_count`, as their writes do.
+    @discardableResult
+    private static func olderBuildUpsert(_ db: PostgresDatabase, _ row: RequestRecord) async throws -> Int64 {
+        let chain = try PostgresDatabase.jsonText(row.chain)
+        let written = try await db.rows("""
+            INSERT INTO requests AS r (device_id, surge_session, surge_id, started_at, method, host, remote_ip, app_id, chain, state, in_bytes)
+            VALUES (\(row.deviceID), \(row.key.session), \(row.key.surgeID), \(row.startedAt), \(row.method), \(row.host), \(row.remoteIP)::inet,
+                    \(row.appID), \(chain)::jsonb, \(row.state.rawValue), \(row.inBytes))
+            ON CONFLICT (device_id, surge_session, surge_id) DO UPDATE SET
+                remote_ip = COALESCE(excluded.remote_ip, r.remote_ip),
+                state = CASE WHEN excluded.state = 'active' AND r.state <> 'active' THEN r.state ELSE excluded.state END,
+                in_bytes = GREATEST(r.in_bytes, excluded.in_bytes),
+                updated_at = now()
+            RETURNING r.id, (r.xmax = 0) AS inserted
+            """).first.map { row in
+            let read = PostgresRowReader(row)
+            return (id: try read("id", as: Int64.self), inserted: try read("inserted", as: Bool.self))
+        }
+        let result = try #require(written)
+        if result.inserted { try await db.execute("UPDATE devices SET row_count = row_count + 1 WHERE id = \(row.deviceID)") }
+        return result.id
     }
 
     // MARK: - Write path robustness

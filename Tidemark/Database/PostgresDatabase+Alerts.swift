@@ -2,13 +2,13 @@ import Foundation
 import PostgresNIO
 
 extension PostgresDatabase {
-    private static let alertSelect = """
+    static let alertSelect = """
         SELECT a.id, a.device_id, a.app_id, a.kind, a.scope, a.value, a.site, a.host, a.ip, a.geo, a.process_name,
                a.is_direct, a.request_id, a.created_at, a.read_at
         FROM alerts a
         """
 
-    private static func decodeAlert(_ row: PostgresRow) throws -> AlertItem {
+    static func decodeAlert(_ row: PostgresRow) throws -> AlertItem {
         let read = PostgresRowReader(row)
         return AlertItem(
             id: try read("id"),

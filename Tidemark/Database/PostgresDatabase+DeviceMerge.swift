@@ -302,6 +302,22 @@ enum DeviceMergeSQL {
         ("notes", "CASE WHEN cardinality(i.notes) >= cardinality(f.notes) THEN i.notes ELSE f.notes END"),
         ("probe_session_id", "COALESCE(i.probe_session_id, f.probe_session_id)"),
         ("written_at", "LEAST(i.written_at, f.written_at)"),
+        ("timing", "COALESCE(i.timing, f.timing)"),
+        ("entry_mode", "COALESCE(i.entry_mode, f.entry_mode)"),
+        ("original_policy", "COALESCE(i.original_policy, f.original_policy)"),
+        ("modified", "COALESCE(i.modified, f.modified)"),
+        ("end_reason", "COALESCE(i.end_reason, f.end_reason)"),
+        // Where the address came from follows the address the row keeps.
+        ("remote_ip_source", """
+            CASE WHEN i.remote_ip IS NULL THEN f.remote_ip_source
+                 WHEN i.remote_ip = f.remote_ip THEN COALESCE(i.remote_ip_source, f.remote_ip_source)
+                 ELSE i.remote_ip_source END
+            """),
+        ("remote_ip_resolved_at", """
+            CASE WHEN i.remote_ip IS NULL THEN f.remote_ip_resolved_at
+                 WHEN i.remote_ip = f.remote_ip THEN COALESCE(i.remote_ip_resolved_at, f.remote_ip_resolved_at)
+                 ELSE i.remote_ip_resolved_at END
+            """),
     ]
 
     /// A batch row whose key `into` already has is a duplicate: the `into` row keeps its data and takes what only
@@ -442,14 +458,26 @@ enum DeviceMergeSQL {
         "UPDATE host_sources SET device_id = $2 WHERE device_id = $1",
     ]
 
-    /// Alerts, probe sessions, egress checks and changes move; inventory entries `from` found first name `into`.
-    /// Then `from` is deleted.
+    /// Alerts, probe sessions, egress checks and changes, DNS answers and proxy errors move; inventory entries `from`
+    /// found first name `into`. A DNS answer or proxy error `into` has too (same key: both IDs recorded the same
+    /// event) is dropped first. Then `from` is deleted, which would delete what is left of its DNS answers and proxy
+    /// errors with it.
     static let rest = [
         "UPDATE alerts SET device_id = $2 WHERE device_id = $1",
         "UPDATE probe_sessions SET device_id = $2 WHERE device_id = $1",
         "UPDATE egress_checks SET device_id = $2 WHERE device_id = $1",
         "UPDATE egress_changes SET device_id = $2 WHERE device_id = $1",
         "UPDATE app_hosts SET first_device_id = $2 WHERE first_device_id = $1",
+        """
+        DELETE FROM dns_answers f USING dns_answers i
+        WHERE f.device_id = $1 AND i.device_id = $2 AND i.domain = f.domain AND i.resolved_at = f.resolved_at
+        """,
+        "UPDATE dns_answers SET device_id = $2 WHERE device_id = $1",
+        """
+        DELETE FROM proxy_errors f USING proxy_errors i
+        WHERE f.device_id = $1 AND i.device_id = $2 AND i.line_hash = f.line_hash AND i.at = f.at AND i.target_host = f.target_host
+        """,
+        "UPDATE proxy_errors SET device_id = $2 WHERE device_id = $1",
         "DELETE FROM devices WHERE id = $1",
     ]
 

@@ -70,6 +70,66 @@ enum Schema {
         Migration(version: 1, name: "initial", sql: v1),
         Migration(version: 2, name: "write path and egress details", sql: v2, concurrentSteps: v2Indexes, requiresVersion: 1),
         Migration(version: 3, name: "active requests and brin autosummarize", sql: "", concurrentSteps: v3Indexes, requiresVersion: 1),
+        Migration(version: 4, name: "request details, dns answers and proxy errors", sql: v4, concurrentSteps: v4Indexes, requiresVersion: 1),
+    ]
+
+    /// v4 — what happened to a request on its way, recorded while Surge still has it (it keeps only its last ~200
+    /// finished requests). Additive only, so every older Tidemark keeps writing (`requiresVersion` 1): its upserts
+    /// never name the new columns, and this build's merge keeps a stored value a write without one would erase.
+    ///
+    /// * `requests`: Surge's `timing` records, `entry_mode` (`takeoverMode`), `original_policy` (only when it
+    ///   differs), `modified`, the `end_reason` parsed from the notes, and where `remote_ip` came from and when
+    ///   (`remote_ip_source`, `remote_ip_resolved_at`). Nullable without a default, so adding them is a
+    ///   catalog-only change: nothing is rewritten. One `ALTER`, taken before the new tables lock `devices`, so
+    ///   the migration never waits for `requests` while holding a lock capture's writes need.
+    /// * `dns_answers`: Surge's `dns` watch events, completed from `dump dns`, per Mac.
+    /// * `proxy_errors`: the errors `proxy-runtime-status` reports for the proxy nodes that carry requests.
+    private static let v4 = """
+    ALTER TABLE requests
+        ADD COLUMN IF NOT EXISTS timing jsonb,
+        ADD COLUMN IF NOT EXISTS entry_mode smallint,
+        ADD COLUMN IF NOT EXISTS original_policy text,
+        ADD COLUMN IF NOT EXISTS modified boolean,
+        ADD COLUMN IF NOT EXISTS end_reason text,
+        ADD COLUMN IF NOT EXISTS remote_ip_source text,
+        ADD COLUMN IF NOT EXISTS remote_ip_resolved_at timestamptz;
+
+    CREATE TABLE IF NOT EXISTS dns_answers (
+        device_id    uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        domain       text NOT NULL,
+        resolved_at  timestamptz NOT NULL,
+        server       text,
+        interface    text,
+        addresses    text[] NOT NULL DEFAULT '{}',
+        path         text,
+        log          text,
+        time_cost_ms real,
+        expires_at   timestamptz,
+        by_tidemark  boolean NOT NULL DEFAULT false,
+        PRIMARY KEY (device_id, domain, resolved_at)
+    );
+
+    CREATE TABLE IF NOT EXISTS proxy_errors (
+        device_id   uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        policy      text NOT NULL,
+        line_hash   text NOT NULL,
+        at          timestamptz NOT NULL,
+        target_host text NOT NULL,
+        error       text NOT NULL,
+        PRIMARY KEY (device_id, line_hash, at, target_host)
+    );
+    """
+
+    /// v4 indexes, built concurrently.
+    ///
+    /// * `requests_host_started_idx`: one host's requests, newest first (`requests(forHost:)`, History with an
+    ///   exact host). `host` and `started_at` never change once written, so progress rewrites stay HOT.
+    /// * `dns_answers_domain_idx`, `proxy_errors_target_idx`: a host's answers and errors on every Mac (the primary
+    ///   keys lead with the Mac).
+    private static let v4Indexes: [ConcurrentStep] = [
+        .createIndex(name: "requests_host_started_idx", table: "requests", definition: "(host, started_at DESC)"),
+        .createIndex(name: "dns_answers_domain_idx", table: "dns_answers", definition: "(domain, resolved_at DESC)"),
+        .createIndex(name: "proxy_errors_target_idx", table: "proxy_errors", definition: "(target_host, at DESC)"),
     ]
 
     /// v3 — index changes only, so every older Tidemark keeps writing (`requiresVersion` 1).

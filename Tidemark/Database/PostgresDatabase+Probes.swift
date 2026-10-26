@@ -45,44 +45,51 @@ extension PostgresDatabase {
     /// Newest first, with their hosts ordered by first activity.
     func probeSessions(limit: Int) async throws -> [ProbeSession] {
         try await withConnection { connection in
-            var sessions: [ProbeSession] = []
-            for row in try await connection.query("""
+            let sessions = try await connection.query("""
                 SELECT id, device_id, url, host, mode, started_at, ended_at, steps
                 FROM probe_sessions ORDER BY started_at DESC LIMIT \(max(0, limit))
-                """, logger: Self.logger).collect() {
-                let read = PostgresRowReader(row)
-                sessions.append(ProbeSession(
-                    id: try read("id"),
-                    deviceID: try read("device_id"),
-                    url: try read("url"),
-                    host: try read("host"),
-                    mode: ProbeDeviceMode(rawValue: try read("mode", as: String.self)) ?? .desktop,
-                    startedAt: try read("started_at"),
-                    endedAt: try read("ended_at"),
-                    steps: try read.json("steps", as: [ProbeStep].self) ?? [],
-                    hosts: []
-                ))
-            }
-            guard !sessions.isEmpty else { return [] }
-
-            var hosts: [UUID: [ProbeHost]] = [:]
-            for row in try await connection.query("""
-                SELECT session_id, host, first_ms, last_ms, request_count, ips, step
-                FROM probe_hosts WHERE session_id = ANY(\(sessions.map(\.id))) ORDER BY first_ms, host
-                """, logger: Self.logger).collect() {
-                let read = PostgresRowReader(row)
-                hosts[try read("session_id", as: UUID.self), default: []].append(ProbeHost(
-                    host: try read("host"),
-                    firstAt: Double(try read("first_ms", as: Int.self)) / 1_000,
-                    lastAt: Double(try read("last_ms", as: Int.self)) / 1_000,
-                    requestCount: try read("request_count"),
-                    ips: try read("ips"),
-                    step: try read("step")
-                ))
-            }
-            for index in sessions.indices { sessions[index].hosts = hosts[sessions[index].id] ?? [] }
-            return sessions
+                """, logger: Self.logger).collect().map(Self.decodeProbeSession)
+            return try await Self.withProbeHosts(sessions, on: connection)
         }
+    }
+
+    /// A row of `probe_sessions` (without its hosts).
+    static func decodeProbeSession(_ row: PostgresRow) throws -> ProbeSession {
+        let read = PostgresRowReader(row)
+        return ProbeSession(
+            id: try read("id"),
+            deviceID: try read("device_id"),
+            url: try read("url"),
+            host: try read("host"),
+            mode: ProbeDeviceMode(rawValue: try read("mode", as: String.self)) ?? .desktop,
+            startedAt: try read("started_at"),
+            endedAt: try read("ended_at"),
+            steps: try read.json("steps", as: [ProbeStep].self) ?? [],
+            hosts: []
+        )
+    }
+
+    /// `sessions` with their hosts, ordered by first activity.
+    static func withProbeHosts(_ sessions: [ProbeSession], on connection: PostgresConnection) async throws -> [ProbeSession] {
+        guard !sessions.isEmpty else { return [] }
+        var hosts: [UUID: [ProbeHost]] = [:]
+        for row in try await connection.query("""
+            SELECT session_id, host, first_ms, last_ms, request_count, ips, step
+            FROM probe_hosts WHERE session_id = ANY(\(sessions.map(\.id))) ORDER BY first_ms, host
+            """, logger: Self.logger).collect() {
+            let read = PostgresRowReader(row)
+            hosts[try read("session_id", as: UUID.self), default: []].append(ProbeHost(
+                host: try read("host"),
+                firstAt: Double(try read("first_ms", as: Int.self)) / 1_000,
+                lastAt: Double(try read("last_ms", as: Int.self)) / 1_000,
+                requestCount: try read("request_count"),
+                ips: try read("ips"),
+                step: try read("step")
+            ))
+        }
+        var sessions = sessions
+        for index in sessions.indices { sessions[index].hosts = hosts[sessions[index].id] ?? [] }
+        return sessions
     }
 
     private static func milliseconds(_ seconds: TimeInterval) -> Int32 {
@@ -138,21 +145,24 @@ extension PostgresDatabase {
                    COALESCE(l.policy_path = (SELECT policy_path FROM chosen), false) AS is_current
             FROM latest l
             ORDER BY is_current DESC, l.policy_path
-            """).map { row in
-            let read = PostgresRowReader(row)
-            return EgressSample(
-                policyPath: try read("policy_path"),
-                ip: try read("ip"),
-                location: try read("location"),
-                network: try read("network"),
-                latencyMs: try read("latency_ms", as: Int?.self),
-                isCurrent: try read("is_current"),
-                checkedAt: try read("checked_at"),
-                error: try read("error"),
-                networkType: try read("network_type"),
-                hasIPv6: try read("has_ipv6")
-            )
-        }
+            """).map(Self.decodeEgressSample)
+    }
+
+    /// A row of `egress_checks` selected with `host(ip) AS ip`.
+    static func decodeEgressSample(_ row: PostgresRow) throws -> EgressSample {
+        let read = PostgresRowReader(row)
+        return EgressSample(
+            policyPath: try read("policy_path"),
+            ip: try read("ip"),
+            location: try read("location"),
+            network: try read("network"),
+            latencyMs: try read("latency_ms", as: Int?.self),
+            isCurrent: try read("is_current"),
+            checkedAt: try read("checked_at"),
+            error: try read("error"),
+            networkType: try read("network_type"),
+            hasIPv6: try read("has_ipv6")
+        )
     }
 
     func insertEgressChange(_ change: EgressChange, deviceID: DeviceID) async throws {
@@ -168,15 +178,18 @@ extension PostgresDatabase {
         try await rows("""
             SELECT id, changed_at, host(ip) AS ip, policy_path, reason FROM egress_changes
             WHERE device_id = \(deviceID) ORDER BY changed_at DESC, id DESC LIMIT \(max(0, limit))
-            """).map { row in
-            let read = PostgresRowReader(row)
-            return EgressChange(
-                id: try read("id"),
-                changedAt: try read("changed_at"),
-                ip: try read("ip"),
-                policyPath: try read("policy_path"),
-                reason: try read("reason")
-            )
-        }
+            """).map(Self.decodeEgressChange)
+    }
+
+    /// A row of `egress_changes` selected with `host(ip) AS ip`.
+    static func decodeEgressChange(_ row: PostgresRow) throws -> EgressChange {
+        let read = PostgresRowReader(row)
+        return EgressChange(
+            id: try read("id"),
+            changedAt: try read("changed_at"),
+            ip: try read("ip"),
+            policyPath: try read("policy_path"),
+            reason: try read("reason")
+        )
     }
 }

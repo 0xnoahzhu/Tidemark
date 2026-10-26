@@ -209,6 +209,24 @@ protocol TidemarkDatabase: Sendable {
     func latestEgress(deviceID: DeviceID) async throws -> [EgressSample]
     func insertEgressChange(_ change: EgressChange, deviceID: DeviceID) async throws
     func egressChanges(deviceID: DeviceID, limit: Int) async throws -> [EgressChange]
+
+    // Request details (schema v4)
+    /// Upserts DNS answers by `(device_id, domain, resolved_at)`; what a stored answer has and a new one lacks is kept.
+    func saveDNSAnswers(_ answers: [DNSAnswer]) async throws
+    /// Inserts proxy node errors; one already stored (same Mac, node, time and host) is skipped.
+    func saveProxyErrors(_ errors: [ProxyNodeError]) async throws
+    /// Requests to exactly `host` (a domain or an IP literal), newest first, with `query`'s other filters and
+    /// paging, like History.
+    func requests(forHost host: String, query: RequestQuery) async throws -> RequestPage
+    /// DNS answers for `host` resolved from `from` to `to` (nil: open), newest first, at most `limit`.
+    func dnsAnswers(forHost host: String, from: Date?, to: Date?, scope: DeviceScope, limit: Int) async throws -> [DNSAnswer]
+    /// Errors proxy nodes reported for `host` from `from` to `to` (nil: open), newest first, at most `limit`.
+    func proxyErrors(forHost host: String, from: Date?, to: Date?, scope: DeviceScope, limit: Int) async throws -> [ProxyNodeError]
+    /// Errors a proxy reported for the request: its Mac and host, within a second of its completion.
+    func proxyErrors(for request: RequestRecord) async throws -> [ProxyNodeError]
+    /// The request's first-contact alert and probe session, the egress check and change nearest its time, its DNS
+    /// answer and its proxy errors.
+    func relatedRecords(of request: RequestRecord) async throws -> RequestRelatedRecords
 }
 
 /// What `mergeDevice` did.
@@ -281,6 +299,26 @@ extension TidemarkDatabase {
     func closeVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date, at date: Date) async throws -> Int64 { 0 }
 
     func countVanishedRequests(deviceID: DeviceID, session: Int64, keeping surgeIDs: [Int64], startedBefore: Date) async throws -> Int64 { 0 }
+
+    // Defaults for databases without the request details of schema v4 (placeholders, test doubles, the demo).
+
+    func saveDNSAnswers(_ answers: [DNSAnswer]) async throws {}
+
+    func saveProxyErrors(_ errors: [ProxyNodeError]) async throws {}
+
+    func requests(forHost host: String, query: RequestQuery) async throws -> RequestPage {
+        var query = query
+        query.host = host
+        return try await queryRequests(query)
+    }
+
+    func dnsAnswers(forHost host: String, from: Date?, to: Date?, scope: DeviceScope, limit: Int) async throws -> [DNSAnswer] { [] }
+
+    func proxyErrors(forHost host: String, from: Date?, to: Date?, scope: DeviceScope, limit: Int) async throws -> [ProxyNodeError] { [] }
+
+    func proxyErrors(for request: RequestRecord) async throws -> [ProxyNodeError] { [] }
+
+    func relatedRecords(of request: RequestRecord) async throws -> RequestRelatedRecords { RequestRelatedRecords() }
 }
 
 /// One `(host or IP, source)` observation for the global inventory (`host_sources`).

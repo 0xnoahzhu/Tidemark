@@ -13,13 +13,21 @@ extension PostgresDatabase {
         ("geo", "jsonb"), ("policy", "text"), ("policy_path", "text[]"), ("rule", "text"), ("state", "text"),
         ("in_bytes", "int8"), ("out_bytes", "int8"), ("pid", "int4"), ("process_name", "text"), ("process_path", "text"),
         ("bundle_path", "text"), ("chain", "jsonb"), ("app_id", "uuid"), ("is_new", "bool"), ("local_address", "text"),
-        ("interface", "text"), ("notes", "text[]"), ("probe_session_id", "uuid"), ("leaf_pid", "int4"), ("leaf_start", "timestamptz"),
+        ("interface", "text"), ("notes", "text[]"), ("probe_session_id", "uuid"),
+        ("timing", "jsonb"), ("entry_mode", "int2"), ("original_policy", "text"), ("modified", "bool"), ("end_reason", "text"),
+        ("remote_ip_source", "text"), ("remote_ip_resolved_at", "timestamptz"),
+        ("leaf_pid", "int4"), ("leaf_start", "timestamptz"),
     ]
 
     /// How a re-written request merges into the stored row. Values that can only grow or settle
     /// (bytes, completion, terminal state, attribution, first-contact flag) never regress, so batches
     /// replayed out of order from the offline spool cannot undo newer data. `written_at` keeps the
     /// first write; `updated_at` marks every write for `requestsWritten(after:)`.
+    ///
+    /// The v4 columns keep a stored value when a write has none: rows spooled by an earlier build carry none
+    /// (an earlier build's own upserts never name them). Where `remote_ip` came from follows `remote_ip`: a
+    /// write that keeps the address keeps its source unless it names one, and a write of another address
+    /// without a source (an earlier build's) leaves the source unknown rather than wrong.
     private static let requestMergeSQL = """
         started_at = excluded.started_at,
         setup_completed_at = COALESCE(excluded.setup_completed_at, r.setup_completed_at),
@@ -50,6 +58,17 @@ extension PostgresDatabase {
         interface = COALESCE(excluded.interface, r.interface),
         notes = CASE WHEN cardinality(excluded.notes) >= cardinality(r.notes) THEN excluded.notes ELSE r.notes END,
         probe_session_id = COALESCE(excluded.probe_session_id, r.probe_session_id),
+        timing = COALESCE(excluded.timing, r.timing),
+        entry_mode = COALESCE(excluded.entry_mode, r.entry_mode),
+        original_policy = COALESCE(excluded.original_policy, r.original_policy),
+        modified = COALESCE(excluded.modified, r.modified),
+        end_reason = COALESCE(excluded.end_reason, r.end_reason),
+        remote_ip_source = CASE WHEN excluded.remote_ip IS NULL THEN r.remote_ip_source
+                                WHEN excluded.remote_ip = r.remote_ip THEN COALESCE(excluded.remote_ip_source, r.remote_ip_source)
+                                ELSE excluded.remote_ip_source END,
+        remote_ip_resolved_at = CASE WHEN excluded.remote_ip IS NULL THEN r.remote_ip_resolved_at
+                                     WHEN excluded.remote_ip = r.remote_ip THEN COALESCE(excluded.remote_ip_resolved_at, r.remote_ip_resolved_at)
+                                     ELSE excluded.remote_ip_resolved_at END,
         updated_at = now()
         """
 
@@ -230,6 +249,13 @@ extension PostgresDatabase {
                 sql.bind(record.interface),
                 sql.bind(record.notes),
                 sql.bind(record.probeSessionID),
+                sql.bind(try record.timing.flatMap { $0.isEmpty ? nil : try jsonText($0) }),
+                sql.bind(record.entryMode.map { Int16(clamping: $0) }),
+                sql.bind(record.originalPolicy),
+                sql.bind(record.modified),
+                sql.bind(record.endReason),
+                sql.bind(record.remoteIPSource?.rawValue),
+                sql.bind(record.remoteIPResolvedAt),
                 sql.bind(leafStart == nil ? nil : leaf?.pid),
                 sql.bind(leafStart),
             ]
@@ -259,6 +285,15 @@ extension PostgresDatabase {
                 later.setupCompletedAt = later.setupCompletedAt ?? earlier.setupCompletedAt
                 if later.chain.isEmpty { later.chain = earlier.chain }
                 if later.policyPath.isEmpty { later.policyPath = earlier.policyPath }
+                if later.remoteIP == earlier.remoteIP, later.remoteIPSource == nil {
+                    later.remoteIPSource = earlier.remoteIPSource
+                    later.remoteIPResolvedAt = later.remoteIPResolvedAt ?? earlier.remoteIPResolvedAt
+                }
+                later.timing = later.timing ?? earlier.timing
+                later.entryMode = later.entryMode ?? earlier.entryMode
+                later.originalPolicy = later.originalPolicy ?? earlier.originalPolicy
+                later.modified = later.modified ?? earlier.modified
+                later.endReason = later.endReason ?? earlier.endReason
                 merged[row.key] = later
             } else {
                 merged[row.key] = row
@@ -277,7 +312,8 @@ extension PostgresDatabase {
         r.id, r.device_id, r.surge_session, r.surge_id, r.started_at, r.setup_completed_at, r.completed_at,
         r.method, r.host, r.port, r.url, host(r.remote_ip) AS remote_ip, r.remote_address, r.geo, r.policy_path,
         r.rule, r.state, r.in_bytes, r.out_bytes, r.pid, r.process_path, r.bundle_path, r.chain, r.app_id,
-        r.local_address, r.interface, r.notes, r.is_new, r.updated_at, r.probe_session_id
+        r.local_address, r.interface, r.notes, r.is_new, r.updated_at, r.probe_session_id,
+        r.timing, r.entry_mode, r.original_policy, r.modified, r.end_reason, r.remote_ip_source, r.remote_ip_resolved_at
         """
 
     /// Decodes a row selected with `requestSelect`. `writtenAt` is the time of the row's latest write
@@ -316,7 +352,15 @@ extension PostgresDatabase {
             notes: try read("notes"),
             isNew: try read("is_new"),
             writtenAt: try read("updated_at", as: Date.self),
-            probeSessionID: try read("probe_session_id")
+            probeSessionID: try read("probe_session_id"),
+            timing: try read.json("timing", as: [RequestTimingRecord].self),
+            entryMode: try read("entry_mode", as: Int16?.self).map(Int.init),
+            originalPolicy: try read("original_policy"),
+            modified: try read("modified"),
+            endReason: try read("end_reason"),
+            // A source a later Tidemark added reads as unknown.
+            remoteIPSource: try read("remote_ip_source", as: String?.self).flatMap(RemoteIPSource.init(rawValue:)),
+            remoteIPResolvedAt: try read("remote_ip_resolved_at")
         )
     }
 
@@ -358,6 +402,9 @@ extension PostgresDatabase {
         case .active: conditions.append("r.state = 'active'")
         case .failed: conditions.append("r.state IN ('failed', 'rejected')")
         }
+        // `requests_host_started_idx` (v4) serves one host newest first.
+        if let host = query.host.map(Self.exactHost) { conditions.append("r.host = \(sql.bind(host))") }
+        if query.endedWithError { conditions.append(Self.endedWithErrorCondition) }
         let search = query.search.trimmingCharacters(in: .whitespacesAndNewlines)
         if !search.isEmpty {
             let p = sql.bind(containsPattern(search))
@@ -370,6 +417,18 @@ extension PostgresDatabase {
         }
         if !conditions.isEmpty { sql.append(" WHERE " + conditions.joined(separator: " AND ")) }
     }
+
+    /// A host as `requests.host` stores it: lowercased, an IPv6 literal without brackets.
+    static func exactHost(_ host: String) -> String {
+        let trimmed = host.trimmingCharacters(in: .whitespaces).lowercased()
+        return trimmed.hasPrefix("[") && trimmed.hasSuffix("]") ? String(trimmed.dropFirst().dropLast()) : trimmed
+    }
+
+    /// `RequestRecord.endedWithError` in SQL: an end reason that is not one of `RequestEndReason.normal`.
+    static let endedWithErrorCondition: String = {
+        let normal = RequestEndReason.normal.sorted().map { "'" + $0.replacingOccurrences(of: "'", with: "''") + "'" }
+        return "(r.end_reason IS NOT NULL AND r.end_reason NOT IN (\(normal.joined(separator: ", "))))"
+    }()
 
     /// Rows newest first with a total. The total counts every row matching the filters (ignoring `offset`);
     /// it is exact up to 100,000 matches, beyond that (and for the unfiltered "All time" view) it comes from
@@ -396,7 +455,7 @@ extension PostgresDatabase {
 
     private func totalCount(for query: RequestQuery, window: TimeWindow, searchApps: [AppID]) async throws -> Int64 {
         let unfiltered = window.lower == nil && query.appID == nil && query.policy == nil && query.status == .any
-            && query.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && query.host == nil && !query.endedWithError && query.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if unfiltered {
             switch query.scope {
             case .all:

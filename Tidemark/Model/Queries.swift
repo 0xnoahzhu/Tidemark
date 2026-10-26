@@ -37,6 +37,11 @@ struct RequestQuery: Hashable, Sendable {
     var status: StatusFilter = .any
     /// Matches host, remote IP and process name (case-insensitive substring).
     var search: String = ""
+    /// Only requests to exactly this host (domain or IP literal), nil = all.
+    var host: String? = nil
+    /// Only requests whose connection ended with an error (`RequestEndReason`), whatever their `status`: Surge
+    /// marks resets and broken pipes completed.
+    var endedWithError = false
     var limit: Int = 500
     var offset: Int = 0
 }

@@ -67,6 +67,24 @@ struct RequestRecord: Identifiable, Hashable, Codable, Sendable {
     var writtenAt: Date?
     var probeSessionID: UUID?
 
+    // Recorded from schema v4 on. Optional with a default, so rows spooled by earlier builds still decode and
+    // rows of earlier builds read back without them.
+
+    /// Surge's per-phase timings (`timingRecords`), e.g. `DNS Lookup` and `Rule Evaluating` in rule mode.
+    var timing: [RequestTimingRecord]? = nil
+    /// How the request reached Surge (`takeoverMode`, see `RequestEntry`).
+    var entryMode: Int? = nil
+    /// Surge's original policy, only when it differs from the final one.
+    var originalPolicy: String? = nil
+    /// Surge's `modified` flag (a rewrite or script changed the request).
+    var modified: Bool? = nil
+    /// Why the connection ended, in Surge's words (`RequestEndReason`); the notes stay the source of truth.
+    var endReason: String? = nil
+    /// Where `remoteIP` came from.
+    var remoteIPSource: RemoteIPSource? = nil
+    /// When `remoteIP` was resolved or reported (see `RemoteIPSource`); nil for IP literals and when unknown.
+    var remoteIPResolvedAt: Date? = nil
+
     var id: RequestKey { key }
     var deviceID: DeviceID { key.deviceID }
 
@@ -90,6 +108,13 @@ struct RequestRecord: Identifiable, Hashable, Codable, Sendable {
     }
 
     var isTunnel: Bool { ["HTTPS", "TCP", "UDP", "CONNECT"].contains(method.uppercased()) }
+
+    /// The connection ended with an error (a reset, a broken pipe…), whatever state Surge reported: Surge marks
+    /// those requests completed.
+    var endedWithError: Bool { endReason.map(RequestEndReason.isError) ?? false }
+
+    /// How the request reached Surge, nil when Surge did not say.
+    var entry: RequestEntry? { entryMode.map(RequestEntry.init(mode:)) }
 }
 
 /// Helpers for classifying host strings.

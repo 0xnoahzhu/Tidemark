@@ -289,13 +289,31 @@ struct DatabaseUnitTests {
             .createIndex(name: "requests_active_idx", table: "requests", definition: "(device_id, surge_session) WHERE state = 'active'"),
             .enableAutosummarize(index: "requests_updated_brin_idx"),
         ])
+
+        // v4 only adds: nullable columns without a default (no table rewrite, no GENERATED column), new tables, and
+        // indexes built concurrently. Every older build keeps writing.
+        let v4 = try #require(Schema.migrations.first { $0.version == 4 })
+        let v4Statements = Schema.statements(in: v4.sql)
+        #expect(v4Statements.count == 3)
+        #expect(v4Statements[0].hasPrefix("ALTER TABLE requests"), "the requests lock comes before the new tables lock devices")
+        for statement in v4Statements {
+            let upper = statement.uppercased()
+            #expect(upper.contains("IF NOT EXISTS"), "\(statement)")
+            #expect(!upper.contains("CREATE INDEX") && !upper.contains("DROP ") && !upper.contains("GENERATED") && !upper.contains("ALTER COLUMN"), "\(statement)")
+        }
+        let added = v4Statements[0].components(separatedBy: "ADD COLUMN IF NOT EXISTS").dropFirst()
+        #expect(added.count == 7 && added.allSatisfy { !$0.uppercased().contains("DEFAULT") && !$0.uppercased().contains("NOT NULL") })
+        #expect(v4.requiresVersion == 1)
+        #expect(v4.concurrentSteps.map(\.indexName) == ["requests_host_started_idx", "dns_answers_domain_idx", "proxy_errors_target_idx"])
         // Shipped migrations never change.
-        #expect(Schema.migrations.map(\.name) == ["initial", "write path and egress details", "active requests and brin autosummarize"])
+        #expect(Schema.migrations.map(\.name) == ["initial", "write path and egress details", "active requests and brin autosummarize",
+                                                  "request details, dns answers and proxy errors"])
     }
 
     @Test func indexStepsFollowTheCatalog() {
         let valid = Schema.IndexState(valid: true, options: [])
-        let all = Schema.migrations
+        // Migrations v1 to v3 (v4's steps are checked below).
+        let all = Array(Schema.migrations.prefix(3))
         let v1Indexes = ["requests_updated_idx", "requests_host_idx", "requests_host_trgm_idx", "requests_remote_ip_idx",
                          "host_sources_last_seen_idx", "requests_started_idx"]
         let v1Catalog = Dictionary(uniqueKeysWithValues: v1Indexes.map { ($0, valid) })
@@ -332,6 +350,13 @@ struct DatabaseUnitTests {
         let withoutActive = v2Catalog.filter { $0.key != "requests_active_idx" }
         #expect(!Schema.pendingSteps(of: all + [later], catalog: withoutActive).contains { $0.indexName == "requests_active_idx" })
         #expect(Schema.pendingSteps(of: all + [later], catalog: v2Catalog) == [.dropIndex(name: "requests_active_idx")])
+
+        // v4 on a finished v3 schema: its three indexes, until they are in effect.
+        let v4 = Schema.migrations[3]
+        #expect(Schema.pendingSteps(of: all + [v4], catalog: v2Catalog) == v4.concurrentSteps)
+        var v4Catalog = v2Catalog
+        for step in v4.concurrentSteps { v4Catalog[step.indexName] = valid }
+        #expect(Schema.pendingSteps(of: Schema.migrations, catalog: v4Catalog).isEmpty)
     }
 
     @Test func indexRetriesBackOff() {
