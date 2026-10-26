@@ -342,10 +342,15 @@ and an inspector beside the Requests page's live table (History has none). Nativ
 for switches, tables (`Table`), search fields and sheets; every segmented choice, though, is Tidemark's own
 `DesignSegmentedControl`, never the system's: on a rounded fill track with no dividers, each choice shows an SF
 Symbol, its title and, where the number is already at hand, a count in a small capsule, and the selected one is
-raised on a white cell (20% white in dark mode) with a hairline border. It is 40 pt tall in page content and
-32 pt (`.compact()`) in the window toolbar and Settings; a control with counts drops them, then its icons, where
+raised on a white cell (20% white in dark mode) with a hairline border. It is 40 px tall in page content and
+32 px (`.compact()`) in the window toolbar and Settings, the compact size growing with the UI scale no taller than
+the toolbar's 36 pt glass capsule; a control with counts drops them, then its icons, where
 it has too little room. In a toolbar it sits outside the glass bubble, and VoiceOver and the overflow menu see a
-picker. The pause /
+picker. Each page draws its title and subtitle in the toolbar's leading item at the design's size
+(`pageToolbar(_:subtitle:items:)`, 15 px bold over 11 px) in place of the system's title, whose size is fixed; the
+window keeps them as its title and subtitle for the Window menu, Mission Control and VoiceOver. Every window's root
+sets the design's line height (`Theme.lineHeight`, CSS `line-height: 1.35`, which SwiftUI also takes as a multiple
+of the font's size). The pause /
 resume and Stop monitoring confirmations are the design's glass dialogs (`GlassDialog`), laid over the whole
 window. Colors come from `Theme` (exact OKLCH conversions of the design tokens); app tiles use the real app
 icon when the bundle exists locally. The window chrome is the system's: the sidebar draws its rows on the split
@@ -396,7 +401,15 @@ list applies at the next launch.
   that keeps it out of the overflow menu longer than the page's other items (it takes ⌘F itself).
 * SwiftUI tables run without NSTableView's estimated row heights (`TableRowHeightDefaults`, registered in
   `TidemarkApp.init`): with them, a table that receives more than 200 rows at once re-enters AppKit's row height
-  cache, which AppKit logs as a reentrant operation in the table's delegate and will turn into an assert.
+  cache, which AppKit logs as a reentrant operation in the table's delegate and will turn into an assert. A table
+  whose rows have the design's height gets it from a cell's minimum height (the request table's 28 px, less what
+  the inset style adds), not from `rowHeight`.
+* Sizes in UI code are the design's px through `UIScale` (`14.px`, `.design(12)`, `.designMono(11)`), so the whole
+  window grows or shrinks with one factor; hairlines, opacities and the system's chrome stay as they are. So far
+  the shell, the Requests page and the shared components are written this way; the other pages still use points.
+  The main window's saved frame and sidebar width are forgotten once when the factor changes (`MainWindowFrame`).
+* A toolbar whose page draws its own title (`toolbar(removing: .title)`) needs a `ToolbarSpacer(.flexible)` in
+  the same toolbar content as the trailing items, or they follow the title instead of keeping to the trailing end.
 * English for all code, comments, docs and commit messages; other languages only in String Catalogs.
 * Conventional Commits (`feat(capture): …`, `fix(ui): …`, `test(database): …`).
 * No credentials in the repository.
