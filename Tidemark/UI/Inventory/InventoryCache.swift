@@ -137,7 +137,8 @@ final class InventoryCache {
     func keepCurrent(_ key: Key, fetch: (Key) async throws -> [InventoryEntry]) async {
         if !key.search.isEmpty {
             // Narrow the cached list at once; the database's answer, when one is needed, waits for the typing to stop.
-            filterLocally(key, replacing: false)
+            // A list that answers the search exactly narrows it again, as it may be newer than the last narrowing.
+            filterLocally(key, replacing: answersLocally(key))
             show(key)
             if snapshot(for: key) != nil {
                 try? await Task.sleep(for: searchDelay)
@@ -147,6 +148,7 @@ final class InventoryCache {
         // A search the complete unsearched list answers refreshes that list instead of running a query of its own.
         var source = answersLocally(key) ? key.base : key
         if let age = age(of: source), age < revalidateAfter {
+            if source != key { filterLocally(key, replacing: true) }
             show(key)
         } else {
             await refresh(source, for: key, fetch: fetch)

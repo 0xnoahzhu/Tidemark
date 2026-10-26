@@ -627,6 +627,26 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect((2...7).contains(calls.count), "\(calls.count) queries")
         #expect(cache.snapshot(for: all)?.all.count == entries.count)
     }
+
+    @Test func narrowsARetypedSearchFromTheNewestCompleteList() async throws {
+        let cache = InventoryCache()
+        cache.store(entries, for: all)
+        let search = InventoryCache.Key(search: "github", scope: .all)
+        cache.filterLocally(search, replacing: false)
+        #expect(try #require(cache.snapshot(for: search)).all.map(\.value) == ["api.github.com"])
+        // The unsearched list was fetched again since, with a new match; the search is typed again.
+        cache.store(entries + [entry("gist.github.com", minutesAgo: 0)], for: all)
+        let task = Task {
+            await cache.keepCurrent(search) { _ in
+                Issue.record("The fresh complete list answers the search without a query")
+                return []
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(try #require(cache.snapshot(for: search)).all.map(\.value) == ["gist.github.com", "api.github.com"])
+        task.cancel()
+        await task.value
+    }
 }
 
 @Suite @MainActor struct EgressOrderingTests {
