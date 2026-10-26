@@ -12,7 +12,7 @@ struct RequestsView: View {
             if nav.requestsLive {
                 RequestsLiveView()
             } else {
-                RequestsHistoryView(history: model.requestsHistory, buildsTableEmpty: !historyShown)
+                RequestsHistoryView(history: model.requestsHistory, opensPage: !historyShown)
                     .onAppear { historyShown = true }
             }
         }

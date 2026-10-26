@@ -80,9 +80,11 @@ final class RequestsHistoryModel {
 
     /// Shows the results of `query`. Results it `keeps` stay up, and once older than `refreshInterval` they are
     /// queried again in the background with no loading state: only what changed is replaced, so an unchanged
-    /// answer redraws nothing. Other results are loaded again (`load`).
-    func show(_ query: RequestQuery, database: any TidemarkDatabase) async {
+    /// answer redraws nothing. Other results are loaded again (`load`); `clearsOthers` clears them first, as on a
+    /// new model, instead of leaving them up until the new page arrives.
+    func show(_ query: RequestQuery, database: any TidemarkDatabase, clearsOthers: Bool = false) async {
         guard keeps(query), let completedAt else {
+            if clearsOthers { clear() }
             await load(query, database: database)
             return
         }
@@ -153,6 +155,16 @@ final class RequestsHistoryModel {
     private enum Part: Sendable {
         case page(Result<RequestPage, any Error>)
         case histogram(Result<Histogram, any Error>)
+    }
+
+    /// The results a new model starts with.
+    private func clear() {
+        rows = []
+        totalCount = 0
+        elapsed = .zero
+        failure = nil
+        histogram = nil
+        histogramFailure = nil
     }
 
     /// Runs `query` (its first page) as the latest load, cancelling the one before. `quietly` refreshes the

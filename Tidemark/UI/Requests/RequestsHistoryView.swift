@@ -5,21 +5,33 @@ import SwiftUI
 struct RequestsHistoryView: View {
     @Environment(AppModel.self) private var model
     var history: RequestsHistoryModel
+    /// The first History since the Requests page opened (see `init`).
+    private let opensPage: Bool
 
-    /// Search text of the last query that ran; a change of only the search is debounced.
+    /// Search text of the last query that ran; a change of only the search is debounced. Nil until the view first
+    /// asks for results.
     @State private var lastSearch: String?
     /// False while the table is built empty, until its first layout.
     @State private var showsRows: Bool
 
-    /// `buildsTableEmpty` builds the table without rows and gives it the rows already loaded right after its first
-    /// layout, as when they arrive from PostgreSQL. A table built with its rows keeps every column at its ideal width
-    /// even where they add up to more than the table's width, while one laid out empty first shares that width out.
-    /// `RequestsView` builds the first History after the page opens empty and the ones the Live / History switch
-    /// brings back with their rows, so each keeps the columns it has always had.
-    init(history: RequestsHistoryModel, buildsTableEmpty: Bool) {
+    /// `opensPage` is true for the first History since the Requests page opened and false for the ones the Live /
+    /// History switch brings back.
+    ///
+    /// The first one opens as on a new model: results the model `keeps` appear at once, and others are not drawn
+    /// but cleared and loaded again. Its table is built without rows and given them right after its first layout,
+    /// as when they arrive from PostgreSQL: a table built with its rows keeps every column at its ideal width even
+    /// where they add up to more than the table's width, while one laid out empty first shares that width out.
+    /// The ones the switch brings back show the results the model has, with their rows, until newer ones arrive.
+    /// So each History keeps the look it has always had.
+    init(history: RequestsHistoryModel, opensPage: Bool) {
         self.history = history
-        _showsRows = State(initialValue: !buildsTableEmpty)
+        self.opensPage = opensPage
+        _showsRows = State(initialValue: !opensPage)
     }
+
+    /// Never loaded: drawn by a History that opens the page in place of results the model will not keep, until it
+    /// has asked for new ones.
+    private static let unloaded = RequestsHistoryModel()
 
     var body: some View {
         let nav = model.nav
@@ -31,18 +43,19 @@ struct RequestsHistoryView: View {
             status: nav.history.status,
             search: nav.requestSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+        let results = opensPage && lastSearch == nil && !history.keeps(key.query) ? Self.unloaded : history
         VStack(spacing: 0) {
-            RequestsHistoryFilterBar(history: history)
+            RequestsHistoryFilterBar(history: results)
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
                 .padding(.bottom, 4)
 
             Group {
-                if let histogram = history.histogram, histogram.counts.contains(where: { $0 > 0 }) {
+                if let histogram = results.histogram, histogram.counts.contains(where: { $0 > 0 }) {
                     RequestsHistogramChart(histogram: histogram)
-                } else if history.isLoadingHistogram, !history.isLoading {
+                } else if results.isLoadingHistogram, !results.isLoading {
                     ProgressView().controlSize(.small)
-                } else if let message = history.histogramError, history.errorMessage == nil {
+                } else if let message = results.histogramError, results.errorMessage == nil {
                     RequestsHistogramUnavailable(message: message)
                 } else {
                     Color.clear
@@ -56,11 +69,11 @@ struct RequestsHistoryView: View {
             Divider()
 
             // As in the design, History rows are not selectable: the inspector belongs to the live table.
-            RequestsTable(model: model, rows: showsRows ? history.rows : [], timeStyle: .dayClock, now: nil, showsHostBadges: false) {
+            RequestsTable(model: model, rows: showsRows ? results.rows : [], timeStyle: .dayClock, now: nil, showsHostBadges: false) {
                 Task { await history.loadMore(database: model.database) }
             }
             .scrollEdgeEffectStyle(.hard, for: .top)
-            .overlay { RequestsHistoryOverlay(history: history, search: key.search) }
+            .overlay { RequestsHistoryOverlay(history: results, search: key.search) }
         }
         .task {
             guard !showsRows else { return }
@@ -69,12 +82,13 @@ struct RequestsHistoryView: View {
             showsRows = true
         }
         .task(id: key) {
+            let first = lastSearch == nil
             if let lastSearch, lastSearch != key.search {
                 try? await Task.sleep(for: .milliseconds(300))
                 guard !Task.isCancelled else { return }
             }
             lastSearch = key.search
-            await history.show(key.query, database: model.database)
+            await history.show(key.query, database: model.database, clearsOthers: opensPage && first)
         }
         .task(id: nav.history.range) {
             await history.loadPolicies(for: nav.history.range, database: model.database)

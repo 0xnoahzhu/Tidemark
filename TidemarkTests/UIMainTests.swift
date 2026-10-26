@@ -827,6 +827,55 @@ struct RequestsHistoryModelTests {
         #expect(history.keeps(query))
     }
 
+    /// A History that opens the page clears results it does not keep before querying, as a new model would; the
+    /// Live / History switch leaves them up until the new page arrives.
+    @Test func clearsResultsItDoesNotKeepWhenAsked() async {
+        let gate = RequestsGate()
+        let gated = RequestsGateSwitch()
+        let database = RequestsStubDatabase(
+            query: { query in
+                if gated.isOn { await gate.wait() }
+                return Self.page(query)
+            },
+            buckets: { _, _ in Self.newChart }
+        )
+        let history = RequestsHistoryModel()
+        var old = RequestQuery()
+        old.search = "old"
+        await history.show(old, database: database)
+        #expect(history.rows.map(\.rowID) == [1])
+        #expect(history.histogram == Self.newChart)
+
+        gated.isOn = true
+        let switched = Task { await history.show(RequestQuery(), database: database) }
+        #expect(await eventually { history.isLoading })
+        #expect(history.rows.map(\.rowID) == [1], "the switch leaves the old rows up")
+        await gate.open()
+        await switched.value
+        #expect(history.rows.map(\.rowID) == [2])
+
+        let reopened = RequestsGate()
+        let database2 = RequestsStubDatabase(
+            query: { query in
+                await reopened.wait()
+                return Self.page(query)
+            },
+            buckets: { _, _ in
+                await reopened.wait()
+                return Self.newChart
+            }
+        )
+        let opened = Task { await history.show(old, database: database2, clearsOthers: true) }
+        #expect(await eventually { history.isLoading })
+        #expect(history.rows.isEmpty)
+        #expect(history.totalCount == 0)
+        #expect(history.histogram == nil)
+        #expect(history.isLoadingHistogram)
+        await reopened.open()
+        await opened.value
+        #expect(history.rows.map(\.rowID) == [1])
+    }
+
     /// The policy list is queried again for another range or database, or once it is older than `refreshInterval`.
     @Test func keepsPoliciesPerRangeAndDatabase() async {
         let asked = RequestsQueryCounter()
