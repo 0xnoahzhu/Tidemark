@@ -45,9 +45,9 @@ private struct RequestsToolbar: ToolbarContent {
     var body: some ToolbarContent {
         @Bindable var nav = model.nav
         ToolbarItem(placement: .primaryAction) {
-            DesignSegmentedControl(tr("Mode", "Requests"), selection: $nav.requestsLive, segments: [
-                (true, tr("Live", "Requests")),
-                (false, tr("History", "Requests")),
+            DesignSegmentedControl(tr("Mode", "Requests"), selection: $nav.requestsLive, size: .compact(), segments: [
+                .init(true, tr("Live", "Requests"), systemImage: "dot.radiowaves.left.and.right"),
+                .init(false, tr("History", "Requests"), systemImage: "clock.arrow.circlepath"),
             ])
             .help(tr("Switch between the live stream and stored history", "Requests"))
         }

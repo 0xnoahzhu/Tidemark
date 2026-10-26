@@ -65,9 +65,9 @@ struct ProbeBrowserWindow: View {
             DesignSegmentedControl(tr("Device", "SiteProbe"), selection: Binding(
                 get: { model.preferences.probeMode },
                 set: { web.switchMode(to: $0, model: model) }
-            ), size: .small(fontSize: 11.5, horizontalPadding: 10), segments: [
-                (.desktop, tr("Desktop", "SiteProbe")),
-                (.iphone, tr("iPhone", "SiteProbe")),
+            ), size: .compact(), segments: [
+                .init(.desktop, tr("Desktop", "SiteProbe"), systemImage: "desktopcomputer"),
+                .init(.iphone, tr("iPhone", "SiteProbe"), systemImage: "iphone"),
             ])
         }
         .sharedBackgroundVisibility(.hidden)

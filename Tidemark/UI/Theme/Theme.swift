@@ -12,11 +12,12 @@ enum Theme {
     static let zebra = Color.dynamic(light: NSColor(hex: 0xfafafb), dark: .white(0.025))
     /// Background of rows that just arrived / unread notifications.
     static let fresh = Color.dynamic(light: OKLCH.nsColor(0.95, 0.04, 235), dark: OKLCH.nsColor(0.33, 0.06, 245))
-    /// The selected segment of a segmented control (`seg`), with its shadow (`segSh`: `0 1px 2px` plus, in light
-    /// mode, a half-point ring).
-    static let segment = Color.dynamic(light: NSColor(hex: 0xffffff), dark: NSColor(hex: 0x5b5b60))
-    static let segmentShadow = Color.dynamic(light: .black(0.14), dark: .black(0.4))
-    static let segmentRing = Color.dynamic(light: .black(0.05), dark: .clear)
+    /// A segmented control's track, and its selected segment, raised by a hairline border and, in light mode, a
+    /// faint shadow.
+    static let segmentTrack = Color.dynamic(light: .black(0.06), dark: .white(0.08))
+    static let segment = Color.dynamic(light: NSColor(hex: 0xffffff), dark: .white(0.2))
+    static let segmentBorder = Color.dynamic(light: .black(0.1), dark: .white(0.12))
+    static let segmentShadow = Color.dynamic(light: .black(0.06), dark: .clear)
 
     // Text
     static let ink = Color.dynamic(light: NSColor(hex: 0x1d1d1f), dark: NSColor(hex: 0xf2f2f4))

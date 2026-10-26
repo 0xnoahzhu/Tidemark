@@ -207,10 +207,11 @@ struct AppDetailInventoryTab: View {
                 .foregroundStyle(Theme.ink3)
                 .fixedSize()
         }
-        let filter = DesignSegmentedControl(tr("Show", "AppDetail"), selection: $nav.appIPFilter, size: .small(), segments: [
-            (.all, tr("All", "AppDetail")),
-            (.direct, tr("Direct", "AppDetail")),
-            (.resolved, tr("From domains", "AppDetail")),
+        // Compact, as the pane is too narrow for the regular size. The counts are those of the list's group headers.
+        let filter = DesignSegmentedControl(tr("Show", "AppDetail"), selection: $nav.appIPFilter, size: .compact(), segments: [
+            .init(.all, tr("All", "AppDetail"), systemImage: "list.bullet", count: summary.directIPs.count + summary.resolvedIPs.count),
+            .init(.direct, tr("Direct", "AppDetail"), systemImage: "number", count: summary.directIPs.count),
+            .init(.resolved, tr("From domains", "AppDetail"), systemImage: "globe", count: summary.resolvedIPs.count),
         ])
         return VStack(spacing: 0) {
             // One row when the pane is wide enough, otherwise the filter moves under the title.
@@ -495,9 +496,10 @@ private struct AppDetailIPHeaderLayout: Layout {
         var cells = [Cell(subview: title, x: 0, width: min(titleWidth, max(0, width - spacing - trailing)))]
         if let showAll { cells.append(Cell(subview: showAll, x: width - showAllWidth, width: showAllWidth)) }
         let first = Self.row(cells)
-        let filterSize = filter.sizeThatFits(ProposedViewSize(width: filterWidth, height: nil))
+        // A pane narrower than the switch gets it without its counts (or icons).
+        let filterSize = filter.sizeThatFits(ProposedViewSize(width: min(filterWidth, width), height: nil))
         var frames = first.frames
-        frames.insert(CGRect(x: 0, y: first.height + rowSpacing, width: filterWidth, height: filterSize.height), at: 1)
+        frames.insert(CGRect(x: 0, y: first.height + rowSpacing, width: filterSize.width, height: filterSize.height), at: 1)
         return Arrangement(items: frames, width: width, height: first.height + rowSpacing + filterSize.height)
     }
 

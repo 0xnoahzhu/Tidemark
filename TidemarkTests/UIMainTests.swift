@@ -317,8 +317,9 @@ struct DesignSegmentedControlTests {
     @Test func overflowMenuOffersEveryChoice() async throws {
         final class Box { var live = true }
         let box = Box()
-        let control = DesignSegmentedControl("Mode", selection: Binding(get: { box.live }, set: { box.live = $0 }),
-                                             segments: [(true, "Live"), (false, "History")])
+        let control = DesignSegmentedControl("Mode", selection: Binding(get: { box.live }, set: { box.live = $0 }), size: .compact(),
+                                             segments: [.init(true, "Live", systemImage: "dot.radiowaves.left.and.right"),
+                                                        .init(false, "History", systemImage: "clock.arrow.circlepath", count: 12)])
         let host = NSHostingView(rootView: Color.clear.toolbar {
             ToolbarItem(placement: .primaryAction) { control }
         })
@@ -346,6 +347,45 @@ struct DesignSegmentedControlTests {
             try await Task.sleep(for: .milliseconds(50))
         }
         #expect(box.live == false)
+    }
+
+    private static func width(of control: DesignSegmentedControl<Int>, proposed: CGFloat = .infinity) -> CGFloat {
+        NSHostingController(rootView: control).sizeThatFits(in: CGSize(width: proposed, height: .infinity)).width
+    }
+
+    private static func kinds(selected: Int, count: Int) -> DesignSegmentedControl<Int> {
+        DesignSegmentedControl("Kind", selection: .constant(selected), size: .compact(), segments: [
+            .init(0, "All", systemImage: "list.bullet", count: count),
+            .init(1, "Domains", systemImage: "globe", count: 128),
+            .init(2, "IPs", systemImage: "number", count: 57),
+        ])
+    }
+
+    /// Selecting another choice, or a count changing without gaining a digit, keeps the control's width, so
+    /// nothing after it moves.
+    @Test func widthHoldsAcrossSelectionsAndCounts() {
+        let width = Self.width(of: Self.kinds(selected: 0, count: 12))
+        #expect(width > 0)
+        #expect(Self.width(of: Self.kinds(selected: 1, count: 12)) == width)
+        #expect(Self.width(of: Self.kinds(selected: 2, count: 12)) == width)
+        #expect(Self.width(of: Self.kinds(selected: 0, count: 85)) == width)
+    }
+
+    /// A place narrower than the control gets it without its counts, then without its icons as well.
+    @Test func countsAndThenIconsGiveWayWhenNarrow() {
+        let control = Self.kinds(selected: 0, count: 185)
+        let ideal = Self.width(of: control)
+        let withoutCounts = Self.width(of: control, proposed: ideal - 1)
+        #expect(withoutCounts < ideal - 1)
+        let withoutIcons = Self.width(of: control, proposed: withoutCounts - 1)
+        #expect(withoutIcons < withoutCounts - 1)
+        // Without counts to give up, the control keeps its icons and its width.
+        let plain = DesignSegmentedControl("Kind", selection: .constant(0), size: .compact(), segments: [
+            .init(0, "All", systemImage: "list.bullet"),
+            .init(1, "Domains", systemImage: "globe"),
+        ])
+        let plainWidth = Self.width(of: plain)
+        #expect(Self.width(of: plain, proposed: plainWidth / 2) == plainWidth)
     }
 }
 

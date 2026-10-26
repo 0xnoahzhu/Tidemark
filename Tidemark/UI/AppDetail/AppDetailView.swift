@@ -34,7 +34,6 @@ struct AppDetailView: View {
 
     @ViewBuilder
     private func page(_ app: MonitoredApp) -> some View {
-        @Bindable var nav = model.nav
         let absent = isAbsent(app)
         let statsKey = AppDetailCounters.Key(appID: app.id, scope: absent ? .all : model.devices.scope)
 
@@ -59,11 +58,7 @@ struct AppDetailView: View {
             .sharedBackgroundVisibility(.hidden)
 
             ToolbarItem(placement: .primaryAction) {
-                DesignSegmentedControl(tr("View", "AppDetail"), selection: $nav.appTab, segments: [
-                    (.requests, tr("All Requests", "AppDetail")),
-                    (.inventory, tr("Domains & IPs", "AppDetail")),
-                    (.tree, tr("Process Tree", "AppDetail")),
-                ])
+                AppDetailTabSwitch(model: model, app: app, absent: absent, counters: counters)
             }
             .sharedBackgroundVisibility(.hidden)
         }
@@ -126,6 +121,25 @@ struct AppDetailView: View {
             }
             try? await Task.sleep(for: .seconds(10))
         }
+    }
+}
+
+/// The All Requests / Domains & IPs / Process Tree switch with the stats strip's counts, in a view of its own so the
+/// counters' updates redraw only the switch, not the page. (A toolbar item gets the model passed in.)
+private struct AppDetailTabSwitch: View {
+    var model: AppModel
+    var app: MonitoredApp
+    var absent: Bool
+    var counters: AppDetailCounters
+
+    var body: some View {
+        @Bindable var nav = model.nav
+        let stats = counters.stats(for: app, absent: absent, model: model)
+        DesignSegmentedControl(tr("View", "AppDetail"), selection: $nav.appTab, size: .compact(), segments: [
+            .init(.requests, tr("All Requests", "AppDetail"), systemImage: "list.bullet.rectangle", count: Int(stats.requests)),
+            .init(.inventory, tr("Domains & IPs", "AppDetail"), systemImage: "globe", count: stats.domains + stats.ips),
+            .init(.tree, tr("Process Tree", "AppDetail"), systemImage: "point.3.connected.trianglepath.dotted", count: stats.processes),
+        ])
     }
 }
 

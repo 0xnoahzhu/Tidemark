@@ -105,8 +105,8 @@ struct AppDetailRequestsTab: View {
                 .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
             DesignSegmentedControl(tr("Source", "AppDetail"), selection: $nav.appRequestsLive, segments: [
-                (true, tr("Live", "AppDetail")),
-                (false, tr("History", "AppDetail")),
+                .init(true, tr("Live", "AppDetail"), systemImage: "dot.radiowaves.left.and.right"),
+                .init(false, tr("History", "AppDetail"), systemImage: "clock.arrow.circlepath"),
             ])
             AppDetailStoredCount(app: app, absent: absent, counters: counters)
             Spacer(minLength: 0)

@@ -55,10 +55,10 @@ private struct NotificationsToolbar: ToolbarContent {
     var body: some ToolbarContent {
         @Bindable var nav = model.nav
         ToolbarItem(placement: .primaryAction) {
-            DesignSegmentedControl(tr("Show", "Notifications"), selection: $nav.alertFilter,
-                                   size: .regular(horizontalPadding: 11), segments: [
-                (.all, tr("All", "Notifications")),
-                (.unread, tr("Unread", "Notifications")),
+            // Only Unread has a count: the page keeps the newest 200 notifications, not all of them.
+            DesignSegmentedControl(tr("Show", "Notifications"), selection: $nav.alertFilter, size: .compact(), segments: [
+                .init(.all, tr("All", "Notifications"), systemImage: "tray.full"),
+                .init(.unread, tr("Unread", "Notifications"), systemImage: "envelope.badge", count: model.alerts.unreadCount),
             ])
         }
         .sharedBackgroundVisibility(.hidden)

@@ -25,11 +25,11 @@ struct InventoryView: View {
             .navigationSubtitle(subtitle(snapshot))
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    DesignSegmentedControl(tr("Kind", "Inventory"), selection: $nav.inventoryKind,
-                                           size: .regular(horizontalPadding: 11), segments: [
-                        (nil, tr("All", "Inventory")),
-                        (.domain, tr("Domains", "Inventory")),
-                        (.ip, tr("IPs", "Inventory")),
+                    // The subtitle's counts (none before the first load).
+                    DesignSegmentedControl(tr("Kind", "Inventory"), selection: $nav.inventoryKind, size: .compact(), segments: [
+                        .init(nil, tr("All", "Inventory"), systemImage: "list.bullet", count: snapshot?.all.count),
+                        .init(.domain, tr("Domains", "Inventory"), systemImage: "globe", count: snapshot?.domainCount),
+                        .init(.ip, tr("IPs", "Inventory"), systemImage: "number", count: snapshot.map { $0.all.count - $0.domainCount }),
                     ])
                 }
                 .sharedBackgroundVisibility(.hidden)
