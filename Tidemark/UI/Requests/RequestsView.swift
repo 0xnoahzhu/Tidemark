@@ -27,9 +27,9 @@ struct RequestsView: View {
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                 .inspectorColumnWidth(min: 280.px, ideal: 316.px, max: 440.px)
         }
-        .navigationTitle(tr("Requests", "Requests"))
-        .navigationSubtitle(tr("Every request Surge sees, kept in PostgreSQL", "Requests"))
-        .toolbar { RequestsToolbar(model: model) }
+        .pageToolbar(tr("Requests", "Requests"), subtitle: tr("Every request Surge sees, kept in PostgreSQL", "Requests")) {
+            RequestsToolbar(model: model)
+        }
         .onChange(of: nav.requestsLive) { nav.selectedRequest = nil }
     }
 }

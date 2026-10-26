@@ -26,9 +26,7 @@ struct EgressView: View {
             .padding(.bottom, 22)
         }
         .background(Theme.bg3)
-        .navigationTitle(tr("Egress IP", "Egress"))
-        .navigationSubtitle(tr("What the outside world sees, for each policy", "Egress"))
-        .toolbar {
+        .pageToolbar(tr("Egress IP", "Egress"), subtitle: tr("What the outside world sees, for each policy", "Egress")) {
             ToolbarItem(placement: .primaryAction) {
                 Button(egress.isChecking ? tr("Checking…", "Egress") : tr("Check All", "Egress")) {
                     Task { await model.egressActions.checkAll() }

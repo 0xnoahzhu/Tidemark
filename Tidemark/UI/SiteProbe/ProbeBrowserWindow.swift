@@ -25,7 +25,9 @@ struct ProbeBrowserWindow: View {
         .frame(minWidth: model.preferences.probeMode == .iphone ? 480 : 760, idealWidth: 1280,
                minHeight: model.preferences.probeMode == .iphone ? 640 : 520, idealHeight: 824)
         .background(Theme.bg)
-        .navigationTitle(model.probe.running?.host ?? tr("Site Probe", "SiteProbe"))
+        .navigationTitle(title)
+        // The toolbar draws the title at the design's size (`toolbar(running:)`); the window keeps it for the Window menu.
+        .toolbar(removing: .title)
         .toolbar { toolbar(running: running) }
         // The session decides which view shows the page; the window only reports that it opened or closed.
         .onAppear { web.windowDidOpen() }
@@ -37,6 +39,11 @@ struct ProbeBrowserWindow: View {
 
     // MARK: Toolbar
 
+    /// The running probe's host, or Site Probe.
+    private var title: String {
+        model.probe.running?.host ?? tr("Site Probe", "SiteProbe")
+    }
+
     @ToolbarContentBuilder
     private func toolbar(running: Bool) -> some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
@@ -45,6 +52,12 @@ struct ProbeBrowserWindow: View {
             Button(tr("Forward", "SiteProbe"), systemImage: "chevron.right") { web.goForward() }
                 .disabled(!running || !web.canGoForward)
         }
+
+        ToolbarItem(placement: .navigation) {
+            PageTitle(title: title)
+                .padding(.horizontal, 4.px)
+        }
+        .sharedBackgroundVisibility(.hidden)
 
         ToolbarItem(placement: .principal) {
             HStack(spacing: 7) {

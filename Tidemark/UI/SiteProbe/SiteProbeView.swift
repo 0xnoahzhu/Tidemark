@@ -40,9 +40,7 @@ struct SiteProbeView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Theme.bg)
-        .navigationTitle(tr("Site Probe", "SiteProbe"))
-        .navigationSubtitle(tr("Open a URL in an isolated browser and record every host it touches", "SiteProbe"))
-        .toolbar {
+        .pageToolbar(tr("Site Probe", "SiteProbe"), subtitle: tr("Open a URL in an isolated browser and record every host it touches", "SiteProbe")) {
             ToolbarItem(placement: .primaryAction) {
                 Button(tr("New Probe", "SiteProbe")) { newProbe() }
                     .disabled(model.probe.isRunning || web.isBusy)

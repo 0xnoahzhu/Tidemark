@@ -48,15 +48,9 @@ struct AppDetailView: View {
                 .id(app.id)
         }
         .background(Theme.bg)
-        .navigationTitle(app.name)
-        .navigationSubtitle(app.path)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                AppTile(app: app, size: 26, dimmed: app.isArchived)
-                    .padding(.horizontal, 2)
-            }
-            .sharedBackgroundVisibility(.hidden)
-
+        .pageToolbar(app.name, subtitle: app.path, monospacedSubtitle: true) {
+            AppTile(app: app, size: 26.px, dimmed: app.isArchived)
+        } items: {
             ToolbarItem(placement: .primaryAction) {
                 AppDetailTabSwitch(model: model, app: app, absent: absent, counters: counters)
             }

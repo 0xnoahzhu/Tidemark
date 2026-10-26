@@ -57,6 +57,99 @@ extension KeyValueRow where Value == Text {
     }
 }
 
+/// A page's title and subtitle at the design's sizes: 15 px bold, slightly tightened, over 11 px in the secondary
+/// ink. Pages draw it in the window toolbar (`pageToolbar(_:subtitle:items:)`), whose own title the system keeps
+/// at its fixed size whatever the scale. Like the system's title, it greys out while its window is inactive.
+struct PageTitle: View {
+    var title: String
+    var subtitle: String?
+    /// Draws the subtitle in the monospaced font (an app's path).
+    var monospacedSubtitle = false
+
+    @Environment(\.appearsActive) private var appearsActive
+
+    static let lineHeight = AttributedString.LineHeight.multiple(factor: 1.2)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1.px) {
+            Text(title)
+                .font(.design(15, .bold))
+                .tracking(-0.15 * UIScale.factor)
+                .foregroundStyle(appearsActive ? Theme.ink : Theme.ink3)
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(monospacedSubtitle ? Theme.mono(11) : .design(11))
+                    .foregroundStyle(appearsActive ? Theme.ink2 : Theme.ink3)
+                    .truncationMode(monospacedSubtitle ? .middle : .tail)
+            }
+        }
+        .lineLimit(1)
+        // Tighter than the page's 1.35: the toolbar stays 52 pt tall at every scale, and the two lines fit it up to
+        // the largest factor.
+        .lineHeight(Self.lineHeight)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+extension View {
+    /// The page's toolbar: its title and subtitle at the leading end, drawn by the page at the design's size in
+    /// place of the system's title, and `items` at the trailing end. The window keeps the title and subtitle as its
+    /// own, which the Window menu, Mission Control and VoiceOver read.
+    func pageToolbar<Items: ToolbarContent>(
+        _ title: String,
+        subtitle: String,
+        monospacedSubtitle: Bool = false,
+        @ToolbarContentBuilder items: () -> Items
+    ) -> some View {
+        // Where the system drew its title.
+        pageToolbar(title, subtitle: subtitle, monospacedSubtitle: monospacedSubtitle, inset: 11.5, leading: EmptyView(), items: items())
+    }
+
+    /// `pageToolbar(_:subtitle:items:)` with `leading` (an app's tile) before the title.
+    func pageToolbar<Leading: View, Items: ToolbarContent>(
+        _ title: String,
+        subtitle: String,
+        monospacedSubtitle: Bool = false,
+        @ViewBuilder leading: () -> Leading,
+        @ToolbarContentBuilder items: () -> Items
+    ) -> some View {
+        pageToolbar(title, subtitle: subtitle, monospacedSubtitle: monospacedSubtitle, inset: 2, leading: leading(), items: items())
+    }
+
+    /// The page toolbar with the title block `inset` px from the toolbar's leading items.
+    private func pageToolbar<Leading: View, Items: ToolbarContent>(
+        _ title: String,
+        subtitle: String,
+        monospacedSubtitle: Bool,
+        inset: CGFloat,
+        leading: Leading,
+        items: Items
+    ) -> some View {
+        navigationTitle(title)
+            .navigationSubtitle(subtitle)
+            .toolbar(removing: .title)
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    HStack(spacing: 10.px) {
+                        leading
+                        PageTitle(title: title, subtitle: subtitle, monospacedSubtitle: monospacedSubtitle)
+                    }
+                    .padding(.leading, inset.px)
+                    .padding(.trailing, 2.px)
+                }
+                // Text on the toolbar itself, as the system's title, rather than in a glass bubble.
+                .sharedBackgroundVisibility(.hidden)
+
+                // What the system's title took: the room between the title and the page's items. It has to be in the
+                // same toolbar as the items; on its own the items would follow the title.
+                ToolbarSpacer(.flexible)
+
+                items
+            }
+    }
+}
+
 /// Page header used by every main-window page: title + subtitle on the left, accessories on the right.
 struct PageHeader<Accessory: View>: View {
     var title: String
@@ -64,14 +157,9 @@ struct PageHeader<Accessory: View>: View {
     @ViewBuilder var accessory: Accessory
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink)
-                if let subtitle {
-                    Text(subtitle).font(.system(size: 11.5)).foregroundStyle(Theme.ink2).lineLimit(1)
-                }
-            }
-            Spacer(minLength: 12)
+        HStack(alignment: .center, spacing: 10.px) {
+            PageTitle(title: title, subtitle: subtitle)
+            Spacer(minLength: 12.px)
             accessory
         }
         .padding(.horizontal, 20.px)

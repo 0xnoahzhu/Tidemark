@@ -117,4 +117,41 @@ struct UIScaleDrawingTests {
         #expect(Self.fittingHeight(field) == 26.px)
         #expect(Self.fittingHeight(FilterField(prompt: "Search", text: .constant(""), width: 190)) == 28.px)
     }
+
+    /// The title block fits the toolbar's 52 pt band, which does not grow with the UI scale, at every factor.
+    @Test func pageTitleFitsTheToolbarAtEveryFactor() {
+        let lines: CGFloat = 15 + 11
+        let drawn = Self.fittingHeight(PageTitle(title: "Requests", subtitle: "Every request Surge sees"))
+        #expect(abs(drawn - (lines * 1.2 * UIScale.factor + 1.px)) <= 1.5)
+        let largest = UIScale.range.upperBound
+        #expect(lines * 1.2 * largest + UIScale.length(1, factor: largest) <= 52)
+    }
+
+    /// A page draws its title in the toolbar, and the window keeps it as its title for the Window menu, Mission
+    /// Control and VoiceOver.
+    @Test func pageToolbarKeepsTheWindowTitle() async throws {
+        let page = Color.clear
+            .frame(width: 600, height: 300)
+            .pageToolbar("Requests", subtitle: "Every request Surge sees") {
+                ToolbarItem(placement: .primaryAction) { Text(verbatim: "Item") }
+            }
+        let host = NSHostingView(rootView: page)
+        host.sceneBridgingOptions = [.toolbars, .title]
+        // Never ordered in.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 400), styleMask: [.titled, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = host
+
+        let deadline = ContinuousClock.now + .seconds(5)
+        while window.title != "Requests" || window.toolbar == nil, ContinuousClock.now < deadline {
+            window.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(window.title == "Requests")
+        #expect(window.subtitle == "Every request Surge sees")
+        let items = try #require(window.toolbar?.items)
+        #expect(items.count >= 3, "the title, the room after it and the page's item")
+    }
 }

@@ -21,9 +21,7 @@ struct InventoryView: View {
         let visible = snapshot?.entries(nav.inventoryKind) ?? []
 
         content(snapshot: snapshot, visible: visible, key: key)
-            .navigationTitle(tr("Domains & IPs", "Inventory"))
-            .navigationSubtitle(subtitle(snapshot))
-            .toolbar {
+            .pageToolbar(tr("Domains & IPs", "Inventory"), subtitle: subtitle(snapshot)) {
                 ToolbarItem(placement: .primaryAction) {
                     // No counts: the subtitle beside it gives them, and at the default window width they would cut it.
                     DesignSegmentedControl(tr("Kind", "Inventory"), selection: $nav.inventoryKind, size: .compact(), segments: [

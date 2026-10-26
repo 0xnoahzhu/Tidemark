@@ -41,9 +41,9 @@ struct NotificationsView: View {
                     .padding(40)
             }
         }
-        .navigationTitle(tr("Notifications", "Notifications"))
-        .navigationSubtitle(tr("First contact with a new domain or IP by a monitored app", "Notifications"))
-        .toolbar { NotificationsToolbar(model: model) }
+        .pageToolbar(tr("Notifications", "Notifications"), subtitle: tr("First contact with a new domain or IP by a monitored app", "Notifications")) {
+            NotificationsToolbar(model: model)
+        }
     }
 }
 
