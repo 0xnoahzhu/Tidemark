@@ -15,6 +15,14 @@ final class AppDetailCache {
     struct Inventory {
         var hosts: [AppHost]
         var summary: AppDetailInventorySummary
+
+        /// Whether a tab searching for `search`, with `selectedHost` selected, can show this list before it reads
+        /// the database: the summary was made for that search and has the selected domain. A domain selected since
+        /// (a notification's View opens the app on a domain that is new) isn't in it, so the tab waits for the
+        /// database rather than show the list without it and then reorder it.
+        func fits(search: String, selectedHost: String?) -> Bool {
+            summary.search == search && (selectedHost == nil || summary.selectedHost(selectedHost) != nil)
+        }
     }
 
     private var inventories: Recent<Inventory>

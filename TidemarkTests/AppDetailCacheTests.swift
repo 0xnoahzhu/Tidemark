@@ -29,6 +29,20 @@ import Testing
         #expect(cache.inventory(AppDetailCache.Key(appID: app, scope: .device(UUID()))) == nil)
     }
 
+    @Test func aCachedListFitsItsSearchAndTheDomainsItHas() {
+        let now = Date()
+        let hosts = [
+            AppHost(appID: UUID(), kind: .domain, value: "api.github.com", site: "github.com", firstSeen: now, lastSeen: now,
+                    requestCount: 1, processName: nil, policy: nil, geo: nil, isDirect: false, hosts: []),
+        ]
+        let inventory = AppDetailCache.Inventory(hosts: hosts, summary: AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: { $0 }))
+        #expect(inventory.fits(search: "", selectedHost: nil))
+        #expect(inventory.fits(search: "", selectedHost: "api.github.com"))
+        #expect(!inventory.fits(search: "git", selectedHost: nil))
+        // A domain selected after the list was cached, like the new domain a notification's View opens.
+        #expect(!inventory.fits(search: "", selectedHost: "brand.new.example"))
+    }
+
     @Test func summaryIsCurrentUntilItsSearchChangesOrANewMarkRunsOut() {
         let now = Date()
         let hosts = [

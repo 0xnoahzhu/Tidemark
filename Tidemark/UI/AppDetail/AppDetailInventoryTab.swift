@@ -35,9 +35,9 @@ struct AppDetailInventoryTab: View {
         var summary = AppDetailInventorySummary()
     }
 
-    /// What the tab last showed for `key`, when its summary was made for `search`.
-    private static func cached(_ key: AppDetailCache.Key, search: String, in cache: AppDetailCache) -> Content? {
-        guard let cached = cache.inventory(key), cached.summary.search == search else { return nil }
+    /// What the tab last showed for `key`, when it fits the search and the selected domain.
+    private static func cached(_ key: AppDetailCache.Key, search: String, selectedHost: String?, in cache: AppDetailCache) -> Content? {
+        guard let cached = cache.inventory(key), cached.fits(search: search, selectedHost: selectedHost) else { return nil }
         return Content(key: key, hosts: cached.hosts, summary: cached.summary)
     }
 
@@ -297,7 +297,7 @@ struct AppDetailInventoryTab: View {
             // Then what the tab last showed for the app and scope, while it reads the database. SwiftUI can start
             // this task while it draws the tab, so the lists wait for the next turn of the run loop: the switch to the
             // tab draws as fast as an empty tab, and the lists follow in the next frame.
-            if let cached = Self.cached(key, search: model.nav.appInventorySearch, in: cache) {
+            if let cached = Self.cached(key, search: model.nav.appInventorySearch, selectedHost: model.nav.appSelectedHost, in: cache) {
                 await Task.yield()
                 if Task.isCancelled { return }
                 content = cached
