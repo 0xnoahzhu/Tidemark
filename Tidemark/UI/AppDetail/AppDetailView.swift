@@ -200,8 +200,8 @@ private struct AppDetailAbsentBanner: View {
         let others = model.devices.devices
             .filter { $0.id != context && $0.isOnline && model.catalog.isInstalled(app.id, on: $0.id) == true }
             .map(\.name)
-        HStack(spacing: 10) {
-            Circle().fill(Color(oklch: 0.72, 0.15, 70)).frame(width: 7, height: 7)
+        HStack(spacing: 10.px) {
+            Circle().fill(Color(oklch: 0.72, 0.15, 70)).frame(width: 7.px, height: 7.px)
             Text(trf("%1$@ is not on %2$@", "AppDetail", app.path, AppDetailContext.macName(model)))
                 .fontWeight(.semibold)
                 .layoutPriority(1)
@@ -211,10 +211,10 @@ private struct AppDetailAbsentBanner: View {
             }
             Spacer(minLength: 0)
         }
-        .font(.system(size: 12))
+        .font(.design(12))
         .lineLimit(1)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 20.px)
+        .padding(.vertical, 9.px)
         .background(Color(oklch: 0.8, 0.14, 75, alpha: 0.16))
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
@@ -240,7 +240,7 @@ private struct AppDetailStatsStrip: View {
 
     var body: some View {
         let stats = counters.stats(for: app, absent: absent, model: model)
-        HStack(spacing: 28) {
+        HStack(spacing: 28.px) {
             stat(tr("Domains", "AppDetail"), Fmt.count(stats.domains))
             stat(tr("IPs", "AppDetail"), Fmt.count(stats.ips))
             stat(tr("Requests", "AppDetail"), Fmt.count(stats.requests))
@@ -248,24 +248,24 @@ private struct AppDetailStatsStrip: View {
             if stats.newDomainsIn24h > 0 {
                 AnalyzePill(text: trn("%lld new domain in 24 h", "%lld new domains in 24 h", stats.newDomainsIn24h, "AppDetail"))
             }
-            Spacer(minLength: 12)
+            Spacer(minLength: 12.px)
             if app.isArchived {
                 archivedControls
             } else {
                 activeControls
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 20.px)
+        .padding(.vertical, 14.px)
         .background(Theme.bg2)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.system(size: 11)).foregroundStyle(Theme.ink2)
+        VStack(alignment: .leading, spacing: 1.px) {
+            Text(label).font(.design(11)).foregroundStyle(Theme.ink2)
             Text(value)
-                .font(.system(size: 21, weight: .semibold))
+                .font(.design(21, .semibold))
                 .monospacedDigit()
                 .foregroundStyle(Theme.ink)
                 .contentTransition(.numericText())
@@ -274,16 +274,16 @@ private struct AppDetailStatsStrip: View {
     }
 
     private var archivedControls: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 10.px) {
             Text(tr("ARCHIVED", "AppDetail"))
-                .font(.system(size: 11, weight: .bold))
-                .tracking(0.44)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2)
-                .background(Theme.fill2, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .font(.design(11, .bold))
+                .tracking(0.44 * UIScale.factor)
+                .padding(.horizontal, 7.px)
+                .padding(.vertical, 2.px)
+                .background(Theme.fill2, in: RoundedRectangle(cornerRadius: 5.px, style: .continuous))
                 .foregroundStyle(Theme.ink2)
             Text(tr("Not monitoring · history kept in the database", "AppDetail"))
-                .font(.system(size: 12))
+                .font(.design(12))
                 .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
             Button(tr("Restore", "AppDetail")) { perform { try await model.capture.restoreApp(app.id) } }
@@ -294,9 +294,9 @@ private struct AppDetailStatsStrip: View {
     }
 
     private var activeControls: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 16.px) {
             if absent {
-                HStack(spacing: 7) {
+                HStack(spacing: 7.px) {
                     Toggle(tr("Monitoring", "AppDetail"), isOn: .constant(false))
                         .labelsHidden()
                         .disabled(true)
@@ -304,7 +304,7 @@ private struct AppDetailStatsStrip: View {
                         .foregroundStyle(Theme.ink3)
                 }
             } else {
-                HStack(spacing: 7) {
+                HStack(spacing: 7.px) {
                     Toggle(tr("Monitoring", "AppDetail"), isOn: monitoringSwitch)
                         .labelsHidden()
                     Text(tr("Monitoring", "AppDetail"))
@@ -314,8 +314,10 @@ private struct AppDetailStatsStrip: View {
                 .buttonStyle(.bordered)
         }
         .toggleStyle(.switch)
-        .controlSize(.small)
-        .font(.system(size: 12))
+        // The system draws the switch, which only grows a control size at a time: one step up once the page is
+        // drawn larger.
+        .controlSize(UIScale.factor >= 1.2 ? .regular : .small)
+        .font(.design(12))
         .fixedSize()
     }
 
@@ -339,17 +341,17 @@ private struct AppDetailInstallsRow: View {
         let devices = model.devices.devices
         if !devices.isEmpty {
             ScrollView(.horizontal) {
-                HStack(spacing: 8) {
+                HStack(spacing: 8.px) {
                     Text(tr("Installed on", "AppDetail")).foregroundStyle(Theme.ink2)
                     ForEach(devices) { device in
                         installChip(device)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 20.px)
+                .padding(.vertical, 8.px)
             }
             .scrollIndicators(.never)
-            .font(.system(size: 11.5))
+            .font(.design(11.5))
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
         }
     }
@@ -369,13 +371,13 @@ private struct AppDetailInstallsRow: View {
         } else {
             tr("Monitoring", "AppDetail")
         }
-        return HStack(spacing: 5) {
-            Circle().fill(Theme.deviceColor(hue: device.hue)).frame(width: 7, height: 7)
+        return HStack(spacing: 5.px) {
+            Circle().fill(Theme.deviceColor(hue: device.hue)).frame(width: 7.px, height: 7.px)
             Text(device.name).foregroundStyle(Theme.ink)
             Text(state).foregroundStyle(Theme.ink3)
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 9.px)
+        .padding(.vertical, 2.px)
         .background(Theme.fill, in: Capsule())
         .opacity(installed == false ? 0.55 : 1)
         .fixedSize()

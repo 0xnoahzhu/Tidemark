@@ -21,8 +21,21 @@ struct AppDetailInventoryTab: View {
     @State private var isExporting = false
     @State private var exportError: (any Error)?
 
-    fileprivate static let domainColumns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 150), .fixed(104), .fixed(70), .fixed(64)]
-    fileprivate static let ipColumns: [AnalyzeColumnsLayout.Column] = [.fixed(150), .flexible(weight: 1, min: 90), .fixed(56)]
+    static let domainColumns = domainColumns(factor: UIScale.factor)
+    static let ipColumns = ipColumns(factor: UIScale.factor)
+
+    // The columns at any UI scale. First seen and the counts are fixed to the longest of their text (`Yesterday 23:59`
+    // in 12 px, `1,234,567` in 11 px SF Mono), the IP to `255.255.255.255` in 11.5 px SF Mono and a NEW badge: text that
+    // grows with the scale as the widths do.
+    static func domainColumns(factor: CGFloat) -> [AnalyzeColumnsLayout.Column] {
+        func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
+        return [.flexible(weight: 1, min: px(150)), .fixed(px(104)), .fixed(px(70)), .fixed(px(64))]
+    }
+
+    static func ipColumns(factor: CGFloat) -> [AnalyzeColumnsLayout.Column] {
+        func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
+        return [.fixed(px(150)), .flexible(weight: 1, min: px(90)), .fixed(px(56))]
+    }
 
     /// The hosts and the summary shown, with what they were read and computed for.
     private struct Content {
@@ -50,12 +63,12 @@ struct AppDetailInventoryTab: View {
                 VStack(spacing: 0) {
                     summaryLine
                     Text(trf("Every domain and IP %@ has used, each listed once. The first time a new one appears you get an alert, and it stays marked NEW for 24 hours.", "AppDetail", app.name))
-                        .font(.system(size: 11.5))
+                        .font(.design(11.5))
                         .foregroundStyle(Theme.ink2)
-                        .lineSpacing(2)
+                        .lineHeight(Theme.noteLineHeight)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, 20.px)
+                        .padding(.vertical, 8.px)
                         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
                     GeometryReader { geometry in
                         HStack(spacing: 0) {
@@ -89,9 +102,9 @@ struct AppDetailInventoryTab: View {
 
     private var summaryLine: some View {
         @Bindable var nav = model.nav
-        return HStack(spacing: 12) {
+        return HStack(spacing: 12.px) {
             Text(summary.headline)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.design(12, .semibold))
                 .lineLimit(1)
             if summary.newCount > 0 {
                 AnalyzePill(text: trn("%lld new domain or IP in 24 h", "%lld new domains & IPs in 24 h", summary.newCount, "AppDetail"), size: 11)
@@ -103,26 +116,26 @@ struct AppDetailInventoryTab: View {
                 .disabled(content.hosts.isEmpty)
                 .help(tr("Save every domain and IP of this app as a CSV file", "AppDetail"))
         }
-        .padding(.horizontal, 20)
-        .frame(height: 48)
+        .padding(.horizontal, 20.px)
+        .frame(height: 48.px)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
 
     private var waitingState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 8.px) {
             Circle()
-                .strokeBorder(Theme.ink3, style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
-                .frame(width: 44, height: 44)
+                .strokeBorder(Theme.ink3, style: StrokeStyle(lineWidth: 2.px, dash: [4.px, 3.px]))
+                .frame(width: 44.px, height: 44.px)
             Text(trf("Waiting for the first request from %@", "AppDetail", app.name))
-                .font(.system(size: 15, weight: .semibold))
+                .font(.design(15, .semibold))
                 .foregroundStyle(Theme.ink)
             Text(tr("Nothing in the database yet. Domains and IPs show up here as soon as Surge sees this app, or anything it launches, open a connection.", "AppDetail"))
-                .font(.system(size: 12.5))
+                .font(.design(12.5))
                 .foregroundStyle(Theme.ink2)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
+                .frame(maxWidth: 400.px)
         }
-        .padding(40)
+        .padding(40.px)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -131,18 +144,18 @@ struct AppDetailInventoryTab: View {
     private var domainsPane: some View {
         let selected = summary.selectedHost(model.nav.appSelectedHost)
         return VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(tr("Domains", "AppDetail")).font(.system(size: 12.5, weight: .bold))
+            HStack(alignment: .firstTextBaseline, spacing: 8.px) {
+                Text(tr("Domains", "AppDetail")).font(.design(12.5, .bold))
                 Text(trf("%1$@ in %2$@", "AppDetail",
                          trn("%lld host", "%lld hosts", summary.domainCount, "AppDetail"),
                          trn("%lld site", "%lld sites", summary.siteCount, "AppDetail")))
-                    .font(.system(size: 11.5))
+                    .font(.design(11.5))
                     .foregroundStyle(Theme.ink3)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
+            .padding(.horizontal, 16.px)
+            .padding(.top, 10.px)
+            .padding(.bottom, 6.px)
             ScrollView {
                 // The column header is pinned inside the scroll view so it keeps the rows' width when an
                 // always-visible scroller takes room.
@@ -155,7 +168,7 @@ struct AppDetailInventoryTab: View {
                             }
                         }
                     } header: {
-                        AnalyzeHeaderRow(columns: Self.domainColumns, height: 26, horizontalPadding: 16) {
+                        AnalyzeHeaderRow(columns: Self.domainColumns, height: 26.px, horizontalPadding: 16.px) {
                             Text(tr("Site · host", "AppDetail"))
                             Text(tr("First seen", "AppDetail"))
                             Text(tr("Last seen", "AppDetail"))
@@ -164,28 +177,28 @@ struct AppDetailInventoryTab: View {
                         .background(Theme.bg)
                     }
                 }
-                .padding(.bottom, 10)
+                .padding(.bottom, 10.px)
             }
         }
     }
 
     private func siteRow(_ group: AppDetailInventorySummary.SiteGroup) -> some View {
         AnalyzeColumnsLayout(columns: Self.domainColumns) {
-            HStack(spacing: 8) {
+            HStack(spacing: 8.px) {
                 Text(group.site).fontWeight(.semibold).lineLimit(1)
                 Text(trn("%lld host", "%lld hosts", group.hosts.count, "AppDetail"))
-                    .font(.system(size: 11))
+                    .font(.design(11))
                     .foregroundStyle(Theme.ink2)
                     .fixedSize()
                 if group.isNewSite { TagBadge(text: tr("NEW SITE", "AppDetail"), style: .new) }
             }
-            Text(AnalyzeFormat.seen(group.firstSeen)).font(.system(size: 12)).foregroundStyle(Theme.ink2).lineLimit(1)
+            Text(AnalyzeFormat.seen(group.firstSeen)).font(.design(12)).foregroundStyle(Theme.ink2).lineLimit(1)
             Text(AnalyzeFormat.seen(group.lastSeen, timeOnlyToday: true)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
             Text(Fmt.count(group.requests)).font(Theme.mono(11, weight: .semibold)).frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .font(.system(size: 12.5))
-        .padding(.horizontal, 16)
-        .frame(height: 30)
+        .font(.design(12.5))
+        .padding(.horizontal, 16.px)
+        .frame(height: 30.px)
         .background(Theme.bg2)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
@@ -197,13 +210,13 @@ struct AppDetailInventoryTab: View {
         let selected = summary.selectedHost(nav.appSelectedHost)
         // Like the design's "N of M", the Direct / From domains switch doesn't change the count.
         let shown = summary.visibleIPCount(selectedHost: selected)
-        let title = HStack(alignment: .firstTextBaseline, spacing: 8) {
+        let title = HStack(alignment: .firstTextBaseline, spacing: 8.px) {
             Text(selected.map { trf("IPs used by %@", "AppDetail", $0) } ?? tr("All IPs", "AppDetail"))
-                .font(.system(size: 12.5, weight: .bold))
+                .font(.design(12.5, .bold))
                 .lineLimit(1)
                 .truncationMode(.middle)
             Text(trf("%1$lld of %2$lld", "AppDetail", shown, summary.ipCount))
-                .font(.system(size: 11.5))
+                .font(.design(11.5))
                 .foregroundStyle(Theme.ink3)
                 .fixedSize()
         }
@@ -220,9 +233,9 @@ struct AppDetailInventoryTab: View {
                 filter
                 showAllButton(selected)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
+            .padding(.horizontal, 16.px)
+            .padding(.top, 10.px)
+            .padding(.bottom, 6.px)
             ScrollView {
                 LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                     Section {
@@ -232,11 +245,11 @@ struct AppDetailInventoryTab: View {
                             ForEach(summary.directIPs) { ipRow($0, selected: selected) }
                             if summary.directIPs.isEmpty {
                                 Text(tr("Nothing reached by IP alone.", "AppDetail"))
-                                    .font(.system(size: 11.5))
+                                    .font(.design(11.5))
                                     .foregroundStyle(Theme.ink3)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 16.px)
+                                    .padding(.vertical, 10.px)
                             }
                         }
                         if nav.appIPFilter != .direct {
@@ -245,7 +258,7 @@ struct AppDetailInventoryTab: View {
                             ForEach(summary.resolvedIPs) { ipRow($0, selected: selected) }
                         }
                     } header: {
-                        AnalyzeHeaderRow(columns: Self.ipColumns, height: 26, horizontalPadding: 16) {
+                        AnalyzeHeaderRow(columns: Self.ipColumns, height: 26.px, horizontalPadding: 16.px) {
                             Text(verbatim: "IP")
                             Text(tr("Network · domains", "AppDetail"))
                             Text(tr("Requests", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
@@ -269,22 +282,22 @@ struct AppDetailInventoryTab: View {
                 withAnimation(.easeOut(duration: 0.2)) { model.nav.appSelectedHost = nil }
             }
             .buttonStyle(.link)
-            .font(.system(size: 11.5))
+            .font(.design(11.5))
             .fixedSize()
         }
     }
 
     private func ipGroupHeader(_ title: String, count: Int, note: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
+        HStack(alignment: .firstTextBaseline, spacing: 7.px) {
             Text(title).foregroundStyle(Theme.ink)
             Text(verbatim: String(count)).fontWeight(.medium).foregroundStyle(Theme.ink3)
             Text(note).fontWeight(.medium).foregroundStyle(Theme.ink3).lineLimit(1)
             Spacer(minLength: 0)
         }
-        .font(.system(size: 11, weight: .semibold))
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 5)
+        .font(.design(11, .semibold))
+        .padding(.horizontal, 16.px)
+        .padding(.top, 10.px)
+        .padding(.bottom, 5.px)
         .background(Theme.bg2)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
@@ -369,19 +382,19 @@ private struct AppDetailDomainRow: View {
 
     var body: some View {
         AnalyzeColumnsLayout(columns: AppDetailInventoryTab.domainColumns) {
-            HStack(spacing: 7) {
+            HStack(spacing: 7.px) {
                 Text(verbatim: "└").font(Theme.mono(11)).foregroundStyle(Theme.ink3)
                 Text(host.value).lineLimit(1).truncationMode(.middle)
                 if host.isNew() { TagBadge(text: tr("NEW", "AppDetail"), style: .new) }
             }
-            .padding(.leading, 12)
+            .padding(.leading, 12.px)
             Text(AnalyzeFormat.seen(host.firstSeen)).foregroundStyle(Theme.ink2).lineLimit(1)
             Text(AnalyzeFormat.seen(host.lastSeen, timeOnlyToday: true)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
             Text(Fmt.count(host.requestCount)).font(Theme.mono(11)).frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .font(.system(size: 12))
-        .padding(.horizontal, 16)
-        .frame(height: 28)
+        .font(.design(12))
+        .padding(.horizontal, 16.px)
+        .frame(height: 28.px)
         .background(selected ? Theme.accentTint : .clear)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -406,20 +419,20 @@ private struct AppDetailIPRow: View {
 
     var body: some View {
         AnalyzeColumnsLayout(columns: AppDetailInventoryTab.ipColumns) {
-            HStack(spacing: 6) {
+            HStack(spacing: 6.px) {
                 Text(ip.value).font(Theme.mono(11.5)).lineLimit(1).textSelection(.enabled)
                 if ip.isNew() { TagBadge(text: tr("NEW", "AppDetail"), style: .new) }
             }
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 1.px) {
                 Text(ip.geo?.display ?? "—")
                     .foregroundStyle(Theme.ink2)
                     .lineLimit(1)
                     .help(ip.geo.map(AppDetailInventoryFormat.fullGeo) ?? "")
-                HStack(spacing: 5) {
+                HStack(spacing: 5.px) {
                     if ip.isDirect { TagBadge(text: tr("BY IP", "AppDetail")) }
                     // Whole host names, cut at the end: a cut in the middle invents names that don't exist.
                     Text(ip.hosts.isEmpty ? tr("No hostname · connected by IP", "AppDetail") : AppDetailInventoryFormat.domains(ip.hosts))
-                        .font(.system(size: 11))
+                        .font(.design(11))
                         .foregroundStyle(Theme.ink3)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -428,9 +441,9 @@ private struct AppDetailIPRow: View {
             }
             Text(Fmt.count(ip.requestCount)).font(Theme.mono(11)).frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .font(.system(size: 12))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .font(.design(12))
+        .padding(.horizontal, 16.px)
+        .padding(.vertical, 6.px)
         .background(highlighted ? Theme.accentTint : .clear)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
         .opacity(dimmed ? 0.35 : 1)
@@ -444,8 +457,8 @@ private struct AppDetailIPRow: View {
 ///
 /// Subviews: the title, the switch, then "Show all" if present.
 private struct AppDetailIPHeaderLayout: Layout {
-    private let spacing: CGFloat = 8
-    private let rowSpacing: CGFloat = 6
+    private let spacing = 8.px
+    private let rowSpacing = 6.px
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let frames = arrange(width: proposal.width, subviews: subviews)

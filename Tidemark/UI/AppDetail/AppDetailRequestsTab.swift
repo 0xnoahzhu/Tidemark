@@ -28,12 +28,25 @@ struct AppDetailRequestsTab: View {
     /// Bumped once fresh rows have aged out, so their tint fades even when nothing new arrives.
     @State private var freshTick = 0
 
-    /// Policy grows like the global table's (up to 200 pt), so a chip such as `AI › AT&T-RackNerd-Hysteria2` is
+    /// Policy grows like the global table's (up to 200 px), so a chip such as `AI › AT&T-RackNerd-Hysteria2` is
     /// whole at the default window width and only shortens when the window is narrow.
-    static let columns: [AnalyzeColumnsLayout.Column] = [
-        .fixed(104), .flexible(weight: 1, min: 120), .flexible(weight: 1.5, min: 150), .fixed(118),
-        .flexible(weight: 1, min: 104, max: 200), .fixed(62),
-    ]
+    static let columns = columns(factor: UIScale.factor)
+    /// The method before each host (`HTTPS`, `CONNECT`): the design's 40 px and the 2 px more a seven-letter method
+    /// needs, which the design lets run into the gap.
+    static let methodWidth = methodWidth(factor: UIScale.factor)
+
+    // The widths above at any UI scale. Time, Remote IP and Size are fixed to the longest of their text in 11 px SF
+    // Mono (`10-24 23:59:59`, `255.255.255.255`, `999.9 KB`) and the method to `CONNECT` in 9.5 px, text that grows
+    // with the scale as the widths do.
+    static func columns(factor: CGFloat) -> [AnalyzeColumnsLayout.Column] {
+        func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
+        return [
+            .fixed(px(104)), .flexible(weight: 1, min: px(120)), .flexible(weight: 1.5, min: px(150)), .fixed(px(118)),
+            .flexible(weight: 1, min: px(104), max: px(200)), .fixed(px(62)),
+        ]
+    }
+
+    static func methodWidth(factor: CGFloat) -> CGFloat { UIScale.length(42, factor: factor) }
 
     var body: some View {
         let nav = model.nav
@@ -59,9 +72,9 @@ struct AppDetailRequestsTab: View {
                                 if expanded == record.key || closing[record.key] != nil {
                                     AppDetailCardSpace(fraction: expanded == record.key ? 1 : 0) {
                                         AppDetailRequestCard(record: record, app: app)
-                                            .padding(.horizontal, 14)
-                                            .padding(.top, 2)
-                                            .padding(.bottom, 8)
+                                            .padding(.horizontal, 14.px)
+                                            .padding(.top, 2.px)
+                                            .padding(.bottom, 8.px)
                                     }
                                     .transition(AppDetailCardEntrance())
                                 }
@@ -100,9 +113,9 @@ struct AppDetailRequestsTab: View {
 
     private func statusLine(live: Bool) -> some View {
         @Bindable var nav = model.nav
-        return HStack(spacing: 10) {
+        return HStack(spacing: 10.px) {
             if model.live.recording {
-                StatusDot(color: Theme.recording, size: 7, pulsing: !reduceMotion && !reducedResources)
+                StatusDot(color: Theme.recording, size: 8.px, pulsing: !reduceMotion && !reducedResources)
             }
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 Text(Fmt.rate(rate(at: context.date)))
@@ -110,7 +123,7 @@ struct AppDetailRequestsTab: View {
                     .foregroundStyle(Theme.ink)
             }
             Text(trf("from %@ and everything it launched", "AppDetail", app.name))
-                .font(.system(size: 12))
+                .font(.design(12))
                 .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
             DesignSegmentedControl(tr("Source", "AppDetail"), selection: $nav.appRequestsLive, segments: [
@@ -121,8 +134,8 @@ struct AppDetailRequestsTab: View {
             Spacer(minLength: 0)
             FilterField(prompt: tr("Filter host, IP, process", "AppDetail"), text: $nav.appRequestSearch, width: 200)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 20.px)
+        .padding(.vertical, 10.px)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
 
@@ -168,8 +181,8 @@ struct AppDetailRequestsTab: View {
         let isFresh = !history && RequestsPresentation.isFresh(record, now: now)
         let background: Color = highlighted == record.key ? Theme.accentTint : isFresh ? Theme.fresh : index.isMultiple(of: 2) ? .clear : Theme.zebra
         return AppDetailRequestRow(record: record, history: history, badge: badges.map { $0[record.deviceID] ?? .unknown })
-            .padding(.horizontal, 20)
-            .frame(height: 28)
+            .padding(.horizontal, 20.px)
+            .frame(height: 28.px)
             .background(background)
             .contentShape(Rectangle())
             .onTapGesture { expand(isExpanded ? nil : record.key) }
@@ -208,11 +221,11 @@ struct AppDetailRequestsTab: View {
             tr("Loading…", "AppDetail")
         }
         Text(text)
-            .font(.system(size: 12.5))
+            .font(.design(12.5))
             .foregroundStyle(Theme.ink2)
             .multilineTextAlignment(.center)
-            .padding(.vertical, 60)
-            .padding(.horizontal, 20)
+            .padding(.vertical, 60.px)
+            .padding(.horizontal, 20.px)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
@@ -256,7 +269,7 @@ private struct AppDetailStoredCount: View {
 
     var body: some View {
         Text(trf("%@ stored", "AppDetail", Fmt.count(counters.stats(for: app, absent: absent, model: model).requests)))
-            .font(.system(size: 11.5))
+            .font(.design(11.5))
             .foregroundStyle(Theme.ink3)
             .lineLimit(1)
             .fixedSize()
@@ -272,7 +285,7 @@ private struct AppDetailDeviceBadge: Equatable {
     static let unknown = AppDetailDeviceBadge(shortName: "?", hue: 240)
 }
 
-/// One 28-point row of an app's request table.
+/// One 28 px row of an app's request table.
 private struct AppDetailRequestRow: View {
     var record: RequestRecord
     var history: Bool
@@ -286,7 +299,7 @@ private struct AppDetailRequestRow: View {
                 .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
 
-            HStack(spacing: 6) {
+            HStack(spacing: 6.px) {
                 if let badge {
                     DeviceBadge(shortName: badge.shortName, hue: badge.hue)
                 }
@@ -299,12 +312,12 @@ private struct AppDetailRequestRow: View {
                 }
             }
 
-            HStack(spacing: 6) {
+            HStack(spacing: 6.px) {
                 Text(record.method)
                     .font(Theme.mono(9.5, weight: .semibold))
                     .foregroundStyle(Theme.ink2)
                     .lineLimit(1)
-                    .frame(width: 40, alignment: .leading)
+                    .frame(width: AppDetailRequestsTab.methodWidth, alignment: .leading)
                 Text(record.host).lineLimit(1).truncationMode(.middle)
                 if record.isIPLiteral { TagBadge(text: tr("BY IP", "AppDetail")) }
                 if record.isNew { TagBadge(text: tr("NEW", "AppDetail"), style: .new) }
@@ -319,7 +332,7 @@ private struct AppDetailRequestRow: View {
 
             sizeLabel.frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .font(.system(size: 12))
+        .font(.design(12))
         .foregroundStyle(Theme.ink)
     }
 
@@ -377,7 +390,7 @@ private struct AppDetailCardEntrance: Transition {
     /// The room below grows with the space, so a card that is barely out casts no shadow over the next row.
     private struct Uncovered: Shape {
         func path(in rect: CGRect) -> Path {
-            let shadow: CGFloat = 40
+            let shadow = 40.px
             return Path(CGRect(x: rect.minX - shadow, y: rect.minY,
                                width: rect.width + 2 * shadow, height: rect.height + min(shadow, rect.height)))
         }
@@ -392,21 +405,21 @@ struct AppDetailRequestCard: View {
     var body: some View {
         let phases = RequestTiming.phases(for: record)
         let total = phases.reduce(0) { $0 + $1.duration }
-        AnalyzeColumnsLayout(columns: [.flexible(weight: 1.5), .flexible(weight: 1), .flexible(weight: 1)], spacing: 20, topAligned: true) {
-            VStack(alignment: .leading, spacing: 6) {
+        AnalyzeColumnsLayout(columns: [.flexible(weight: 1.5), .flexible(weight: 1), .flexible(weight: 1)], spacing: 20.px, topAligned: true) {
+            VStack(alignment: .leading, spacing: 6.px) {
                 SectionLabel(text: tr("Process chain", "AppDetail"))
                 Text(Self.chainText(record))
                     .font(Theme.mono(11.5))
-                    .lineSpacing(3)
+                    .lineHeight(Theme.noteLineHeight)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                 Text(Self.attribution(record, app: app))
-                    .font(.system(size: 11.5))
+                    .font(.design(11.5))
                     .foregroundStyle(Theme.ink2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 6.px) {
                 SectionLabel(text: tr("Connection", "AppDetail"))
                 Text(record.geo?.display ?? "—")
                 Text(record.rule ?? "—")
@@ -417,32 +430,32 @@ struct AppDetailRequestCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 7.px) {
                 HStack {
                     SectionLabel(text: tr("Timing", "AppDetail"))
-                    Spacer(minLength: 4)
+                    Spacer(minLength: 4.px)
                     Text(Fmt.ms(total * 1000)).font(Theme.mono(11)).foregroundStyle(Theme.ink2)
                 }
                 if phases.isEmpty {
                     Text(verbatim: "—").foregroundStyle(Theme.ink3)
                 } else {
-                    TimingBar(phases: phases, barHeight: 7, showsLegend: false)
+                    TimingBar(phases: phases, barHeight: 7.px, showsLegend: false)
                 }
                 if let rowID = record.rowID {
                     Text(trf("Stored as row %@", "AppDetail", "#\(rowID)"))
-                        .font(.system(size: 11))
+                        .font(.design(11))
                         .foregroundStyle(Theme.ink2)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .font(.system(size: 12))
+        .font(.design(12))
         .foregroundStyle(Theme.ink)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.1), radius: 9, y: 6)
+        .padding(.horizontal, 14.px)
+        .padding(.vertical, 12.px)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 10.px, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10.px, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.1), radius: 9.px, y: 6.px)
     }
 
     /// `Cursor (812)  →  Cursor Helper (Plugin) (851)  →  node (1201)`

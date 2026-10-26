@@ -13,52 +13,60 @@ struct AppDetailProcessTreeTab: View {
     @State private var nodes: [ProcessNode] = []
     @State private var loaded = false
 
-    fileprivate static let columns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 200), .fixed(70), .fixed(80), .fixed(84)]
+    static let columns = columns(factor: UIScale.factor)
+
+    /// The columns at any UI scale. Domains, Requests and State are fixed to the longest of their text (`1,234,567` in
+    /// 11.5 px SF Mono, the Running chip in 11 px), which grows with the scale as the widths do.
+    static func columns(factor: CGFloat) -> [AnalyzeColumnsLayout.Column] {
+        func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
+        return [.flexible(weight: 1, min: px(200)), .fixed(px(70)), .fixed(px(80)), .fixed(px(84))]
+    }
 
     var body: some View {
         let onlyThisMac = pageShowsOnlyThisMac
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 12.px) {
                 Text(AnalyzeFormat.emphasized(
                     tr("Surge reports each request's process and its parent. Tidemark walks up that chain until it reaches a monitored app, so everything below rolls up to %@, including processes that have already exited. Process IDs get reused, so each one is stored together with its start time.", "AppDetail"),
                     app.name, size: 12))
                     .font(.design(12))
                     .foregroundStyle(Theme.ink2)
-                    .lineSpacing(3)
-                    .frame(maxWidth: 780, alignment: .leading)
+                    // The design's paragraph line-height.
+                    .lineHeight(.multiple(factor: 1.55))
+                    .frame(maxWidth: 780.px, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
 
                 // Lazy, so a big tree only builds and measures the rows on screen.
                 LazyVStack(spacing: 0) {
-                    AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
+                    AnalyzeColumnsLayout(columns: Self.columns, spacing: 12.px) {
                         Text(tr("Process", "AppDetail"))
                         Text(tr("Domains", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
                         Text(tr("Requests", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
                         Text(tr("State", "AppDetail"))
                     }
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.design(11, .semibold))
                     .foregroundStyle(Theme.ink2)
-                    .padding(.horizontal, 14)
-                    .frame(height: 28)
+                    .padding(.horizontal, 14.px)
+                    .frame(height: 28.px)
 
                     if nodes.isEmpty {
                         Text(loaded ? tr("No processes recorded yet.", "AppDetail") : tr("Loading…", "AppDetail"))
-                            .font(.system(size: 12))
+                            .font(.design(12))
                             .foregroundStyle(Theme.ink3)
-                            .frame(maxWidth: .infinity, minHeight: 60)
+                            .frame(maxWidth: .infinity, minHeight: 60.px)
                             .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
                     }
                     ForEach(nodes) { node in
                         AppDetailProcessRow(node: node, appPath: app.path, running: isRunning(node, pageShowsOnlyThisMac: onlyThisMac))
                     }
                 }
-                .padding(.vertical, 2)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+                .padding(.vertical, 2.px)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 12.px, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12.px, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 20)
+            .padding(.horizontal, 20.px)
+            .padding(.top, 14.px)
+            .padding(.bottom, 20.px)
         }
         .task(id: AppDetailCache.Key(appID: app.id, scope: scope)) {
             await refresh()
@@ -104,13 +112,13 @@ private struct AppDetailProcessRow: View {
     var running: Bool
 
     var body: some View {
-        AnalyzeColumnsLayout(columns: AppDetailProcessTreeTab.columns, spacing: 12) {
-            HStack(spacing: 7) {
+        AnalyzeColumnsLayout(columns: AppDetailProcessTreeTab.columns, spacing: 12.px) {
+            HStack(spacing: 7.px) {
                 if node.depth > 0 {
                     Text(verbatim: "└─").font(Theme.mono(11)).foregroundStyle(Theme.ink3)
                 }
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                VStack(alignment: .leading, spacing: 1.px) {
+                    HStack(alignment: .firstTextBaseline, spacing: 7.px) {
                         Text(node.name)
                             .fontWeight(node.depth == 0 ? .semibold : .medium)
                             .lineLimit(1)
@@ -129,27 +137,27 @@ private struct AppDetailProcessRow: View {
                     }
                 }
             }
-            .padding(.leading, CGFloat(node.depth) * 22)
+            .padding(.leading, CGFloat(node.depth) * 22.px)
 
             Text(Fmt.count(node.domainCount)).font(Theme.mono(11.5)).frame(maxWidth: .infinity, alignment: .trailing)
             Text(Fmt.count(node.requestCount)).font(Theme.mono(11.5)).frame(maxWidth: .infinity, alignment: .trailing)
             stateChip
         }
-        .font(.system(size: 12))
+        .font(.design(12))
         .foregroundStyle(Theme.ink)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
-        .frame(minHeight: 40)
+        .padding(.horizontal, 14.px)
+        .padding(.vertical, 4.px)
+        .frame(minHeight: 40.px)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
 
     private var stateChip: some View {
         let ok = Theme.tint(150)
         return Text(running ? tr("Running", "AppDetail") : tr("Exited", "AppDetail"))
-            .font(.system(size: 11, weight: .medium))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 1)
-            .background(running ? ok.background : Theme.fill, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .font(.design(11, .medium))
+            .padding(.horizontal, 7.px)
+            .padding(.vertical, 1.px)
+            .background(running ? ok.background : Theme.fill, in: RoundedRectangle(cornerRadius: 5.px, style: .continuous))
             .foregroundStyle(running ? ok.foreground : Theme.ink2)
             .fixedSize()
     }

@@ -47,20 +47,20 @@ struct AppDeleteConfirmation: View {
     var onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12.px) {
+            HStack(spacing: 12.px) {
                 AppTile(app: app, size: 40.px)
                 Text(trf("Delete %@?", "AppDetail", app.name))
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.design(15, .bold))
                     .accessibilityAddTraits(.isHeader)
             }
             Text(trf("This removes %1$@'s domain and IP lists, its alerts and its settings. Its %2$@ requests stay in the global request log, because every request is recorded anyway.",
                      "AppDetail", app.name, Fmt.count(requests)))
-                .font(.system(size: 12.5))
-                .lineSpacing(5)
+                .font(.design(12.5))
+                .lineHeight(.multiple(factor: 1.6))
                 .foregroundStyle(Theme.ink2)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
+            HStack(spacing: 8.px) {
                 Spacer(minLength: 0)
                 Button(tr("Cancel", "AppDetail")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
@@ -72,10 +72,10 @@ struct AppDeleteConfirmation: View {
                 .tint(Theme.destructive)
             }
             .controlSize(.large)
-            .padding(.top, 4)
+            .padding(.top, 4.px)
         }
-        .padding(20)
-        .frame(width: 420)
+        .padding(20.px)
+        .frame(width: 420.px)
         .background(Theme.bg)
         .foregroundStyle(Theme.ink)
     }
