@@ -13,7 +13,11 @@ struct AppDetailRequestsTab: View {
     /// The page's counters (requests stored for the app).
     var counters: AppDetailCounters
 
+    /// The request whose card is open.
     @State private var expanded: RequestKey?
+    /// The row drawn highlighted, always `expanded`. It changes in a transaction of its own, without the cards'
+    /// animation, so the highlight switches at once, like a table's selection, yet still moves with its row.
+    @State private var highlighted: RequestKey?
     @State private var history: [RequestRecord] = []
     @State private var historyLoaded = false
     /// Why the history could not be loaded, described while rendering so it follows the UI language.
@@ -48,14 +52,19 @@ struct AppDetailRequestsTab: View {
                     LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                         Section {
                             ForEach(Array(rows.enumerated()), id: \.element.key) { index, record in
-                                row(record, index: index, history: !live, now: now, badges: badges)
-                                if expanded == record.key {
-                                    AppDetailRequestCard(record: record, app: app)
-                                        .padding(.horizontal, 14)
-                                        .padding(.top, 2)
-                                        .padding(.bottom, 8)
-                                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+                                VStack(spacing: 0) {
+                                    row(record, index: index, history: !live, now: now, badges: badges)
+                                    if expanded == record.key {
+                                        AppDetailRequestCard(record: record, app: app)
+                                            .padding(.horizontal, 14)
+                                            .padding(.top, 2)
+                                            .padding(.bottom, 8)
+                                            .transition(AppDetailCardReveal())
+                                    }
                                 }
+                                // The row and its card move as one: a card opening under a row that is moving (another
+                                // card closing above it) would otherwise start where the row ends up, over other rows.
+                                .geometryGroup()
                             }
                         } header: {
                             header.background(Theme.bg)
@@ -157,15 +166,19 @@ struct AppDetailRequestsTab: View {
     private func row(_ record: RequestRecord, index: Int, history: Bool, now: Date, badges: [DeviceID: AppDetailDeviceBadge]?) -> some View {
         let isExpanded = expanded == record.key
         let isFresh = !history && RequestsPresentation.isFresh(record, now: now)
-        let background: Color = isExpanded ? Theme.accentTint : isFresh ? Theme.fresh : index.isMultiple(of: 2) ? .clear : Theme.zebra
+        let background: Color = highlighted == record.key ? Theme.accentTint : isFresh ? Theme.fresh : index.isMultiple(of: 2) ? .clear : Theme.zebra
         return AppDetailRequestRow(record: record, history: history, badge: badges.map { $0[record.deviceID] ?? .unknown })
             .padding(.horizontal, 20)
             .frame(height: 28)
             .background(background)
             .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { expanded = isExpanded ? nil : record.key }
-            }
+            .onTapGesture { expand(isExpanded ? nil : record.key) }
+    }
+
+    /// Opens the card of the request `key` (closing any other) or, with nil, closes it.
+    private func expand(_ key: RequestKey?) {
+        highlighted = key
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { expanded = key }
     }
 
     @ViewBuilder
@@ -301,6 +314,37 @@ private struct AppDetailRequestRow: View {
             .font(Theme.mono(11))
             .foregroundStyle(failed ? Color(oklch: 0.64, 0.19, 27) : Theme.ink3)
             .lineLimit(1)
+    }
+}
+
+/// How the card under an expanded row comes and goes: it slides down out of the row as the rows below make room,
+/// and back up into it, shown only between the row and the rows below. A plain `.move(edge: .top)` would start it a
+/// card's height higher, drawn over the row and the rows above it.
+private struct AppDetailCardReveal: Transition {
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        content
+            .visualEffect { content, proxy in
+                content.offset(y: phase.isIdentity ? 0 : -proxy.size.height)
+            }
+            .clipShape(Uncovered(fraction: phase.isIdentity ? 1 : 0))
+    }
+
+    /// The part of the card's place the rows below have uncovered, from the row's bottom edge down, with room at
+    /// the sides and bottom for the card's shadow once it is out.
+    private struct Uncovered: Shape {
+        var fraction: Double
+
+        var animatableData: Double {
+            get { fraction }
+            set { fraction = newValue }
+        }
+
+        func path(in rect: CGRect) -> Path {
+            let shadow: CGFloat = 40
+            // A spring overshoots below 0 as the card goes; a negative height would open the clip above the row.
+            return Path(CGRect(x: rect.minX - shadow, y: rect.minY,
+                               width: rect.width + 2 * shadow, height: (rect.height + shadow) * max(0, fraction)))
+        }
     }
 }
 
