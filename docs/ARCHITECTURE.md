@@ -408,7 +408,8 @@ list applies at the next launch.
   the inset style adds), not from `rowHeight`.
 * Sizes in UI code are the design's px through `UIScale` (`14.px`, `.design(12)`, `.designMono(11)`), so the whole
   window grows or shrinks with one factor; hairlines, opacities and the system's chrome stay as they are. So far
-  the shell, the Requests page and the shared components are written this way; the other pages still use points.
+  the shell, the Requests page and the shared components are written this way; the other pages still use points,
+  except for the sizes they hand the shared components (a tile's or dot's `size`, `labelWidth`), which are px.
   The main window's saved frame and sidebar width are forgotten once when the factor changes (`MainWindowFrame`).
 * A toolbar whose page draws its own title (`toolbar(removing: .title)`) needs a `ToolbarSpacer(.flexible)` in
   the same toolbar content as the trailing items, or they follow the title instead of keeping to the trailing end.

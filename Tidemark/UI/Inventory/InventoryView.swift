@@ -545,7 +545,7 @@ private struct InventoryGroupRow: View {
             .padding(.vertical, 4)
             HStack(spacing: -4) {
                 ForEach(Array(group.sources.prefix(5).enumerated()), id: \.offset) { _, source in
-                    InventorySourceTile(model: model, source: source, size: 18)
+                    InventorySourceTile(model: model, source: source, size: 18.px)
                         .padding(1.5)
                         .background(Theme.bg, in: RoundedRectangle(cornerRadius: 6.5, style: .continuous))
                         .help(InventorySourcesList.displayTitle(source))
@@ -765,7 +765,7 @@ struct InventorySourcesList: View {
         VStack(alignment: .leading, spacing: 3) {
             ForEach(Array(sources.prefix(6).enumerated()), id: \.offset) { _, source in
                 HStack(alignment: .top, spacing: 6) {
-                    InventorySourceTile(model: model, source: source, size: 14)
+                    InventorySourceTile(model: model, source: source, size: 14.px)
                         .padding(.top, 1)
                     Text(Self.wrappable(Self.displayPath(source)))
                         .font(Theme.mono(10.5))

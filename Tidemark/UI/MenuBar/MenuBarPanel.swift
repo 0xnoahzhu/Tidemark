@@ -297,7 +297,7 @@ private struct MenuBarAlertRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 9) {
-                AppTile(identity: identity, size: 22)
+                AppTile(identity: identity, size: 22.px)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(value)
                         .font(.system(size: 12, weight: .semibold))

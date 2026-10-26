@@ -126,6 +126,7 @@ struct CountBadge: View {
 /// Callers pass `pulsing: false` under Reduce Motion or reduced resource usage, for a still dot.
 struct StatusDot: View {
     var color: Color
+    /// The dot's diameter in points; callers pass design px (`7.px`).
     var size: CGFloat = 6.px
     var pulsing = false
 

@@ -164,7 +164,7 @@ struct SiteProbeView: View {
         let requestCount = waterfall.steps.reduce(0) { $0 + $1.rows.reduce(0) { $0 + $1.requests } }
         return VStack(spacing: 0) {
             HStack(spacing: 8) {
-                if running { StatusDot(color: Theme.recording, size: 7, pulsing: !reduceMotion && !reducedResources) }
+                if running { StatusDot(color: Theme.recording, size: 7.px, pulsing: !reduceMotion && !reducedResources) }
                 Text(status(session, running: running))
                     .fontWeight(.semibold)
                     .foregroundStyle(Theme.ink)

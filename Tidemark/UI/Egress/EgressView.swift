@@ -89,7 +89,7 @@ private struct EgressCurrentCard: View {
         EgressCard(padding: EdgeInsets(top: 18, leading: 20, bottom: 18, trailing: 20)) {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 8) {
-                    StatusDot(color: sample?.error == nil && sample != nil ? Theme.live : Theme.ink3, size: 7,
+                    StatusDot(color: sample?.error == nil && sample != nil ? Theme.live : Theme.ink3, size: 7.px,
                               pulsing: isChecking && !reduceMotion)
                     Text(tr("Current egress", "Egress")).fontWeight(.semibold).foregroundStyle(Theme.ink)
                     if let mode = EgressFormat.modeLabel(proxyMode) { Text(mode) }
@@ -310,11 +310,11 @@ private struct EgressLookupCard: View {
                         .disabled(address.isEmpty || isLookingUp)
                 }
                 VStack(alignment: .leading, spacing: 7) {
-                    KeyValueRow(tr("Country", "Egress"), EgressFormat.location(result?.country) ?? "—", labelWidth: 84)
-                    KeyValueRow("ASN", result?.asn.map { "AS\($0)" } ?? "—", mono: true, labelWidth: 84)
-                    KeyValueRow(tr("Organization", "Egress"), result?.organization ?? "—", labelWidth: 84)
-                    KeyValueRow(tr("Type", "Egress"), EgressFormat.type(result?.networkType) ?? "—", labelWidth: 84)
-                    KeyValueRow(tr("Reverse DNS", "Egress"), result?.reverseDNS ?? "—", mono: true, labelWidth: 84)
+                    KeyValueRow(tr("Country", "Egress"), EgressFormat.location(result?.country) ?? "—", labelWidth: 84.px)
+                    KeyValueRow("ASN", result?.asn.map { "AS\($0)" } ?? "—", mono: true, labelWidth: 84.px)
+                    KeyValueRow(tr("Organization", "Egress"), result?.organization ?? "—", labelWidth: 84.px)
+                    KeyValueRow(tr("Type", "Egress"), EgressFormat.type(result?.networkType) ?? "—", labelWidth: 84.px)
+                    KeyValueRow(tr("Reverse DNS", "Egress"), result?.reverseDNS ?? "—", mono: true, labelWidth: 84.px)
                 }
                 .redacted(reason: isLookingUp ? .placeholder : [])
                 Text(EgressFormat.sourcesNote)
@@ -373,11 +373,11 @@ private struct EgressThisMacCard: View {
             VStack(alignment: .leading, spacing: 9) {
                 Text(tr("This Mac", "Egress")).font(.system(size: 13, weight: .semibold))
                 VStack(alignment: .leading, spacing: 7) {
-                    KeyValueRow(tr("Interface", "Egress"), interface, labelWidth: 84)
-                    KeyValueRow(tr("Local IP", "Egress"), network?.localIP ?? "—", mono: true, labelWidth: 84)
-                    KeyValueRow(tr("Router", "Egress"), network?.router ?? "—", mono: true, labelWidth: 84)
-                    KeyValueRow("DNS", dns, mono: true, labelWidth: 84)
-                    KeyValueRow("Surge", surgeMode, labelWidth: 84)
+                    KeyValueRow(tr("Interface", "Egress"), interface, labelWidth: 84.px)
+                    KeyValueRow(tr("Local IP", "Egress"), network?.localIP ?? "—", mono: true, labelWidth: 84.px)
+                    KeyValueRow(tr("Router", "Egress"), network?.router ?? "—", mono: true, labelWidth: 84.px)
+                    KeyValueRow("DNS", dns, mono: true, labelWidth: 84.px)
+                    KeyValueRow("Surge", surgeMode, labelWidth: 84.px)
                 }
             }
         }

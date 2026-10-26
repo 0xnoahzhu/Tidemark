@@ -277,7 +277,7 @@ struct SettingsStatusLine: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            StatusDot(color: color, size: 7, pulsing: tone == .pending)
+            StatusDot(color: color, size: 7.px, pulsing: tone == .pending)
                 .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
             Text(text)
                 .foregroundStyle(tone == .failed ? Theme.failed : Theme.ink2)

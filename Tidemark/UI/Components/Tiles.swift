@@ -46,6 +46,7 @@ extension AppTile {
 struct LetterTile: View {
     var letter: String
     var color: Color
+    /// The tile's side in points; callers pass design px.
     var size: CGFloat = 20.px
 
     var body: some View {
@@ -64,6 +65,7 @@ struct LetterTile: View {
 struct GlyphTile: View {
     var systemName: String
     var color: Color
+    /// The tile's side in points; callers pass design px.
     var size: CGFloat = 20.px
 
     var body: some View {

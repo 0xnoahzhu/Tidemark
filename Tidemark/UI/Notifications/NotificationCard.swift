@@ -69,9 +69,9 @@ struct NotificationCard: View {
     @ViewBuilder
     private func tile(app: MonitoredApp?) -> some View {
         if let app {
-            AppTile(app: app, size: 32)
+            AppTile(app: app, size: 32.px)
         } else {
-            LetterTile(letter: "?", color: Theme.tileNeutral, size: 32)
+            LetterTile(letter: "?", color: Theme.tileNeutral, size: 32.px)
         }
     }
 

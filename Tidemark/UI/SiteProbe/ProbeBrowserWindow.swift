@@ -61,7 +61,7 @@ struct ProbeBrowserWindow: View {
 
         ToolbarItem(placement: .principal) {
             HStack(spacing: 7) {
-                if running { StatusDot(color: Theme.recording, size: 7, pulsing: !reduceMotion && !reducedResources) }
+                if running { StatusDot(color: Theme.recording, size: 7.px, pulsing: !reduceMotion && !reducedResources) }
                 Text(address)
                     .font(Theme.mono(12))
                     .lineLimit(1)

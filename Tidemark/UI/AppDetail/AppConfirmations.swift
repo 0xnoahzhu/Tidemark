@@ -30,7 +30,7 @@ struct AppMonitoringConfirmation: ViewModifier {
                         model.capture.setMonitoring(app.id, enabled: !monitoring)
                     }
                 ) {
-                    AppTile(app: app, size: 52)
+                    AppTile(app: app, size: 52.px)
                 }
             }
         }
@@ -49,7 +49,7 @@ struct AppDeleteConfirmation: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                AppTile(app: app, size: 40)
+                AppTile(app: app, size: 40.px)
                 Text(trf("Delete %@?", "AppDetail", app.name))
                     .font(.system(size: 15, weight: .bold))
                     .accessibilityAddTraits(.isHeader)

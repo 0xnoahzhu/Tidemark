@@ -235,7 +235,7 @@ private struct AddAppCandidateRow: View {
                         .opacity(isSelected ? 1 : 0)
                 }
                 .frame(width: 16, height: 16)
-                AppTile(identity: AddAppCandidates.identity(for: candidate), size: 28)
+                AppTile(identity: AddAppCandidates.identity(for: candidate), size: 28.px)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(candidate.name)
                         .font(.system(size: 12.5, weight: .semibold))
