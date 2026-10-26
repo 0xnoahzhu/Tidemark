@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Policy capsule (`Proxy › HK-01`, `DIRECT`, `AI › US-West`) tinted by policy group.
@@ -119,17 +120,86 @@ struct CountBadge: View {
 }
 
 /// Status dot, optionally pulsing (recording indicator, Surge / PostgreSQL health).
+///
+/// The pulse (opacity 1 → 0.3 and back, 0.7 s each way) runs in Core Animation on the dot's own layer: as a SwiftUI
+/// animation it would update the page around the dot on the main thread every frame for as long as it is shown.
+/// Callers pass `pulsing: false` under Reduce Motion or reduced resource usage, for a still dot.
 struct StatusDot: View {
     var color: Color
     var size: CGFloat = 6
     var pulsing = false
 
     var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: size, height: size)
-            .phaseAnimator(pulsing ? [1.0, 0.3] : [1.0]) { dot, opacity in
-                dot.opacity(opacity)
-            } animation: { _ in .easeInOut(duration: 0.7) }
+        if pulsing {
+            StatusDotPulse(color: color)
+                .frame(width: size, height: size)
+                // The AppKit view takes no clicks; this shape gives a click on the dot to the button around it, as
+                // the SwiftUI circle did.
+                .contentShape(Circle())
+        } else {
+            Circle()
+                .fill(color)
+                .frame(width: size, height: size)
+        }
+    }
+}
+
+/// The pulsing dot: an AppKit view that draws the dot and pulses its layer.
+private struct StatusDotPulse: NSViewRepresentable {
+    var color: Color
+
+    func makeNSView(context: Context) -> StatusDotPulseView { StatusDotPulseView() }
+
+    func updateNSView(_ view: StatusDotPulseView, context: Context) {
+        view.color = color
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: StatusDotPulseView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
+    }
+}
+
+/// Draws a filled circle in `color` (redrawn when the appearance changes, so dynamic colors follow it) and pulses
+/// its layer's opacity with a repeating `CABasicAnimation`, which the render server runs. It takes no clicks itself.
+final class StatusDotPulseView: NSView {
+    static let animationKey = "pulse"
+
+    var color: Color = .clear {
+        didSet { if color != oldValue { needsDisplay = true } }
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isOpaque: Bool { false }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor(color).setFill()
+        NSBezierPath(ovalIn: bounds).fill()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, let layer, layer.animation(forKey: Self.animationKey) == nil else { return }
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 1.0
+        pulse.toValue = 0.3
+        pulse.duration = 0.7
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(pulse, forKey: Self.animationKey)
     }
 }
