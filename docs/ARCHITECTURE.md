@@ -376,19 +376,30 @@ Results it does not keep are cleared on a return to the page, as on a first visi
 leaves them up until the new page arrives. The live table takes in the stream at most twice a second (once a second
 while the system asks for reduced resource usage); its filter and the Mac scope apply at once.
 
-The inspector opens on a row of either table, its selection following the keyboard too. Under the connection it
-tells the request's journey through Surge (`RequestsJourney`), each stage at its offset from the start and only when
+The inspector opens on a row of either table, its selection following the keyboard too. Under the connection it tells
+the request's journey through Surge (`RequestsJourney`), each stage at its offset from the start and only when
 something tells about it: how the request reached Surge; the DNS it needed (in rule mode Surge's lookup for rule
-matching and the answer that held, in global proxy mode only that the proxy resolved the name, and in both the remote
-IP shown with where it came from and how old it was); the rule; the hops Surge's record shows (entry, policy groups,
-node and its type, proxy server, the exit IP the egress check saw for that policy, destination; never router hops);
-the connection; and how it ended. Its sources are the request's notes, which stay the source of truth, and the
-records joined to it by host and time (`relatedRecords(of:)`), loaded when the request is shown; node types come
-from one `policy-group list` every ten minutes. Surge's log of the request and links to the first-contact alert,
-the site probe and the egress change around it follow. The timing bar times the wait for the Client Hello, the DNS
-lookup Surge timed and the rest of the setup, which in global proxy mode is Surge's own work rather than a connect.
-`Navigation.openRequests(forHost:)` opens History on one exact host, shown as a removable chip beside the filters,
-and the status filter also finds the requests that ended with an error, which Surge marks completed.
+matching and its answer; for a proxied request that the proxy resolved the name on its side, again after any lookup
+for rule matching; an answer joined to a request that looked nothing up, as in global proxy mode, only as Tidemark's
+own lookup or Surge's resolver answering apart from it; and the remote IP shown with where it came from and how old it
+was, an entry of Surge's cache at least that old); the rule; the hops Surge's record shows (entry, policy groups, node
+and its type, proxy server, the exit IP the egress check saw for that policy, destination; never router hops); the
+connection; and how it ended, with the error its own proxy node reported. Its sources are the request's notes, which
+stay the source of truth, and the records joined to it by host and time (`relatedRecords(of:)`), loaded once the
+selection rests (`RequestsInspectorDetails`), the related records first; node types come from this Mac's
+`policy-group list`, once every ten minutes, and only for this Mac's requests. Surge's log of the request and links to
+the first-contact alert, the site probe and the egress change around it follow. The journey and each of its stages are
+equatable, so the inspector's other updates leave them alone, and only values the inspector shows nowhere else are
+selectable, each selectable text being a text view of its own. The inspector and its scroll view take the size they
+are offered without measuring their content (`RequestsInspectorFill`): a flexible frame would have the hosting view's
+minimum size lay every text of the request out again on each selection. The timing bar times the wait for the Client
+Hello, the DNS lookup Surge timed and the rest of the setup, which in global proxy mode, when the request rode an open
+connection of its proxy, is Surge's own work rather than a connect. While the inspector opens, SwiftUI lays the page
+out at no height a few times and AppKit's table, seeing none of itself, scrolls to its top; `RequestsTablePlaceKeeper`
+puts the rows back, so the selected row stays where it was. `Navigation.openRequests(forHost:)` opens History on one
+exact host, shown as a removable chip beside the filters, and the status filter also finds the requests that ended
+with an error, which Surge marks completed; it reads the end reason stored since schema v4, so it finds no request
+recorded before, which its empty state says.
 
 The Domains & IPs page draws its table itself, as the native inset table looks and behaves (header and separators,
 rounded alternate rows continued below the last one, each row one VoiceOver element naming its columns), in one
