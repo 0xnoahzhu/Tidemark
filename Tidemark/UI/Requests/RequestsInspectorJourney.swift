@@ -112,7 +112,8 @@ private struct RequestsJourneyNote: View {
     }
 }
 
-/// `Label  value` under a stage, as one text: the label in the faint ink, the value, and what else is known after it.
+/// `Label  value` under a stage, as one text: the label in the faint ink, the value in full, and what else is known
+/// after it. A value that wraps goes on under the label.
 ///
 /// One text rather than a row of two, and only a value the inspector shows nowhere else can be selected: the journey
 /// is drawn again for each request the selection passes, and each text, a selectable one most, takes its share.
@@ -123,15 +124,26 @@ private struct RequestsJourneyFact: View {
     var color: Color = Theme.ink
     /// Said after the value in the secondary ink (`· From Surge's cache`).
     var detail: String?
+    /// The value is one token (a host, rule or connector name): on one line, shortened in the middle and shown in
+    /// full on hover, rather than broken mid-word.
+    var oneLine = false
     var selectable = false
 
     var body: some View {
         let label = Text(label + "  ").font(.design(11)).foregroundStyle(Theme.ink3)
         let value = Text(value).font(mono ? Theme.mono(11) : .design(11.5)).foregroundStyle(color)
-        let detail = Text(verbatim: detail.map { " · " + $0 } ?? "").font(.design(11.5)).foregroundStyle(Theme.ink2)
-        Text("\(label)\(value)\(detail)")
-            .selectable(selectable)
-            .fixedSize(horizontal: false, vertical: true)
+        if oneLine {
+            Text("\(label)\(value)")
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .selectable(selectable)
+                .help(self.value)
+        } else {
+            let detail = Text(verbatim: detail.map { " · " + $0 } ?? "").font(.design(11.5)).foregroundStyle(Theme.ink2)
+            Text("\(label)\(value)\(detail)")
+                .selectable(selectable)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
@@ -147,6 +159,32 @@ private extension View {
     }
 }
 
+/// `CNAME  name` with each further name on a line of its own, each shortened in the middle where it does not fit.
+private struct RequestsJourneyNames: View {
+    var label: String
+    var names: [String]
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6.px) {
+            Text(label)
+                .font(.design(11))
+                .foregroundStyle(Theme.ink3)
+                .fixedSize()
+            VStack(alignment: .leading, spacing: 1.px) {
+                ForEach(Array(names.enumerated()), id: \.offset) { _, name in
+                    Text(name)
+                        .font(Theme.mono(11))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                        .help(name)
+                }
+            }
+        }
+    }
+}
+
 private struct RequestsJourneyEntered: View {
     var entered: RequestsJourney.Entered
 
@@ -155,7 +193,7 @@ private struct RequestsJourneyEntered: View {
             RequestsJourneyNote(text: RequestsJourneyLabels.entered(entry))
         }
         if let sni = entered.sni {
-            RequestsJourneyFact(label: tr("SNI", "Requests"), value: sni, mono: true)
+            RequestsJourneyFact(label: tr("SNI", "Requests"), value: sni, mono: true, oneLine: true)
         }
     }
 }
@@ -172,7 +210,7 @@ private struct RequestsJourneyDNS: View {
                 .help(server)
         }
         if !dns.cnames.isEmpty {
-            RequestsJourneyFact(label: "CNAME", value: dns.cnames.joined(separator: " → "), mono: true, selectable: true)
+            RequestsJourneyNames(label: "CNAME", names: dns.cnames)
         }
         if let answer = dns.answer, !answer.addresses.isEmpty {
             RequestsJourneyFact(label: tr("Answer", "Requests"), value: answer.addresses.joined(separator: ", "), mono: true, selectable: true)
@@ -197,14 +235,14 @@ private struct RequestsJourneyRule: View {
     var body: some View {
         switch rule.decision {
         case .matched(let matched):
-            RequestsJourneyFact(label: tr("Matched", "Requests"), value: matched, mono: true)
+            RequestsJourneyFact(label: tr("Matched", "Requests"), value: matched, mono: true, oneLine: true)
         case .global(let policy):
             RequestsJourneyNote(text: trf("Global · %@", "Requests", policy), color: Theme.ink)
         case .allDirect:
             RequestsJourneyNote(text: tr("All direct", "Requests"), color: Theme.ink)
         }
         if let subRule = rule.subRule {
-            RequestsJourneyFact(label: tr("Sub-rule", "Requests"), value: subRule, mono: true, selectable: true)
+            RequestsJourneyFact(label: tr("Sub-rule", "Requests"), value: subRule, mono: true, oneLine: true, selectable: true)
         }
         if let original = rule.originalPolicy {
             RequestsJourneyNote(text: trf("Surge first chose %@.", "Requests", original))
@@ -326,7 +364,7 @@ private struct RequestsJourneyConnection: View {
         if connection.reused {
             RequestsJourneyNote(text: tr("Reused an open connection", "Requests"))
             if let connector = connection.connector {
-                RequestsJourneyFact(label: tr("Connector", "Requests"), value: connector, mono: true, selectable: true)
+                RequestsJourneyFact(label: tr("Connector", "Requests"), value: connector, mono: true, oneLine: true, selectable: true)
             }
         } else {
             RequestsJourneyNote(text: tr("Opened a new connection", "Requests"))
