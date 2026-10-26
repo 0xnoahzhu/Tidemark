@@ -202,12 +202,17 @@ final class ProbeProxyServer: Sendable {
         }
     }
 
-    /// Keeps connections a while before releasing them. `NetworkConnection` starts itself in a task that holds
-    /// it weakly, and an operation issued once a cancellation has torn the connection down (or from a
-    /// cancelled task) queues that start again. The start traps ("Neither nw nor nwGroup is initialized") when
-    /// the connection is gone by the time it runs, so a connection that may have been cancelled outlives it.
-    /// Connections that ended on their own are released at once and close their sockets.
+    /// Closes connections at once and releases them a while later. `NetworkConnection` has no `cancel()`, but an
+    /// operation from a cancelled task cancels the connection, which closes its socket, also when a stop found
+    /// the connection between operations. That operation, like any issued once a cancellation has torn the
+    /// connection down, queues the connection's start again, in a task that holds it weakly; the start traps
+    /// ("Neither nw nor nwGroup is initialized") when the connection is gone by the time it runs, so the
+    /// connection outlives it. Connections that ended on their own are released at once and close their sockets.
     static func retire(_ connections: [NetworkConnection<TCP>]) {
+        Task.detached {
+            withUnsafeCurrentTask { $0?.cancel() }
+            for connection in connections { _ = try? await connection.receive(atLeast: 1, atMost: 1) }
+        }
         Task.detached {
             try? await Task.sleep(for: retirement)
             withExtendedLifetime(connections) {}

@@ -14,8 +14,11 @@ final class ProbeFakeUpstream: Sendable {
 
     private let seen = Mutex<[Seen]>([])
     private let task = Mutex<Task<Void, Never>?>(nil)
+    private let open = Mutex(0)
 
     var requests: [Seen] { seen.withLock { $0 } }
+    /// Connections still served: the proxy has not closed its side of them.
+    var openConnections: Int { open.withLock { $0 } }
 
     func start() async throws -> UInt16 {
         let listener = try NetworkListener(using: .parameters { TCP() }.localEndpoint(.hostPort(host: "127.0.0.1", port: .any)))
@@ -41,8 +44,12 @@ final class ProbeFakeUpstream: Sendable {
 
     /// Stopping cancels the operations of open connections; those, and failed ones, are retired like the proxy's.
     private func serve(_ connection: NetworkConnection<TCP>) async {
+        open.withLock { $0 += 1 }
         var interrupted = false
-        defer { if interrupted || Task.isCancelled { ProbeProxyServer.retire([connection]) } }
+        defer {
+            open.withLock { $0 -= 1 }
+            if interrupted || Task.isCancelled { ProbeProxyServer.retire([connection]) }
+        }
         do {
             var buffer = Data()
             var end: Int?
@@ -113,16 +120,15 @@ final class ProbeTestClient: Sendable {
         }
     }
 
-    /// Sends data through a tunnel and reads the echo every millisecond until the connection ends or the task is
-    /// cancelled.
+    /// Sends data through a tunnel as fast as the echo comes back, until the connection ends or the task is
+    /// cancelled, so the proxy's pipes are often between two operations.
     func pump() async {
         let connection = self.connection
-        let chunk = Data(repeating: 0x61, count: 4_096)
+        let chunk = Data(repeating: 0x61, count: 16_384)
         try? await noting {
             while !Task.isCancelled {
                 try await connection.send(chunk)
                 if try await connection.receive(atLeast: 1, atMost: 65_536).metadata.endOfStream { return }
-                try await Task.sleep(for: .milliseconds(1))
             }
         }
     }
@@ -391,7 +397,8 @@ struct ProbeProxyTests {
 
     /// Stopping cancels both pipes of every tunnel, and a cancelled receive returns an empty end of stream.
     /// The proxy used to pass that on to the connection the other pipe's cancellation had torn down, which
-    /// queued the start of a connection the proxy then released, and the start trapped the test host.
+    /// queued the start of a connection the proxy then released, and the start trapped the test host. Both sides
+    /// of every tunnel close with the stop, also those of a tunnel the stop found between two operations.
     @Test func stopsWhileTunnelsCarryData() async throws {
         let upstream = ProbeFakeUpstream()
         let upstreamPort = try await upstream.start()
@@ -410,12 +417,27 @@ struct ProbeProxyTests {
             }
             try await Task.sleep(for: .milliseconds(Int.random(in: 2...15)))
             proxy.stop()
-            try await Task.sleep(for: .milliseconds(5))
+            let ended = await CaptureTimeout.value(within: .seconds(2)) { [pumps] in
+                for pump in pumps { await pump.value }
+                return true
+            }
+            #expect(ended == true, "every browser side closed with the stop")
+            #expect(await Self.eventually(.seconds(2)) { upstream.openConnections == 0 }, "every Surge side closed with the stop")
             for pump in pumps {
                 pump.cancel()
                 await pump.value
             }
         }
+    }
+
+    /// Polls `condition` until it holds or the timeout passes.
+    private static func eventually(_ timeout: Duration, _ condition: () async -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return await condition()
     }
 }
 
