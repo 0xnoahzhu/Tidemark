@@ -18,6 +18,9 @@ struct AppDetailRequestsTab: View {
     /// The row drawn highlighted, always `expanded`. It changes in a transaction of its own, without the cards'
     /// animation, so the highlight switches at once, like a table's selection, yet still moves with its row.
     @State private var highlighted: RequestKey?
+    /// Cards sliding back under their rows, each with the click that closed it. A card stays in the layout until its
+    /// space has shrunk to nothing, so the rows below move up with it, and only then leaves.
+    @State private var closing: [RequestKey: UUID] = [:]
     @State private var history: [RequestRecord] = []
     @State private var historyLoaded = false
     /// Why the history could not be loaded, described while rendering so it follows the UI language.
@@ -52,19 +55,16 @@ struct AppDetailRequestsTab: View {
                     LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                         Section {
                             ForEach(Array(rows.enumerated()), id: \.element.key) { index, record in
-                                VStack(spacing: 0) {
-                                    row(record, index: index, history: !live, now: now, badges: badges)
-                                    if expanded == record.key {
+                                row(record, index: index, history: !live, now: now, badges: badges)
+                                if expanded == record.key || closing[record.key] != nil {
+                                    AppDetailCardSpace(fraction: expanded == record.key ? 1 : 0) {
                                         AppDetailRequestCard(record: record, app: app)
                                             .padding(.horizontal, 14)
                                             .padding(.top, 2)
                                             .padding(.bottom, 8)
-                                            .transition(AppDetailCardReveal())
                                     }
+                                    .transition(AppDetailCardEntrance())
                                 }
-                                // The row and its card move as one: a card opening under a row that is moving (another
-                                // card closing above it) would otherwise start where the row ends up, over other rows.
-                                .geometryGroup()
                             }
                         } header: {
                             header.background(Theme.bg)
@@ -178,7 +178,22 @@ struct AppDetailRequestsTab: View {
     /// Opens the card of the request `key` (closing any other) or, with nil, closes it.
     private func expand(_ key: RequestKey?) {
         highlighted = key
-        withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { expanded = key }
+        guard !reduceMotion else {
+            expanded = key
+            return
+        }
+        // A card reopened while it slides back keeps its `closing` entry: `withAnimation` applies the changes made
+        // before it on their own, so clearing the entry first would drop the card for a moment and replay its entrance.
+        let closed = expanded == key ? nil : expanded
+        let click = UUID()
+        if let closed { closing[closed] = click }
+        withAnimation(.snappy(duration: 0.2), completionCriteria: .removed) {
+            expanded = key
+        } completion: {
+            // The closed card's space is empty now, or the card is open again: its entry can go, unless a later
+            // click closed it again.
+            if let closed, closing[closed] == click { closing[closed] = nil }
+        }
     }
 
     @ViewBuilder
@@ -317,33 +332,52 @@ private struct AppDetailRequestRow: View {
     }
 }
 
-/// How the card under an expanded row comes and goes: it slides down out of the row as the rows below make room,
-/// and back up into it, shown only between the row and the rows below. A plain `.move(edge: .top)` would start it a
-/// card's height higher, drawn over the row and the rows above it.
-private struct AppDetailCardReveal: Transition {
-    func body(content: Content, phase: TransitionPhase) -> some View {
-        content
-            .visualEffect { content, proxy in
-                content.offset(y: phase.isIdentity ? 0 : -proxy.size.height)
-            }
-            .clipShape(Uncovered(fraction: phase.isIdentity ? 1 : 0))
+/// The space the card under an expanded row takes up: `fraction` of the card's height, the part of it that is out,
+/// with the card's bottom edge on the space's bottom edge. The rows below are placed under this space on every frame,
+/// so the card slides out from under its row with them and back in, even when a click retargets an animation that is
+/// still under way. A plain `.move(edge: .top)` would start the card a card's height higher, drawn over the row and
+/// the rows above it.
+private struct AppDetailCardSpace: Layout {
+    var fraction: Double
+
+    var animatableData: Double {
+        get { fraction }
+        set { fraction = newValue }
     }
 
-    /// The part of the card's place the rows below have uncovered, from the row's bottom edge down, with room at
-    /// the sides and bottom for the card's shadow once it is out.
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let card = subviews.first else { return .zero }
+        let size = card.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        // A spring overshoots below 0 as the card goes; a negative height would pull the rows below over the row.
+        return CGSize(width: size.width, height: size.height * max(0, fraction))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let card = subviews.first else { return }
+        let size = card.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+        card.place(at: CGPoint(x: bounds.minX, y: bounds.maxY), anchor: .bottomLeading, proposal: ProposedViewSize(size))
+    }
+}
+
+/// A card's way in: its space starts empty and grows to the whole card. The card is clipped to its space, so it is
+/// never drawn over its row or the rows above.
+///
+/// It only plays on the way in. SwiftUI takes a view out of the layout as soon as its removal starts, so on the way
+/// out the rows below would move up on their own, under a card left where it was. A card is removed only once its
+/// space has shrunk to nothing (`AppDetailRequestsTab.closing`).
+private struct AppDetailCardEntrance: Transition {
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        AppDetailCardSpace(fraction: phase.isIdentity ? 1 : 0) { content }
+            .clipShape(Uncovered())
+    }
+
+    /// The card's space, from the row's bottom edge down, with room at the sides and bottom for the card's shadow.
+    /// The room below grows with the space, so a card that is barely out casts no shadow over the next row.
     private struct Uncovered: Shape {
-        var fraction: Double
-
-        var animatableData: Double {
-            get { fraction }
-            set { fraction = newValue }
-        }
-
         func path(in rect: CGRect) -> Path {
             let shadow: CGFloat = 40
-            // A spring overshoots below 0 as the card goes; a negative height would open the clip above the row.
             return Path(CGRect(x: rect.minX - shadow, y: rect.minY,
-                               width: rect.width + 2 * shadow, height: (rect.height + shadow) * max(0, fraction)))
+                               width: rect.width + 2 * shadow, height: rect.height + min(shadow, rect.height)))
         }
     }
 }
