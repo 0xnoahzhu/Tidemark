@@ -411,8 +411,8 @@ list applies at the next launch.
   the inset style adds), not from `rowHeight`.
 * Sizes in UI code are the design's px through `UIScale` (`14.px`, `.design(12)`, `.designMono(11)`), so the whole
   window grows or shrinks with one factor; hairlines, opacities and the system's chrome stay as they are. Tidemark
-  ships at 1.2 (`UIScale.standard`): each design px is 1.2 points, so the main window opens at 1498×975 and is at
-  least 1200×768. Every page, the menu bar panel, Settings, the sheets and the shared components are written this
+  ships at 1.0 (`UIScale.standard`): each design px is one point, so the main window opens at 1248×812 and is at
+  least 1000×640. Every page, the menu bar panel, Settings, the sheets and the shared components are written this
   way. Settings' panes grow under the system's tab toolbar, 88 pt at every factor,
   and its native switch and slider are a control size larger from 1.2. `scripts/check-design-px.sh` lists the
   sizes in `Tidemark/UI` still written in points (fonts, stack spacing, padding, frames, corner radii), except the
