@@ -348,13 +348,16 @@ enum SettingsDatabaseURL {
 
     /// The URL to save for the field's text: the text as typed, except that a mask (or what is left of it) stands
     /// for the saved URL's password, the one in the same place (user info or `password` parameter) when it has
-    /// one there, encoded as it was saved. A mask with no saved password to stand for is dropped. The field left
-    /// as `masked` showed it gives back the saved URL exactly. Nil for text that is not a PostgreSQL URL, which
+    /// one there, encoded as it was saved. A mask is dropped when there is no saved password to stand for, or when
+    /// the text holds a newly typed password (user info or `password` parameter): that one is to be used. The field
+    /// left as `masked` showed it gives back the saved URL exactly. Nil for text that is not a PostgreSQL URL, which
     /// must not be saved.
     static func unmasked(_ text: String, saved: String) -> String? {
         guard var components = postgresComponents(text) else { return nil }
         guard text != masked(saved) else { return saved }
-        let savedComponents = postgresComponents(saved)
+        let typed = components.password.map(isTyped) == true
+            || components.percentEncodedQueryItems?.contains { isPassword($0) && isTyped(value(of: $0)) } == true
+        let savedComponents = typed ? nil : postgresComponents(saved)
         // Percent-encoded; the last non-empty `password` parameter is the one that counts, as in `PostgresConnectionURL`.
         let savedUserPassword = savedComponents?.percentEncodedPassword.flatMap { $0.isEmpty ? nil : $0 }
         let savedQueryPassword = savedComponents?.percentEncodedQueryItems?.last { isPassword($0) && $0.value?.isEmpty == false }?.value
@@ -401,9 +404,14 @@ enum SettingsDatabaseURL {
         (name.removingPercentEncoding ?? String(name)).lowercased() == "password"
     }
 
-    private static func isMaskedPassword(_ item: URLQueryItem) -> Bool {
-        isPassword(item) && (item.value?.removingPercentEncoding).map(isMask) == true
-    }
+    private static func isMaskedPassword(_ item: URLQueryItem) -> Bool { isPassword(item) && isMask(value(of: item)) }
 
+    /// A query parameter's value, decoded.
+    private static func value(of item: URLQueryItem) -> String { item.value.map { $0.removingPercentEncoding ?? $0 } ?? "" }
+
+    /// A mask, or what is left of one.
     private static func isMask(_ password: String) -> Bool { !password.isEmpty && password.allSatisfy { $0 == "•" } }
+
+    /// A password typed into the field: neither empty nor (what is left of) a mask.
+    private static func isTyped(_ password: String) -> Bool { !password.isEmpty && !isMask(password) }
 }

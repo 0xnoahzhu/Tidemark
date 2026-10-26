@@ -335,6 +335,12 @@ struct UIChromeTests {
         let both = "postgres://me:mine@h/db?password=other"
         #expect(SettingsDatabaseURL.masked(both) == "postgres://me:••••••••@h/db?password=••••••••")
         #expect(SettingsDatabaseURL.unmasked(SettingsDatabaseURL.masked(both), saved: both) == both)
+        // A password typed in one place replaces the saved one, as it would be used: the mask in the other is dropped.
+        let typedParameter = try #require(SettingsDatabaseURL.unmasked("postgres://tide:••••••••@h/db?password=new", saved: both))
+        #expect(typedParameter == "postgres://tide@h/db?password=new")
+        #expect(try PostgresConnectionURL(typedParameter).password == "new")
+        #expect(SettingsDatabaseURL.unmasked("postgres://me:new@h/db?password=••••••••", saved: both) == "postgres://me:new@h/db")
+        #expect(SettingsDatabaseURL.unmasked("postgres://h/db?password=••••••••&password=new", saved: both) == "postgres://h/db?password=new")
         let moved = try #require(SettingsDatabaseURL.unmasked("postgres://tide@h/db?password=••••••••", saved: "postgres://tide:a&b=c@h/db"))
         #expect(try PostgresConnectionURL(moved).password == "a&b=c")
         let movedBack = try #require(SettingsDatabaseURL.unmasked("postgres://tide:••••••••@h/db", saved: "postgres://tide@h/db?password=x%2Fy%3Az"))
