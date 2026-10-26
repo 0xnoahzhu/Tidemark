@@ -568,6 +568,48 @@ struct RequestsTableRowHeightTests {
         #expect(!RequestsTableHeaderAnchor.needsHeight(table))
     }
 
+    /// As the inspector opens, SwiftUI lays the page out at no height a few times, and AppKit's table, seeing none of
+    /// itself, scrolls to its top; its rows go back where they were once it shows again. A scroll of the reader's stays.
+    @Test func tableKeepsItsPlaceThroughALayoutAtNoHeight() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let page = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        window.contentView = page
+        let scroll = NSScrollView(frame: page.bounds)
+        scroll.autoresizingMask = [.width, .height]
+        let table = NSTableView(frame: scroll.bounds)
+        table.addTableColumn(NSTableColumn(identifier: .init("time")))
+        let rows = PlaceRows()
+        table.dataSource = rows
+        scroll.documentView = table
+        page.addSubview(scroll)
+        table.reloadData()
+        RequestsTablePlaceKeeper.watch(table)
+        RequestsTablePlaceKeeper.watch(table)
+        let clip = scroll.contentView
+        #expect(RequestsTablePlaceKeeper.keeper(of: clip) != nil)
+
+        clip.scroll(to: NSPoint(x: 0, y: 3_000))
+        scroll.reflectScrolledClipView(clip)
+        #expect(clip.bounds.origin.y == 3_000)
+
+        page.setFrameSize(NSSize(width: 400, height: 0))
+        #expect(table.visibleRect.isEmpty)
+        clip.scroll(to: .zero)
+        page.setFrameSize(NSSize(width: 400, height: 300))
+        #expect(clip.bounds.origin.y == 3_000)
+
+        clip.scroll(to: NSPoint(x: 0, y: 1_200))
+        page.setFrameSize(NSSize(width: 400, height: 280))
+        #expect(clip.bounds.origin.y == 1_200)
+    }
+
+    /// 400 rows of nothing.
+    private final class PlaceRows: NSObject, NSTableViewDataSource {
+        func numberOfRows(in tableView: NSTableView) -> Int { 400 }
+    }
+
     private static func table(in view: NSView) -> NSTableView? {
         if let table = view as? NSTableView { return table }
         return view.subviews.lazy.compactMap { table(in: $0) }.first

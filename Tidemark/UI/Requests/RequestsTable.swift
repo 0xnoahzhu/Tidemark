@@ -78,9 +78,11 @@ struct RequestsTable: View {
                     if now != nil {
                         RequestsRowTint(key: record.key, isFresh: isFresh(record), isSelected: record.key == selectedKey)
                     }
-                    // One cell sets the header's height for its table, the first row's, which every table loads.
-                    if RequestsTableHeaderHeight.isNeeded, record.key == rows.first?.key {
-                        RequestsTableHeaderHeight()
+                    // One cell reaches its table for what `Table` has no API for, the first row's, which every table
+                    // loads: it keeps the rows' place and, where needed, sets the header's height.
+                    if record.key == rows.first?.key {
+                        RequestsTablePlace()
+                        if RequestsTableHeaderHeight.isNeeded { RequestsTableHeaderHeight() }
                     }
                 }
                 .onAppear {
