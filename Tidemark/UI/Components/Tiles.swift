@@ -96,8 +96,15 @@ final class AppIconCache {
             missing.insert(path)
             return nil
         }
-        let image = NSWorkspace.shared.icon(forFile: path)
+        // The bundle itself, not a link to it: the icon of a symbolic link carries the alias badge, and
+        // /Applications/Safari.app links into Safari's cryptex.
+        let image = NSWorkspace.shared.icon(forFile: Self.resolved(path))
         cache[path] = image
         return image
+    }
+
+    /// `path` with every symbolic link in it resolved.
+    nonisolated static func resolved(_ path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().path
     }
 }
