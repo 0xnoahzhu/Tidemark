@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import Tidemark
 
@@ -526,6 +527,58 @@ private final class SlowStopProbeActions: ProbeActions {
         let narrow = Layout.widths(for: Layout.entryColumns, spacing: 17, total: 85 + 334 + 195)
         #expect(narrow == [75, 58, 120, 108, 108, 60])
         #expect(Layout.widths(for: Layout.entryColumns, spacing: 17, total: 100).allSatisfy { $0 >= 0 })
+    }
+}
+
+/// The Domains & IPs lists kept between visits.
+@Suite @MainActor struct InventoryCacheTests {
+    private let all = InventoryCache.Key(search: "", scope: .all)
+
+    private func entry(_ value: String, kind: HostKind = .domain, source: String = "Cursor", minutesAgo: Double) -> InventoryEntry {
+        InventoryEntry(kind: kind, value: value,
+                       sources: [InventorySource(title: source, path: "/Applications/\(source).app/Contents/MacOS/\(source)", appID: nil,
+                                                 probeSessionID: nil, bundlePath: nil)],
+                       firstSeen: Date(timeIntervalSince1970: 1_800_000_000 - minutesAgo * 60), lastSeen: .distantPast, requestCount: 1, geo: nil)
+    }
+
+    private var entries: [InventoryEntry] {
+        [entry("api.github.com", minutesAgo: 5), entry("104.18.19.125", kind: .ip, source: "Raycast", minutesAgo: 1),
+         entry("notion.so", source: "Raycast", minutesAgo: 9), entry("140.82.112.3", kind: .ip, minutesAgo: 7)]
+    }
+
+    @Test func keepsTheListInThePageOrderWithItsDomainsAndIPs() throws {
+        let cache = InventoryCache()
+        #expect(cache.snapshot(for: all) == nil)
+        cache.store(entries, for: all)
+        let snapshot = try #require(cache.snapshot(for: all))
+        #expect(snapshot.all.map(\.value) == ["104.18.19.125", "api.github.com", "140.82.112.3", "notion.so"])
+        #expect(snapshot.entries(.domain).map(\.value) == ["api.github.com", "notion.so"])
+        #expect(snapshot.entries(.ip).map(\.value) == ["104.18.19.125", "140.82.112.3"])
+        #expect(snapshot.domainCount == 2)
+        #expect(cache.age(of: all) != nil)
+    }
+
+    @Test func redrawsOnlyWhenTheDatabaseAnswersSomethingNew() {
+        final class Flag: @unchecked Sendable { var raised = false }
+        let cache = InventoryCache()
+        cache.store(entries, for: all)
+        let changed = Flag()
+        withObservationTracking { _ = cache.snapshot(for: all) } onChange: { changed.raised = true }
+        cache.store(entries.reversed(), for: all)
+        #expect(!changed.raised)
+        cache.store(Array(entries.dropFirst()), for: all)
+        #expect(changed.raised)
+    }
+
+    @Test func showsTheLastListWhileAnotherHasNoneYet() throws {
+        let cache = InventoryCache()
+        cache.store(entries, for: all)
+        cache.show(all)
+        let otherMac = InventoryCache.Key(search: "", scope: .device(UUID()))
+        #expect(try #require(cache.snapshot(for: otherMac)).all.count == entries.count)
+        cache.storeFailure(for: otherMac)
+        #expect(try #require(cache.snapshot(for: otherMac)).all.isEmpty)
+        #expect(cache.age(of: otherMac) == nil)
     }
 }
 

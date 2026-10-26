@@ -13,6 +13,8 @@ final class AppModel {
     let egress: EgressState
     let probe: ProbeState
     let nav: Navigation
+    /// The Domains & IPs page's lists, kept between visits.
+    let inventory: InventoryCache
 
     // Services. Replaced by the real implementations in `AppBootstrap`.
     @ObservationIgnored var database: any TidemarkDatabase
@@ -33,6 +35,7 @@ final class AppModel {
         egress = EgressState()
         probe = ProbeState()
         nav = Navigation()
+        inventory = InventoryCache()
         database = OfflineDatabase()
         surge = UnavailableSurgeClient(endpoint: preferences.surgeEndpoint)
         classifier = NaiveSiteClassifier()

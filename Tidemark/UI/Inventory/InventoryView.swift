@@ -4,28 +4,25 @@ import UniformTypeIdentifiers
 /// Global Domains & IPs page, deduplicated across every app and probe.
 ///
 /// A table lists each domain and IP once, newest first, with the processes (and probes) that reached it;
-/// "Group by site" folds domains into their registrable domain and IPs into their network. The rows are built as
-/// they scroll into view, so switching between All, Domains and IPs and grouping only lay out the rows on screen.
+/// "Group by site" folds domains into their registrable domain and IPs into their network. The lists come from
+/// `AppModel.inventory`, which outlives the page, and the rows are built as they scroll into view, so switching
+/// between All, Domains and IPs, grouping and coming back to the page only lay out the rows on screen.
 struct InventoryView: View {
     @Environment(AppModel.self) private var model
 
-    @State private var entries: [InventoryEntry] = []
-    /// `entries` filtered by kind and in the table's order, and their site / network groups. Recomputed only
-    /// when the entries, the kind or the grouping change.
-    @State private var visible: [InventoryEntry] = []
-    @State private var groups: [InventoryGroup] = []
-    @State private var domainCount = 0
-    @State private var loaded = false
     @State private var exportDocument: AnalyzeCSVDocument?
     @State private var isExporting = false
     @State private var exportError: (any Error)?
 
     var body: some View {
         @Bindable var nav = model.nav
+        let key = InventoryCache.Key(search: nav.inventorySearch.trimmingCharacters(in: .whitespaces), scope: model.devices.scope)
+        let snapshot = model.inventory.snapshot(for: key)
+        let visible = snapshot?.entries(nav.inventoryKind) ?? []
 
-        content
+        content(snapshot: snapshot, visible: visible, key: key)
             .navigationTitle(tr("Domains & IPs", "Inventory"))
-            .navigationSubtitle(subtitle)
+            .navigationSubtitle(subtitle(snapshot))
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     DesignSegmentedControl(tr("Kind", "Inventory"), selection: $nav.inventoryKind,
@@ -67,20 +64,20 @@ struct InventoryView: View {
             .alert(error: $exportError) {
                 Button(tr("OK", "Inventory")) {}
             }
-            .task(id: QueryKey(search: nav.inventorySearch.trimmingCharacters(in: .whitespaces), scope: model.devices.scope)) {
-                await refresh()
-            }
-            .onChange(of: PresentationKey(kind: nav.inventoryKind, grouped: nav.inventoryGrouped,
-                                          language: Localizer.shared.languageCode), initial: true) {
-                recompute()
+            .task(id: key) {
+                await load(key)
             }
     }
 
     @ViewBuilder
-    private var content: some View {
-        if loaded && visible.isEmpty {
-            let search = model.nav.inventorySearch.trimmingCharacters(in: .whitespaces)
-            if search.isEmpty {
+    private func content(snapshot: InventoryCache.Snapshot?, visible: [InventoryEntry], key: InventoryCache.Key) -> some View {
+        if snapshot == nil {
+            // Only the first visit waits for the database; later visits show the cached list at once.
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if visible.isEmpty {
+            if key.search.isEmpty {
                 EmptyState(systemImage: "network",
                            title: tr("No domains or IPs yet", "Inventory"),
                            message: tr("Every domain and IP that Surge sees shows up here once, whichever app or probe reached it.", "Inventory"))
@@ -88,57 +85,61 @@ struct InventoryView: View {
                 // Not `ContentUnavailableView.search`, whose text follows the system language rather than
                 // Settings › Language.
                 EmptyState(systemImage: "magnifyingglass",
-                           title: trf("No domains or IPs match “%@”", "Inventory", search),
+                           title: trf("No domains or IPs match “%@”", "Inventory", key.search),
                            message: tr("The search looks at each domain or IP and the apps and probes that reached it.", "Inventory"))
             }
         } else {
-            InventoryList(model: model, entries: visible, groups: model.nav.inventoryGrouped ? groups : nil)
+            let groups = model.nav.inventoryGrouped
+                ? model.inventory.groups(for: key, kind: model.nav.inventoryKind, unknownNetwork: tr("Unknown network", "Inventory"),
+                                         site: { model.classifier.site(for: $0) })
+                : nil
+            InventoryList(model: model, entries: visible, groups: groups)
         }
     }
 
-    private var subtitle: String {
-        trf("%1$@ · %2$@, deduplicated across every app and probe", "Inventory",
-            trn("%lld domain", "%lld domains", domainCount, "Inventory"),
-            trn("%lld IP", "%lld IPs", entries.count - domainCount, "Inventory"))
-    }
-
-    private struct PresentationKey: Hashable {
-        var kind: HostKind?
-        var grouped: Bool
-        var language: String
-    }
-
-    /// Filters, orders and groups `entries` for the list.
-    private func recompute() {
-        visible = InventoryPresentation.visible(entries, kind: model.nav.inventoryKind)
-        groups = model.nav.inventoryGrouped
-            ? InventoryGroup.make(visible, site: { model.classifier.site(for: $0) }, unknownNetwork: tr("Unknown network", "Inventory"))
-            : []
-        domainCount = entries.reduce(0) { $0 + ($1.kind == .domain ? 1 : 0) }
+    private func subtitle(_ snapshot: InventoryCache.Snapshot?) -> String {
+        let domains = snapshot?.domainCount ?? 0
+        return trf("%1$@ · %2$@, deduplicated across every app and probe", "Inventory",
+                   trn("%lld domain", "%lld domains", domains, "Inventory"),
+                   trn("%lld IP", "%lld IPs", (snapshot?.all.count ?? 0) - domains, "Inventory"))
     }
 
     // MARK: Loading
 
-    private struct QueryKey: Hashable {
-        var search: String
-        var scope: DeviceScope
-    }
+    /// A list fetched this recently is shown as it is when the page opens; an older one is fetched again at once.
+    private static let revalidateAfter: Duration = .seconds(5)
+    private static let refreshInterval: Duration = .seconds(30)
 
-    private func refresh() async {
-        // Debounce typing in the search field.
-        if loaded {
+    private func load(_ key: InventoryCache.Key) async {
+        let cache = model.inventory
+        // Debounce typing in the search field (the first list loads at once).
+        if !key.search.isEmpty, cache.snapshot(for: key) != nil {
             try? await Task.sleep(for: .milliseconds(300))
+            if Task.isCancelled { return }
+        }
+        if let age = cache.age(of: key), age < Self.revalidateAfter {
+            cache.show(key)
+        } else {
+            await fetch(key)
         }
         while !Task.isCancelled {
-            let search = model.nav.inventorySearch.trimmingCharacters(in: .whitespaces)
-            if let fresh = try? await model.database.inventory(kind: nil, search: search, scope: model.devices.scope),
-               !Task.isCancelled, fresh != entries {
-                entries = fresh
-                recompute()
-            }
-            loaded = true
-            try? await Task.sleep(for: .seconds(30))
+            try? await Task.sleep(for: Self.refreshInterval - min(cache.age(of: key) ?? .zero, Self.refreshInterval))
+            if Task.isCancelled { return }
+            await fetch(key)
         }
+    }
+
+    private func fetch(_ key: InventoryCache.Key) async {
+        let cache = model.inventory
+        do {
+            let fresh = try await model.database.inventory(kind: nil, search: key.search, scope: key.scope)
+            if Task.isCancelled { return }
+            cache.store(fresh, for: key)
+        } catch {
+            if Task.isCancelled { return }
+            cache.storeFailure(for: key)
+        }
+        cache.show(key)
     }
 }
 
