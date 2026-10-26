@@ -101,25 +101,33 @@ final class ProbeProxyServer: Sendable {
     }
 
     /// Reads the head, or returns nil after `timeout`. Cancelling a pending receive tears the connection
-    /// down, so the reader is only cancelled after the caller has answered the client.
+    /// down, so the reader is only cancelled after the caller has answered the client, or when the proxy
+    /// stops.
     private static func readHead(from client: NetworkConnection<TCP>, timeout: Duration) async throws -> (read: HeadRead?, reader: Task<HeadRead, any Error>) {
         let reader = Task { try await readHead(from: client) }
         let once = ProbeOnce<HeadRead?>()
-        let read = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HeadRead?, any Error>) in
-            once.set(continuation)
-            let timer = Task {
-                try? await Task.sleep(for: timeout)
-                once.resume(returning: nil)
-            }
-            Task {
-                do {
-                    let value = try await reader.value
-                    once.resume(returning: value)
-                } catch {
-                    once.resume(throwing: error)
+        let read = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HeadRead?, any Error>) in
+                once.set(continuation)
+                let timer = Task {
+                    try? await Task.sleep(for: timeout)
+                    once.resume(returning: nil)
                 }
-                timer.cancel()
+                Task {
+                    do {
+                        let value = try await reader.value
+                        once.resume(returning: value)
+                    } catch {
+                        once.resume(throwing: error)
+                    }
+                    timer.cancel()
+                }
+                // A stop that came before the continuation was set.
+                if Task.isCancelled { once.resume(throwing: CancellationError()) }
             }
+        } onCancel: {
+            reader.cancel()
+            once.resume(throwing: CancellationError())
         }
         return (read, reader)
     }

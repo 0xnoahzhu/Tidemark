@@ -316,6 +316,23 @@ struct ProbeProxyTests {
         #expect(registry.snapshot().hosts.isEmpty)
     }
 
+    @Test func stopClosesClientsStillSendingTheirHead() async throws {
+        let registry = ProbeRegistry()
+        registry.begin(sessionID: UUID(), startedAt: .now)
+        let proxy = ProbeProxyServer(upstreamPort: 9, registry: registry)
+        let port = try await proxy.start()
+        let client = ProbeTestClient(port: port)
+        try await client.send("CONNECT example.com:443 HTTP/1.1\r\n")
+        try await Task.sleep(for: .milliseconds(50))
+        proxy.stop()
+        let clock = ContinuousClock()
+        let stopped = clock.now
+        let answer = try? await client.read(until: "\r\n\r\n", timeout: .seconds(3))
+        #expect(clock.now - stopped < .seconds(1), "closed with the stop, not after the head timeout")
+        #expect(answer?.isEmpty ?? true)
+        #expect(registry.snapshot().hosts.isEmpty)
+    }
+
     /// `NetworkConnection` starts itself in a task on the cooperative pool that holds it weakly, and an operation
     /// from a cancelled task queues that start again. Here that operation runs off the pool while every pool
     /// thread for its priority is blocked, so the start runs only after the connection was let go: dropped, it
