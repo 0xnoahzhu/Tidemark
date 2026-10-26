@@ -11,7 +11,7 @@ import SwiftUI
 /// Every choice is a button, so keyboard navigation reaches each one; VoiceOver reads the control as a
 /// segmented picker with its selected choice, and a toolbar's overflow menu lists the choices.
 struct DesignSegmentedControl<Value: Hashable>: View {
-    /// The metrics of one of the two sizes. A call site short of width can pass less horizontal padding.
+    /// The metrics of one of the two sizes.
     struct Size {
         var fontSize: CGFloat
         var iconSize: CGFloat
@@ -28,16 +28,16 @@ struct DesignSegmentedControl<Value: Hashable>: View {
 
         /// 14 pt titles, 15 pt icons and 12 pt counts; `padding: 8px 14px; border-radius: 9px` in a 4 pt track with
         /// 12 pt corners: 40 pt tall.
-        static func regular(horizontalPadding: CGFloat = 14) -> Size {
+        static func regular() -> Size {
             Size(fontSize: 14, iconSize: 15, badgeFontSize: 12, contentHeight: 16, verticalPadding: 8,
-                 horizontalPadding: horizontalPadding, spacing: 6, cornerRadius: 9, trackPadding: 4, trackCornerRadius: 12)
+                 horizontalPadding: 14, spacing: 6, cornerRadius: 9, trackPadding: 4, trackCornerRadius: 12)
         }
 
         /// 13 pt titles, 13 pt icons and 11 pt counts; `padding: 5px 11px; border-radius: 7px` in a 3 pt track with
         /// 10 pt corners: 32 pt tall, which a toolbar item holds without clipping.
-        static func compact(horizontalPadding: CGFloat = 11) -> Size {
+        static func compact() -> Size {
             Size(fontSize: 13, iconSize: 13, badgeFontSize: 11, contentHeight: 16, verticalPadding: 5,
-                 horizontalPadding: horizontalPadding, spacing: 5, cornerRadius: 7, trackPadding: 3, trackCornerRadius: 10)
+                 horizontalPadding: 11, spacing: 5, cornerRadius: 7, trackPadding: 3, trackCornerRadius: 10)
         }
     }
 
@@ -71,11 +71,6 @@ struct DesignSegmentedControl<Value: Hashable>: View {
         _selection = selection
         self.size = size
         self.segments = segments
-    }
-
-    /// Choices with a title only.
-    init(_ title: String, selection: Binding<Value>, size: Size = .regular(), segments: [(value: Value, title: String)]) {
-        self.init(title, selection: selection, size: size, segments: segments.map { Segment($0.value, $0.title) })
     }
 
     var body: some View {
