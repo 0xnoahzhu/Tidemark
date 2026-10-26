@@ -39,6 +39,7 @@ enum AppBootstrap {
         self.probe = probe
 
         StatusItemController.install(model: model)
+        DockPresence.start(model: model)
 
         engine.start()
         egress.start()
@@ -53,6 +54,7 @@ enum AppBootstrap {
     /// running, so quitting never hangs on an unreachable server. Then every surge-cli child still running is
     /// stopped (a second more at most, for one that ignores SIGTERM), so none outlives Tidemark.
     static func stop(_ model: AppModel, timeout: Duration = .seconds(6)) async {
+        DockPresence.stop()
         StatusItemController.uninstall()
         await shutDown(probe: probe, egress: egress, engine: engine, timeout: timeout)
         // Lookups nobody cancelled may still be running, and a child that ignored SIGTERM would get its SIGKILL

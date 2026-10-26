@@ -224,7 +224,7 @@ Status: Typechecked. Shield semantics are Runtime-checked: inside the shield `is
 - Batch preset changes → `WriteBuffer` configuration.
 - `openAtLogin` → `SMAppService` (4.13).
 - `appearance` → `NSApp.appearance`. `language` → `Localizer`.
-- Unread count → the menu bar glyph (`StatusItemController` observes it this way). Tidemark has no Dock tile to badge.
+- Unread count → the menu bar glyph (`StatusItemController` observes it this way), and the Dock badge while Tidemark is in the Dock (`DockIconUpdater`, which `DockPresence` starts with each new Dock tile).
 
 **Why.** `Preferences` persists in `didSet`. The side effects belong in one place. They cannot live in a view's `.onChange`, because that runs only while the view exists, and Tidemark often runs with no window open, only its menu bar item. `withContinuousObservation` re-arms itself, runs on the caller's actor, tracks exactly the properties its closure reads, and delivers changes made in the same turn as one event. The token stops it. This replaces hand-written `withObservationTracking` re-arm loops and Combine.
 
@@ -313,6 +313,7 @@ final class SystemEvents {
 **Notes**
 - The system allows only a short window after `willSleep`. Keep the work to a drain plus a spool fallback.
 - `Process.DidTerminateMessage` (26) is not needed for `surge-cli`, because the `events()` stream already ends when the child exits. Read `terminationStatus` there and reconnect with backoff, as the architecture already specifies.
+- `DockPresence` observes the `NSWindow` messages (`.didBecomeKey`, `.willClose`, `.didMiniaturize` and the others, macOS 27) of every window with `addObserver(of: NSWindow.self, for:)`. None of them is posted when a window is ordered on screen behind other apps' windows (not key, and no occlusion change while it is fully covered), so it also observes each window's `isVisible`, which is KVO-compliant: opening, closing, ordering out and hiding the app all change it. Runtime-checked.
 
 Status: Typechecked. The AppKit survey also compiled its own launch/terminate snippet.
 
@@ -1117,6 +1118,6 @@ These findings are uncertain, or their signatures typecheck but their behaviour 
     - For large exports, check whether returning `FileWrapper(url:)` for a temporary file written incrementally avoids reading it all into memory, or whether a custom `DocumentWriter` with `Destination == URL` can stream.
     - Remember that the survey's `@MainActor` version does not compile.
 12. **FoundationModels at runtime (4.8).** No longer applies: host insights were removed.
-13. **`NSStatusItemExpandedInterfaceDelegate` (5.1).** It is compiled only. Panel positioning on multiple displays, focus behaviour and how it interacts with Tidemark running as an agent app (`LSUIElement`, no Dock icon) are unverified.
+13. **`NSStatusItemExpandedInterfaceDelegate` (5.1).** It is compiled only. Panel positioning on multiple displays, focus behaviour and how it interacts with `NSApp.setActivationPolicy` switching between `.accessory` and `.regular` (`DockPresence`) are unverified.
 14. **Localisation with generated symbols (section 3.1).** Before switching `tr()` to generated `LocalizedStringResource` symbols, confirm that resolving a resource with `resource.locale = Localizer.shared.locale` picks the `zh-Hans` table even when the system language is English.
 15. **The 27 SDK writes `anyAppleOS` availability.** When checking whether an API exists on macOS, grep for both `anyAppleOS 27` and `macOS 27`. Otherwise you will wrongly conclude many APIs are missing.

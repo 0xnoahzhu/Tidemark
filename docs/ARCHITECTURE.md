@@ -311,11 +311,22 @@ reused for an hour.
 
 ## UI
 
-Tidemark lives in the menu bar (`StatusItemController`). It is an agent app from launch (`LSUIElement`, set through
-`INFOPLIST_KEY_LSUIElement`): it never shows a Dock icon and is not in the app switcher, also while its windows are
-open, and no setting changes that. The main window opens at launch. With no Dock icon or app switcher entry to bring
-it forward, every way into a window activates Tidemark first: the menu bar panel's Open Window, Settings… and alerts,
-a notification's View, the App Intents (`TidemarkIntents.showMainWindow`) and the menu commands.
+Tidemark lives in the menu bar (`StatusItemController`) and shows in the Dock only while one of its windows is open;
+no setting changes either. It is an agent app from launch (`LSUIElement`, set through `INFOPLIST_KEY_LSUIElement`), so
+no Dock icon flashes at startup. `DockPresence` makes the activation policy `.regular` (a Dock icon, an app switcher
+entry, Tidemark's menus in the menu bar) while the main window, Settings or the Site Probe window is on screen or
+minimized into the Dock, and `.accessory` again 250 ms after the last of them closes, so moving from one window to
+another never takes the icon away. The menu bar panel, sheets, popovers and alerts do not count, and a hidden app keeps
+its icon. It follows each window's `isVisible` (a window that opens behind other apps posts no occlusion change) and
+the window and app notifications, with no polling. The main window opens at launch, so the Dock icon appears with it.
+Leaving the Dock while active, Tidemark first hands the focus back to the app that was in front before it. Turning
+regular while already active (Tidemark opened again from Finder while it runs in the menu bar, say) leaves the previous
+app's menus in the menu bar, and activating an active app does nothing, so Tidemark lends the activation to the Dock
+and takes it back as it resigns; a window that opens behind other apps takes no focus. While Tidemark is in the Dock,
+`DockIconUpdater` shows the light or dark `BrandIcon` for the system's appearance (the Dock follows System Settings,
+not Settings › Appearance) and the number of unread alerts as the badge, written afresh to each new Dock tile. Every
+way into a window activates Tidemark first: the menu bar panel's Open Window, Settings… and alerts, a notification's
+View, the App Intents (`TidemarkIntents.showMainWindow`) and the menu commands.
 
 The window follows the "Three-pane · Native" direction of the design: a Liquid Glass sidebar (Mac menu,
 Capture, Analyze, Monitored Apps, Archived, Surge/PostgreSQL status footer), a content column per page,

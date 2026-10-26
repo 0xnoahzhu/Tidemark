@@ -55,6 +55,92 @@ struct UIChromeTests {
         return total
     }
 
+    // MARK: Dock
+
+    /// Tidemark is in the Dock while an ordinary window is on screen or minimized into the Dock; the menu bar
+    /// panel, the status item, sheets, popovers and alerts never put it there.
+    @Test func dockPresenceCountsOrdinaryWindowsOnly() {
+        typealias Traits = DockPresence.WindowTraits
+        let window = Traits(isVisible: true, isMiniaturized: false, isTitled: true, isPanel: false, isAttached: false)
+        var minimized = window
+        minimized.isVisible = false
+        minimized.isMiniaturized = true
+        var closed = window
+        closed.isVisible = false
+        let statusItem = Traits(isVisible: true, isMiniaturized: false, isTitled: false, isPanel: false, isAttached: false)
+        let menuBarPanel = Traits(isVisible: true, isMiniaturized: false, isTitled: false, isPanel: true, isAttached: false)
+        let alert = Traits(isVisible: true, isMiniaturized: false, isTitled: true, isPanel: true, isAttached: false)
+        let sheet = Traits(isVisible: true, isMiniaturized: false, isTitled: true, isPanel: false, isAttached: true)
+        let popover = Traits(isVisible: true, isMiniaturized: false, isTitled: false, isPanel: false, isAttached: true)
+
+        #expect(DockPresence.keepsDockIcon(window))
+        #expect(DockPresence.keepsDockIcon(minimized))
+        for other in [closed, statusItem, menuBarPanel, alert, sheet, popover] {
+            #expect(!DockPresence.keepsDockIcon(other))
+        }
+
+        #expect(DockPresence.policy(for: []) == .accessory)
+        #expect(DockPresence.policy(for: [statusItem, menuBarPanel, closed]) == .accessory)
+        #expect(DockPresence.policy(for: [statusItem, window]) == .regular)
+        #expect(DockPresence.policy(for: [statusItem, minimized]) == .regular)
+        // Settings closing while the main window stays open, and the reverse.
+        #expect(DockPresence.policy(for: [statusItem, window, closed]) == .regular)
+        #expect(DockPresence.policy(for: [statusItem, closed, window]) == .regular)
+        // A sheet or an alert left over does not keep Tidemark in the Dock by itself.
+        #expect(DockPresence.policy(for: [statusItem, closed, sheet, alert]) == .accessory)
+    }
+
+    /// The traits come from the window itself: its style, its class and whether it hangs off another window.
+    @Test func dockPresenceReadsWindowTraits() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled, .closable],
+                              backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        let borderless = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: true)
+        borderless.isReleasedWhenClosed = false
+        let panel = NSPanel(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        panel.isReleasedWhenClosed = false
+
+        #expect(DockPresence.WindowTraits(window)
+            == .init(isVisible: false, isMiniaturized: false, isTitled: true, isPanel: false, isAttached: false))
+        #expect(!DockPresence.WindowTraits(borderless).isTitled)
+        #expect(DockPresence.WindowTraits(panel).isPanel)
+        window.addChildWindow(borderless, ordered: .above)
+        #expect(DockPresence.WindowTraits(borderless).isAttached)
+        window.removeChildWindow(borderless)
+    }
+
+    @Test func dockBadgeLabel() {
+        #expect(DockIconUpdater.badgeLabel(unread: 0) == nil)
+        #expect(DockIconUpdater.badgeLabel(unread: -1) == nil)
+        #expect(DockIconUpdater.badgeLabel(unread: 7) == "7")
+        #expect(DockIconUpdater.badgeLabel(unread: 1000) == "999+")
+    }
+
+    @Test func brandIconVariantsDiffer() throws {
+        let light = try #require(DockIconUpdater.brandIcon(dark: false, pixels: 64))
+        let dark = try #require(DockIconUpdater.brandIcon(dark: true, pixels: 64))
+        let lightRep = try #require(light.representations.first as? NSBitmapImageRep)
+        let darkRep = try #require(dark.representations.first as? NSBitmapImageRep)
+        // Upper middle of the icon: the sky is light in one variant and dark in the other.
+        let a = try #require(lightRep.colorAt(x: 32, y: 18)?.usingColorSpace(.deviceRGB))
+        let b = try #require(darkRep.colorAt(x: 32, y: 18)?.usingColorSpace(.deviceRGB))
+        #expect(a.brightnessComponent > b.brightnessComponent + 0.2)
+        #expect(DockIconUpdater.isDark(try #require(NSAppearance(named: .darkAqua))))
+        #expect(!DockIconUpdater.isDark(try #require(NSAppearance(named: .aqua))))
+    }
+
+    /// The Dock follows the system: the app's effective appearance while it follows the system too, the
+    /// global interface style while Settings › Appearance forces Light or Dark.
+    @Test func dockIconFollowsTheSystemAppearance() throws {
+        let light = try #require(NSAppearance(named: .aqua))
+        let dark = try #require(NSAppearance(named: .darkAqua))
+        #expect(DockIconUpdater.systemIsDark(appOverride: nil, effective: dark, interfaceStyle: nil))
+        #expect(!DockIconUpdater.systemIsDark(appOverride: nil, effective: light, interfaceStyle: "Dark"))
+        // Forced Dark inside Tidemark on a light system keeps the light Dock icon, and the reverse.
+        #expect(!DockIconUpdater.systemIsDark(appOverride: dark, effective: dark, interfaceStyle: nil))
+        #expect(DockIconUpdater.systemIsDark(appOverride: light, effective: light, interfaceStyle: "Dark"))
+    }
+
     // MARK: Menu bar panel
 
     @Test func menuBarPanelMatchesTheDesignWidth() {

@@ -9,7 +9,8 @@ new domain or IP.
 * Site Probe: open a URL in an isolated browser and record every host it touches
 * Egress IP per Surge policy, with a change log
 * Several Macs can share one database
-* Lives in the menu bar, with no Dock icon: the window and Settings open from there
+* Lives in the menu bar, which opens the window and Settings; it shows in the Dock only while one of its windows
+  is open
 
 Requires macOS 27, Surge Mac 6.10+ (`surge-cli`), and PostgreSQL 14+.
 
