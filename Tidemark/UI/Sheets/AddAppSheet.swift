@@ -15,40 +15,60 @@ struct AddAppSheet: View {
     @State private var working = false
     @State private var failure: (any Error)?
 
-    private static let rowHeight: CGFloat = 44
+    /// A candidate's row, as in the design: its name and path (two lines, taller than the 28 px tile) with 8 px above
+    /// and below.
+    static let rowHeight = 47.px
+    /// Between two rows.
+    private static let rowSpacing = 2.px
+    /// The rows the list shows before it scrolls.
+    static let visibleRows = visibleRows(minimumWindowHeight: UIScale.minimumWindowSize.height, factor: UIScale.factor)
+
+    /// What the sheet takes besides its rows, in design px: the title and a two-line subtitle, RUNNING NOW, the
+    /// Choose Another App… line with two lines of help, the footer and the paddings between them (213 in English),
+    /// with room for a line more.
+    static let chromeHeight: CGFloat = 230
+
+    /// Six rows, or five where six would make the sheet taller than the main window at its minimum height, under
+    /// whose toolbar it hangs. At the design's minimum window six always fit; five are for a screen too small for
+    /// it, which cuts the window's minimum.
+    static func visibleRows(minimumWindowHeight: CGFloat, factor: CGFloat) -> Int {
+        // Six rows of 47 px, 2 px apart.
+        let sixRows = UIScale.length(chromeHeight + 6 * (47 + 2), factor: factor)
+        return sixRows <= minimumWindowHeight ? 6 : 5
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 3.px) {
                 Text(tr("Monitor an App", "Sheets"))
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.design(15, .bold))
                 Text(tr("Everything this app and its child processes send is collected under it, deduplicated by domain and IP.", "Sheets"))
-                    .font(.system(size: 12))
+                    .font(.design(12))
                     .foregroundStyle(Theme.ink2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 20.px)
+            .padding(.top, 18.px)
+            .padding(.bottom, 12.px)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Self.rowSpacing) {
                 Text(tr("Running now", "Sheets").uppercased(with: localizer.locale))
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .tracking(0.6)
+                    .font(.design(10.5, .semibold))
+                    .tracking(0.6 * UIScale.factor)
                     .foregroundStyle(Theme.ink2)
-                    .padding(.horizontal, 8)
-                    .padding(.top, 2)
-                    .padding(.bottom, 6)
+                    .padding(.horizontal, 8.px)
+                    .padding(.top, 2.px)
+                    .padding(.bottom, 6.px)
                 candidateList
                 chooseAnother
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 12.px)
+            .padding(.bottom, 8.px)
             .disabled(working)
 
             footer
         }
-        .frame(width: 520)
+        .frame(width: 520.px)
         .background(Theme.bg)
         .foregroundStyle(Theme.ink)
         .interactiveDismissDisabled(working)
@@ -65,23 +85,23 @@ struct AddAppSheet: View {
     @ViewBuilder
     private var candidateList: some View {
         if !loaded {
-            HStack(spacing: 8) {
+            HStack(spacing: 8.px) {
                 ProgressView().controlSize(.small)
                 Text(tr("Looking for running apps…", "Sheets"))
             }
-            .font(.system(size: 12))
+            .font(.design(12))
             .foregroundStyle(Theme.ink2)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 8.px)
+            .padding(.vertical, 10.px)
         } else if candidates.isEmpty {
             Text(tr("Every running app is already monitored.", "Sheets"))
-                .font(.system(size: 12))
+                .font(.design(12))
                 .foregroundStyle(Theme.ink2)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 8.px)
+                .padding(.vertical, 10.px)
         } else {
             ScrollView {
-                VStack(spacing: 2) {
+                VStack(spacing: Self.rowSpacing) {
                     ForEach(candidates) { candidate in
                         AddAppCandidateRow(candidate: candidate, isSelected: candidate.path == selection) {
                             selection = candidate.path
@@ -91,47 +111,49 @@ struct AddAppSheet: View {
                 }
             }
             .scrollBounceBehavior(.basedOnSize)
-            .frame(height: min(CGFloat(candidates.count) * (Self.rowHeight + 2), 6 * (Self.rowHeight + 2)))
+            .frame(height: CGFloat(min(candidates.count, Self.visibleRows)) * (Self.rowHeight + Self.rowSpacing))
         }
     }
 
     private var chooseAnother: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 10.px) {
             Button(tr("Choose Another App…", "Sheets"), action: chooseApp)
+                .buttonStyle(DesignButtonStyle(height: 26, cornerRadius: 7, horizontalPadding: 10))
                 .fixedSize()
             Text(tr("The full path is saved to the database. Every Mac that has the same path starts monitoring it; Macs without it skip it.", "Sheets"))
-                .font(.system(size: 11))
+                .font(.design(11))
                 .foregroundStyle(Theme.ink3)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
+        .padding(.horizontal, 8.px)
+        .padding(.top, 8.px)
+        .padding(.bottom, 2.px)
     }
 
     // MARK: Footer
 
+    /// Cancel on the fill and Start Monitoring on the accent, the design's 28 px buttons.
     private var footer: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 8.px) {
             if working {
                 ProgressView().controlSize(.small)
                 Text(progressText)
-                    .font(.system(size: 12))
+                    .font(.design(12))
                     .foregroundStyle(Theme.ink2)
                     .lineLimit(1)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 8.px)
             Button(tr("Cancel", "Sheets"), action: close)
+                .buttonStyle(DesignButtonStyle(horizontalPadding: 12))
                 .keyboardShortcut(.cancelAction)
                 .disabled(working)
             Button(tr("Start Monitoring", "Sheets"), action: start)
+                .buttonStyle(DesignButtonStyle(kind: .accent, horizontalPadding: 12))
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.glassProminent)
                 .disabled(selected == nil || working)
         }
-        .controlSize(.large)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 20.px)
+        .padding(.vertical, 12.px)
         .frame(maxWidth: .infinity)
         .background(Theme.bg2)
         .overlay(alignment: .top) {
@@ -225,20 +247,21 @@ private struct AddAppCandidateRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: 10.px) {
                 ZStack {
                     Circle()
-                        .strokeBorder(isSelected ? Theme.accent : Theme.ink3, lineWidth: 1.5)
+                        .strokeBorder(isSelected ? Theme.accent : Theme.ink3, lineWidth: 1.5.px)
                     Circle()
                         .fill(Theme.accent)
-                        .frame(width: 8, height: 8)
+                        .frame(width: 8.px, height: 8.px)
                         .opacity(isSelected ? 1 : 0)
                 }
-                .frame(width: 16, height: 16)
+                .frame(width: 16.px, height: 16.px)
                 AppTile(identity: AddAppCandidates.identity(for: candidate), size: 28.px)
-                VStack(alignment: .leading, spacing: 1) {
+                // The name and the path stack at the window's line height, as in the design.
+                VStack(alignment: .leading, spacing: 0) {
                     Text(candidate.name)
-                        .font(.system(size: 12.5, weight: .semibold))
+                        .font(.design(12.5, .semibold))
                         .lineLimit(1)
                     Text(candidate.path)
                         .font(Theme.mono(10.5))
@@ -246,16 +269,19 @@ private struct AddAppCandidateRow: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: 8.px)
+                // One line, whatever the language: the row's height is fixed.
                 Text(AddAppCandidates.backfillLabel(candidate.pastRequests))
-                    .font(.system(size: 11))
+                    .font(.design(11))
                     .foregroundStyle(Theme.ink2)
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 8.px)
             .frame(maxHeight: .infinity)
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .background(isSelected ? Theme.accentTint : .clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 9.px, style: .continuous))
+            .background(isSelected ? Theme.accentTint : .clear, in: RoundedRectangle(cornerRadius: 9.px, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])

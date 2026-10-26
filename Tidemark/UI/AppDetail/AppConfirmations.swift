@@ -38,7 +38,8 @@ struct AppMonitoringConfirmation: ViewModifier {
 }
 
 /// "Delete Raycast?": the page's delete sheet. The app's tile sits beside the title, the message says what
-/// deleting removes and what stays, and Cancel and a red Delete, the design's 28 px buttons, close it at the right.
+/// deleting removes and what stays (at the design's line height of 1.6), and the design's 28 px Cancel and red Delete
+/// close it at the right.
 struct AppDeleteConfirmation: View {
     @Environment(\.dismiss) private var dismiss
     var app: MonitoredApp
