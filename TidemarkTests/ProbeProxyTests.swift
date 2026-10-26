@@ -221,6 +221,7 @@ struct ProbeHTTPHeadTests {
     }
 }
 
+@Suite(.timeLimit(.minutes(1)))
 struct ProbeProxyTests {
     @Test func tunnelsConnectThroughSurgeAndReportsTheSourcePort() async throws {
         let upstream = ProbeFakeUpstream()
@@ -435,6 +436,7 @@ struct ProbeRegistryTests {
     }
 }
 
+@Suite(.timeLimit(.minutes(1)))
 @MainActor
 struct ProbeControllerTests {
     let scratch = TestDefaults()
