@@ -277,6 +277,6 @@ final class RequestsHistoryModel {
 
     private func sameFilter(_ a: RequestQuery, _ b: RequestQuery) -> Bool {
         a.scope == b.scope && a.range == b.range && a.appID == b.appID && a.policy == b.policy
-            && a.status == b.status && a.search == b.search
+            && a.status == b.status && a.search == b.search && a.host == b.host && a.endedWithError == b.endedWithError
     }
 }

@@ -23,6 +23,7 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func matching(_ query: RequestQuery, now: Date = .now) -> [RequestRecord] {
         let lower = query.range.lowerBound(now: now)
         let needle = query.search.trimmingCharacters(in: .whitespaces).lowercased()
+        let host = query.host.map(RequestsHostFilter.normalized)
         return rows.filter { r in
             guard query.scope.includes(r.deviceID) else { return false }
             if let lower, r.startedAt < lower { return false }
@@ -34,6 +35,8 @@ struct ShellDemoDatabase: TidemarkDatabase {
             case .active: if r.state != .active { return false }
             case .failed: if r.state != .failed && r.state != .rejected { return false }
             }
+            if let host, r.host != host { return false }
+            if query.endedWithError, !r.endedWithError { return false }
             if !needle.isEmpty {
                 let app = r.appID.flatMap { appNames[$0] } ?? ""
                 return RequestsPresentation.matches(r, needle: needle, appName: app)

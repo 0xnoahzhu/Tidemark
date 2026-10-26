@@ -12,7 +12,10 @@ struct RequestsView: View {
             if nav.requestsLive {
                 RequestsLiveView()
             } else {
+                // History's filters wrap onto a second line in a narrow column; a minimum height that followed
+                // them would change while the inspector opens or the window narrows, as the inspector's would.
                 RequestsHistoryView(history: model.requestsHistory, opensPage: !historyShown)
+                    .frame(minHeight: 0, maxHeight: .infinity)
                     .onAppear { historyShown = true }
             }
         }

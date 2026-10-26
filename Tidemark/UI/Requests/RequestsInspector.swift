@@ -41,8 +41,9 @@ struct RequestsInspector: View {
     }
 }
 
-/// Method and status chips, host and URL.
+/// Method and status chips, host and URL, and the host's other requests.
 private struct RequestsInspectorHeader: View {
+    @Environment(AppModel.self) private var model
     var record: RequestRecord
     var close: () -> Void
 
@@ -89,11 +90,25 @@ private struct RequestsInspectorHeader: View {
                     .lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if !showsHostHistory {
+                Button(tr("Requests to this host", "Requests")) {
+                    model.nav.openRequests(forHost: record.host)
+                }
+                .buttonStyle(.link)
+                .font(.design(11.5))
+                .help(trf("Show every stored request to %@ in History", "Requests", record.host))
+            }
         }
         .padding(.horizontal, 16.px)
         .padding(.top, 14.px)
         .padding(.bottom, 12.px)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// History already shows exactly this host's requests.
+    private var showsHostHistory: Bool {
+        let nav = model.nav
+        return !nav.requestsLive && nav.history.host == RequestsHostFilter.normalized(record.host)
     }
 }
 

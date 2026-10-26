@@ -41,6 +41,8 @@ struct RequestsHistoryView: View {
             appID: nav.history.appID,
             policy: nav.history.policy,
             status: nav.history.status,
+            host: nav.history.host,
+            endedWithError: nav.history.endedWithError,
             search: nav.requestSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         let results = opensPage && lastSearch == nil && !history.keeps(key.query) ? Self.unloaded : history
@@ -75,7 +77,7 @@ struct RequestsHistoryView: View {
                 Task { await history.loadMore(database: model.database) }
             }
             .scrollEdgeEffectStyle(.hard, for: .top)
-            .overlay { RequestsHistoryOverlay(history: results, search: key.search) }
+            .overlay { RequestsHistoryOverlay(history: results, search: key.search, host: key.host) }
         }
         .task {
             guard !showsRows else { return }
@@ -114,14 +116,20 @@ private struct RequestsHistoryKey: Hashable {
     var appID: AppID?
     var policy: String?
     var status: StatusFilter
+    var host: String?
+    var endedWithError: Bool
     var search: String
 
     var query: RequestQuery {
-        RequestQuery(scope: scope, range: range, appID: appID, policy: policy, status: status, search: search)
+        RequestQuery(
+            scope: scope, range: range, appID: appID, policy: policy, status: status, search: search, host: host,
+            endedWithError: endedWithError
+        )
     }
 }
 
-/// Range, app, policy and status menus; row count and query time.
+/// Range, app, policy and status menus and the exact host; row count and query time. The filters wrap onto a second
+/// line where the page is narrow (the inspector open in a small window).
 private struct RequestsHistoryFilterBar: View {
     @Environment(AppModel.self) private var model
     var history: RequestsHistoryModel
@@ -129,7 +137,7 @@ private struct RequestsHistoryFilterBar: View {
     var body: some View {
         @Bindable var nav = model.nav
         let apps = model.catalog.active + model.catalog.archived
-        HStack(spacing: 8.px) {
+        RequestsFilterBarLayout(spacing: 8.px, rowSpacing: 6.px) {
             RequestsFilterMenu(title: tr("Time range", "Requests"), label: RequestsHistoryLabels.range(nav.history.range), selection: $nav.history.range) {
                 ForEach(HistoryRange.allCases, id: \.self) { range in
                     Text(RequestsHistoryLabels.range(range)).tag(range)
@@ -153,24 +161,31 @@ private struct RequestsHistoryFilterBar: View {
                     Text(policy).tag(String?.some(policy))
                 }
             }
-            RequestsFilterMenu(title: tr("Status", "Requests"), label: RequestsHistoryLabels.status(nav.history.status), selection: $nav.history.status) {
-                ForEach(StatusFilter.allCases, id: \.self) { status in
-                    Text(RequestsHistoryLabels.status(status)).tag(status)
+            let status = RequestsStatusChoice.binding(nav)
+            RequestsFilterMenu(title: tr("Status", "Requests"), label: RequestsHistoryLabels.status(status.wrappedValue), selection: status) {
+                ForEach(RequestsStatusChoice.states, id: \.self) { choice in
+                    Text(RequestsHistoryLabels.status(choice)).tag(choice)
+                }
+                Divider()
+                Text(RequestsHistoryLabels.status(.endedWithError)).tag(RequestsStatusChoice.endedWithError)
+            }
+            if let host = nav.history.host {
+                RequestsHostChip(host: host) { nav.history.host = nil }
+            }
+            Group {
+                if history.isLoading {
+                    ProgressView().controlSize(.small)
+                }
+                if history.errorMessage == nil, history.totalCount > 0 || !history.isLoading {
+                    Text(trf("%1$@ rows · query %2$@", "Requests", Fmt.count(history.totalCount), RequestsHistoryLabels.milliseconds(history.elapsed)))
+                        .font(Theme.mono(11))
+                        .foregroundStyle(Theme.ink3)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
                 }
             }
-            Spacer(minLength: 8.px)
-            if history.isLoading {
-                ProgressView().controlSize(.small)
-            }
-            if history.errorMessage == nil, history.totalCount > 0 || !history.isLoading {
-                Text(trf("%1$@ rows · query %2$@", "Requests", Fmt.count(history.totalCount), RequestsHistoryLabels.milliseconds(history.elapsed)))
-                    .font(Theme.mono(11))
-                    .foregroundStyle(Theme.ink3)
-                    .lineLimit(1)
-                    .contentTransition(.numericText())
-            }
+            .layoutValue(key: RequestsFilterBarLayout.Trailing.self, value: true)
         }
-        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -242,12 +257,16 @@ private struct RequestsHistogramUnavailable: View {
 private struct RequestsHistoryOverlay: View {
     var history: RequestsHistoryModel
     var search: String
+    var host: String?
 
     var body: some View {
         if let message = history.errorMessage {
             EmptyState(systemImage: "exclamationmark.triangle", title: tr("Can't load history", "Requests"), message: message)
         } else if history.rows.isEmpty, !history.isLoading {
-            if search.isEmpty {
+            if let host, search.isEmpty {
+                EmptyState(systemImage: "clock", title: trf("No requests to %@ in this range", "Requests", host),
+                           message: tr("Try a longer time range or fewer filters.", "Requests"))
+            } else if search.isEmpty {
                 EmptyState(systemImage: "clock", title: tr("No requests in this range", "Requests"), message: tr("Try a longer time range or fewer filters.", "Requests"))
             } else {
                 EmptyState(systemImage: "magnifyingglass", title: trf("No requests match “%@”", "Requests", search), message: tr("The filter looks at host, remote IP, process and app.", "Requests"))
@@ -276,6 +295,14 @@ enum RequestsHistoryLabels {
         case .completed: tr("Completed", "Requests")
         case .active: tr("Active", "Requests")
         case .failed: tr("Failed", "Requests")
+        }
+    }
+
+    @MainActor
+    static func status(_ choice: RequestsStatusChoice) -> String {
+        switch choice {
+        case .state(let status): Self.status(status)
+        case .endedWithError: tr("Ended with an error", "Requests")
         }
     }
 

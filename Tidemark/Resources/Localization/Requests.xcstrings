@@ -540,6 +540,17 @@
         }
       }
     },
+    "Ended with an error" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以错误结束"
+          }
+        }
+      }
+    },
     "Entered" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1046,6 +1057,17 @@
         }
       }
     },
+    "No requests to %@ in this range" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个时间范围内没有发往 %@ 的请求"
+          }
+        }
+      }
+    },
     "No timing yet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1277,6 +1299,17 @@
         }
       }
     },
+    "Remove the filter for %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除 %@ 的筛选"
+          }
+        }
+      }
+    },
     "Requests" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1306,6 +1339,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请求随时间的分布"
+          }
+        }
+      }
+    },
+    "Requests to this host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个主机的请求"
           }
         }
       }
@@ -1438,6 +1482,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "服务器"
+          }
+        }
+      }
+    },
+    "Show every host" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示全部主机"
+          }
+        }
+      }
+    },
+    "Show every stored request to %@ in History" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在历史中显示发往 %@ 的全部已存请求"
           }
         }
       }

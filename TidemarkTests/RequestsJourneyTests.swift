@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import Tidemark
 
@@ -394,5 +395,81 @@ struct RequestsJourneyLabelTests {
             #expect(RequestsJourneyLabels.duration(7200) == "2 h")
             #expect(RequestsJourneyLabels.duration(3 * 86400) == "3 d")
         }
+    }
+}
+
+/// History on one exact host, and the status filter's "ended with an error".
+@MainActor
+struct RequestsHostHistoryTests {
+    typealias M = UIMainFixtures
+
+    @Test func opensHistoryOnOneHost() {
+        let nav = Navigation()
+        nav.open(.egress)
+        nav.selectedRequest = M.record(id: 7).key
+        nav.requestSearch = "cursor"
+        nav.history.range = .last7Days
+        nav.history.policy = "DIRECT"
+        nav.history.appID = M.cursor.id
+        nav.history.endedWithError = true
+
+        nav.openRequests(forHost: " API2.Cursor.sh ")
+        #expect(nav.page == .requests)
+        #expect(!nav.requestsLive)
+        #expect(nav.history.host == "api2.cursor.sh")
+        // The range stays; nothing else hides the host's requests.
+        #expect(nav.history.range == .last7Days)
+        #expect(nav.history.policy == nil && nav.history.appID == nil && nav.history.status == .any && !nav.history.endedWithError)
+        #expect(nav.requestSearch.isEmpty)
+        // A selection from another page does not carry over.
+        #expect(nav.selectedRequest == nil)
+
+        // From History's own inspector the request stays open.
+        let key = M.record(id: 8).key
+        nav.selectedRequest = key
+        nav.openRequests(forHost: "[2001:DB8::1]")
+        #expect(nav.history.host == "2001:db8::1")
+        #expect(nav.selectedRequest == key)
+    }
+
+    @Test func theStatusMenuSetsTheErrorFilter() {
+        let nav = Navigation()
+        let status = RequestsStatusChoice.binding(nav)
+        #expect(status.wrappedValue == .state(.any))
+        status.wrappedValue = .endedWithError
+        #expect(nav.history.endedWithError && nav.history.status == .any)
+        #expect(status.wrappedValue == .endedWithError)
+        status.wrappedValue = .state(.failed)
+        #expect(!nav.history.endedWithError && nav.history.status == .failed)
+    }
+
+    @Test func theDemoDatabaseFiltersByHostAndEnding() async throws {
+        var reset = M.record(id: 1, host: "api2.cursor.sh")
+        reset.endReason = "TCP error: Connection reset"
+        var closed = M.record(id: 2, host: "api2.cursor.sh", startedAt: Date(timeIntervalSince1970: 1_729_750_100))
+        closed.endReason = "Closed by remote"
+        let other = M.record(id: 3, host: "api.github.com")
+        let database = ShellDemoDatabase(rows: [reset, closed, other])
+
+        let host = try await database.queryRequests(RequestQuery(range: .all, host: "API2.cursor.sh"))
+        #expect(host.rows.map(\.key.surgeID) == [2, 1])
+        let errors = try await database.queryRequests(RequestQuery(range: .all, host: "api2.cursor.sh", endedWithError: true))
+        #expect(errors.rows.map(\.key.surgeID) == [1])
+        let anyHost = try await database.queryRequests(RequestQuery(range: .all, endedWithError: true))
+        #expect(anyHost.totalCount == 1)
+        let histogram = try await database.histogram(RequestQuery(range: .all, host: "api.github.com"), buckets: 4)
+        #expect(histogram.counts.reduce(0, +) == 1)
+    }
+
+    @Test func keepsResultsOnlyForTheSameHostAndEnding() async {
+        let history = RequestsHistoryModel()
+        var query = RequestQuery(range: .all, host: "api2.cursor.sh")
+        await history.load(query, database: ShellDemoDatabase(rows: [M.record(id: 1)]))
+        #expect(history.keeps(query))
+        query.host = "api.github.com"
+        #expect(!history.keeps(query))
+        query.host = "api2.cursor.sh"
+        query.endedWithError = true
+        #expect(!history.keeps(query))
     }
 }
