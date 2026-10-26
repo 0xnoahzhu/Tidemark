@@ -45,6 +45,17 @@
         }
       }
     },
+    "%1$@, resolved at least %2$@ before the request" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，解析早于请求至少 %2$@"
+          }
+        }
+      }
+    },
     "%1$lld A, %2$lld AAAA" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1673,6 +1684,39 @@
         }
       }
     },
+    "Surge resolved the name only to match rules; the proxy resolved it again on its side." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 解析域名只为匹配规则；代理在它那一侧又解析了一次。"
+          }
+        }
+      }
+    },
+    "Surge's resolver answered %1$@, via %2$@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 的解析器经 %2$@ 给出了应答，%1$@"
+          }
+        }
+      }
+    },
+    "Surge's resolver answered %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 的解析器给出了应答，%@"
+          }
+        }
+      }
+    },
     "Switch between the live stream and stored history" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1757,6 +1801,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "经由 Surge 的虚拟网卡（VIF），UDP"
+          }
+        }
+      }
+    },
+    "Tidemark looked the name up %1$@, via %2$@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidemark 经 %2$@ 查询了该域名，%1$@"
+          }
+        }
+      }
+    },
+    "Tidemark looked the name up %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidemark 查询了该域名，%@"
           }
         }
       }

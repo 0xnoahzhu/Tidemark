@@ -51,27 +51,44 @@ struct RequestsJourney: Equatable {
             var aaaa: Int
         }
 
+        /// An answer for the host made apart from the request.
+        struct SeparateAnswer: Equatable {
+            var answer: DNSAnswer
+            /// When it was resolved, from the request's start (negative before it).
+            var age: TimeInterval
+            /// It holds the IP shown and is Tidemark's exactly when that IP came from Tidemark's lookup: the answer the
+            /// IP shown came from.
+            var gaveShownIP: Bool
+        }
+
         var offset: TimeInterval?
         /// What Surge did for rule matching (rule mode).
         var lookup: Lookup?
         var recordCounts: RecordCounts?
         /// The address rule matching used, when it is not the remote IP shown.
         var matchedIP: String?
-        /// Surge's answer for the host that held at the start: its server, CNAME path and addresses.
+        /// Surge's answer to the request's own lookup (`lookup`): its server, CNAME path and addresses.
         var answer: DNSAnswer?
-        /// The proxy resolved the host on its side, which this Mac never sees: a proxy policy always resolves remotely.
+        /// An answer for the host that held as the request started though its notes record no lookup of its own
+        /// (global proxy mode, a rule that needed no address): Tidemark's own lookup, or Surge's resolver answering
+        /// for something else, which says nothing of how the request itself was resolved.
+        var separateAnswer: SeparateAnswer?
+        /// The proxy resolved the host on its side, which this Mac never sees: a proxy policy always resolves remotely,
+        /// also after a lookup for rule matching.
         var resolvedByProxy = false
         /// The remote IP the request shows and where it came from.
         var shownIP: ShownIP?
 
-        /// The names between the host and its addresses in the answer's CNAME path.
-        var cnames: [String] {
-            guard let path = answer?.path else { return [] }
-            let host = answer?.domain ?? ""
+        /// The names between the host and its addresses in `answer`'s CNAME path.
+        var cnames: [String] { Self.cnames(in: answer) }
+
+        /// The names between the host and its addresses in an answer's CNAME path.
+        static func cnames(in answer: DNSAnswer?) -> [String] {
+            guard let answer, let path = answer.path else { return [] }
             return path.components(separatedBy: "->")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { name in
-                    !name.isEmpty && name.caseInsensitiveCompare(host) != .orderedSame
+                    !name.isEmpty && name.caseInsensitiveCompare(answer.domain) != .orderedSame
                         && !name.split(separator: ",").allSatisfy { HostName.isIPAddress($0.trimmingCharacters(in: .whitespaces)) }
                 }
         }
@@ -199,10 +216,12 @@ struct RequestsJourney: Equatable {
 
     // MARK: Stages
 
-    /// Nil for an IP literal (nothing to resolve) and when nothing tells about the host's DNS.
+    /// Nil for an IP literal (nothing to resolve) and when nothing tells about the host's DNS. The answer joined by
+    /// host and time is the request's own only when its notes record a lookup (rule mode); otherwise it was made
+    /// apart from the request and is said to be.
     private static func dns(_ record: RequestRecord, notes: Notes, answer: DNSAnswer?) -> DNS? {
         guard !record.isIPLiteral else { return nil }
-        var dns = DNS(offset: notes.dnsOffset, lookup: notes.lookup, recordCounts: notes.recordCounts, answer: answer)
+        var dns = DNS(offset: notes.dnsOffset, lookup: notes.lookup, recordCounts: notes.recordCounts)
         if case .lookedUp(nil) = dns.lookup, let duration = RequestTiming.dnsLookupDuration(of: record) {
             dns.lookup = .lookedUp(milliseconds: duration * 1000)
         }
@@ -211,8 +230,15 @@ struct RequestsJourney: Equatable {
             let age = record.remoteIPResolvedAt.map { $0.timeIntervalSince(record.startedAt) }
             dns.shownIP = ShownIP(ip: ip, source: record.remoteIPSource, age: age)
         }
+        if dns.lookup != nil {
+            dns.answer = answer
+        } else if let answer {
+            let shown = dns.shownIP
+            let gave = shown.map { answer.addresses.contains($0.ip) && answer.byTidemark == ($0.source == .tidemarkLookup) } ?? false
+            dns.separateAnswer = DNS.SeparateAnswer(answer: answer, age: answer.resolvedAt.timeIntervalSince(record.startedAt), gaveShownIP: gave)
+        }
         if let matched = notes.matchedIP, matched != dns.shownIP?.ip { dns.matchedIP = matched }
-        guard dns.lookup != nil || dns.answer != nil || dns.resolvedByProxy || dns.shownIP != nil else { return nil }
+        guard dns.lookup != nil || answer != nil || dns.resolvedByProxy || dns.shownIP != nil else { return nil }
         return dns
     }
 

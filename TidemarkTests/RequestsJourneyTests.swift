@@ -285,6 +285,40 @@ struct RequestsJourneyTests {
         #expect(end.proxyError == error)
     }
 
+    /// In global proxy mode Surge looks nothing up for the request: an answer joined by host and time is Tidemark's
+    /// own lookup or Surge's resolver answering for something else, never the request's.
+    @Test func keepsAnAnswerMadeApartFromTheRequestApart() throws {
+        let record = F.globalModeReset()
+        let lookup = DNSAnswer(
+            deviceID: F.mac, domain: record.host, resolvedAt: record.remoteIPResolvedAt!, server: "https://cloudflare-dns.com/dns-query",
+            interface: nil, addresses: ["43.175.21.9"], path: "collect.moomoo.com -> collect.moomoo.com.edgekey.net -> 43.175.21.9",
+            log: nil, timeCostMs: 40, expiresAt: nil, byTidemark: true
+        )
+        func dns(_ answer: DNSAnswer) throws -> RequestsJourney.DNS {
+            let journey = RequestsJourney(record: record, related: RequestRelatedRecords(dnsAnswer: answer))
+            return try #require(journey.stages.compactMap { if case .dns(let dns) = $0 { dns } else { nil } }.first)
+        }
+
+        let tidemark = try dns(lookup)
+        #expect(tidemark.lookup == nil)
+        #expect(tidemark.answer == nil)
+        #expect(tidemark.cnames.isEmpty)
+        #expect(tidemark.resolvedByProxy)
+        // The lookup the IP shown came from.
+        #expect(tidemark.separateAnswer == RequestsJourney.DNS.SeparateAnswer(answer: lookup, age: -180, gaveShownIP: true))
+        #expect(RequestsJourney.DNS.cnames(in: lookup) == ["collect.moomoo.com.edgekey.net"])
+
+        // Surge's resolver answered just before the request, with another address.
+        var resolver = lookup
+        resolver.byTidemark = false
+        resolver.resolvedAt = record.startedAt.addingTimeInterval(-5)
+        resolver.addresses = ["43.175.21.12"]
+        #expect(try dns(resolver).separateAnswer == RequestsJourney.DNS.SeparateAnswer(answer: resolver, age: -5, gaveShownIP: false))
+        // The same address, but not the lookup the IP shown names.
+        resolver.addresses = ["43.175.21.9"]
+        #expect(try dns(resolver).separateAnswer?.gaveShownIP == false)
+    }
+
     /// Proxy errors are joined by host and time: only one the request's own node reported is its.
     @Test func takesOnlyItsOwnNodesError() {
         let record = F.globalModeReset()
@@ -411,7 +445,10 @@ struct RequestsJourneyLabelTests {
                 "Looked up by Tidemark", "From Surge's cache",
             ])
             #expect(RequestsJourneyLabels.shownIPDetail(.init(ip: "1.2.3.4", source: .tidemarkLookup, age: -180)) == "Looked up by Tidemark, 3 min before the request")
-            #expect(RequestsJourneyLabels.shownIPDetail(.init(ip: "1.2.3.4", source: .surgeCache, age: 0.2)) == "From Surge's cache, as the request started")
+            // A cache entry's time is only the latest it can have been resolved.
+            #expect(RequestsJourneyLabels.shownIPDetail(.init(ip: "1.2.3.4", source: .surgeCache, age: 0.2)) == "From Surge's cache")
+            #expect(RequestsJourneyLabels.shownIPDetail(.init(ip: "1.2.3.4", source: .surgeCache, age: -180))
+                == "From Surge's cache, resolved at least 3 min before the request")
             // Resolved during the request: its time adds nothing.
             #expect(RequestsJourneyLabels.shownIPDetail(.init(ip: "1.2.3.4", source: .ruleDNS, age: 0.3)) == "Address Surge matched rules on")
             #expect(RequestsJourneyLabels.shownIPDetail(.init(ip: "1.2.3.4", source: nil, age: nil)) == nil)
@@ -422,6 +459,28 @@ struct RequestsJourneyLabelTests {
                 #expect(RequestsJourneyLabels.source(source).unicodeScalars.contains { $0.value >= 0x4E00 }, "\(source)")
             }
             #expect(RequestsJourneyLabels.shownIPDetail(.init(ip: "1.2.3.4", source: .tidemarkLookup, age: -180)) == "由 Tidemark 查询，请求前 3 分钟")
+            #expect(RequestsJourneyLabels.shownIPDetail(.init(ip: "1.2.3.4", source: .surgeCache, age: -180)) == "来自 Surge 的缓存，解析早于请求至少 3 分钟")
+        }
+    }
+
+    @Test func saysWhoseAnAnswerApartFromTheRequestWas() {
+        let answer = DNSAnswer(deviceID: RequestsJourneyFixtures.mac, domain: "example.com", resolvedAt: .now, server: "https://cloudflare-dns.com/dns-query",
+                               interface: nil, addresses: ["93.184.215.14"], path: nil, log: nil, timeCostMs: nil, expiresAt: nil, byTidemark: true)
+        var surge = answer
+        surge.byTidemark = false
+        surge.server = nil
+        withLanguage("en") {
+            #expect(RequestsJourneyLabels.separateAnswer(.init(answer: answer, age: -180, gaveShownIP: true))
+                == "Tidemark looked the name up 3 min before the request, via cloudflare-dns.com")
+            #expect(RequestsJourneyLabels.separateAnswer(.init(answer: surge, age: 0.3, gaveShownIP: false)) == "Surge's resolver answered as the request started")
+            #expect(RequestsJourneyLabels.resolvedByProxy(afterLookup: false) == "The proxy resolved the name on its side, which this Mac can't see.")
+            #expect(RequestsJourneyLabels.resolvedByProxy(afterLookup: true)
+                == "Surge resolved the name only to match rules; the proxy resolved it again on its side.")
+        }
+        withLanguage("zh-Hans") {
+            guard Localizer.shared.bundle != nil else { return }
+            #expect(RequestsJourneyLabels.separateAnswer(.init(answer: answer, age: -180, gaveShownIP: true)) == "Tidemark 经 cloudflare-dns.com 查询了该域名，请求前 3 分钟")
+            #expect(RequestsJourneyLabels.separateAnswer(.init(answer: surge, age: 0.3, gaveShownIP: false)) == "Surge 的解析器给出了应答，请求开始时")
         }
     }
 

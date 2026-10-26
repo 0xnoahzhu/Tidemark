@@ -209,11 +209,8 @@ private struct RequestsJourneyDNS: View {
             RequestsJourneyFact(label: tr("Server", "Requests"), value: RequestsJourney.serverLabel(server))
                 .help(server)
         }
-        if !dns.cnames.isEmpty {
-            RequestsJourneyNames(label: "CNAME", names: dns.cnames)
-        }
-        if let answer = dns.answer, !answer.addresses.isEmpty {
-            RequestsJourneyFact(label: tr("Answer", "Requests"), value: answer.addresses.joined(separator: ", "), mono: true, selectable: true)
+        if let answer = dns.answer {
+            RequestsJourneyAnswer(answer: answer)
         } else if let counts = dns.recordCounts {
             RequestsJourneyFact(label: tr("Answer", "Requests"), value: trf("%1$lld A, %2$lld AAAA", "Requests", counts.a, counts.aaaa))
         }
@@ -221,10 +218,38 @@ private struct RequestsJourneyDNS: View {
             RequestsJourneyFact(label: tr("Matched on", "Requests"), value: matched, mono: true, selectable: true)
         }
         if dns.resolvedByProxy {
-            RequestsJourneyNote(text: tr("The proxy resolved the name on its side, which this Mac can't see.", "Requests"))
+            RequestsJourneyNote(text: RequestsJourneyLabels.resolvedByProxy(afterLookup: dns.lookup != nil))
         }
         if let shown = dns.shownIP {
             RequestsJourneyFact(label: tr("IP shown", "Requests"), value: shown.ip, mono: true, detail: RequestsJourneyLabels.shownIPDetail(shown))
+        }
+        if let separate = dns.separateAnswer {
+            // The answer the IP shown came from needs no word on whose it is: the IP shown says so.
+            if separate.gaveShownIP {
+                if let server = separate.answer.server {
+                    RequestsJourneyFact(label: tr("Server", "Requests"), value: RequestsJourney.serverLabel(server))
+                        .help(server)
+                }
+            } else {
+                RequestsJourneyNote(text: RequestsJourneyLabels.separateAnswer(separate))
+                    .help(separate.answer.server ?? "")
+            }
+            RequestsJourneyAnswer(answer: separate.answer)
+        }
+    }
+}
+
+/// An answer's CNAME path and addresses.
+private struct RequestsJourneyAnswer: View {
+    var answer: DNSAnswer
+
+    var body: some View {
+        let cnames = RequestsJourney.DNS.cnames(in: answer)
+        if !cnames.isEmpty {
+            RequestsJourneyNames(label: "CNAME", names: cnames)
+        }
+        if !answer.addresses.isEmpty {
+            RequestsJourneyFact(label: tr("Answer", "Requests"), value: answer.addresses.joined(separator: ", "), mono: true, selectable: true)
         }
     }
 }
@@ -589,12 +614,41 @@ enum RequestsJourneyLabels {
     }
 
     /// `Looked up by Tidemark, 3 min before the request`: the source, and for an address resolved apart from the
-    /// request, when.
+    /// request, when. An entry of Surge's cache is dated by the read of the cache that first showed it unless a `dns`
+    /// event dated it, so its time is only the latest it can have been resolved.
     static func shownIPDetail(_ shown: RequestsJourney.ShownIP) -> String? {
         guard let source = shown.source else { return nil }
         let label = Self.source(source)
-        guard source == .tidemarkLookup || source == .surgeCache, let age = shown.age else { return label }
-        return trf("%1$@, %2$@", "Requests", label, relative(age))
+        guard let age = shown.age else { return label }
+        switch source {
+        case .tidemarkLookup:
+            return trf("%1$@, %2$@", "Requests", label, relative(age))
+        case .surgeCache:
+            guard age <= -1 else { return label }
+            return trf("%1$@, resolved at least %2$@ before the request", "Requests", label, duration(-age))
+        case .literal, .surge, .ruleDNS:
+            return label
+        }
+    }
+
+    /// What a proxied request's DNS stage says of the proxy's own resolution.
+    static func resolvedByProxy(afterLookup: Bool) -> String {
+        afterLookup
+            ? tr("Surge resolved the name only to match rules; the proxy resolved it again on its side.", "Requests")
+            : tr("The proxy resolved the name on its side, which this Mac can't see.", "Requests")
+    }
+
+    /// `Tidemark looked the name up 3 min before the request, via cloudflare-dns.com`: whose an answer made apart from
+    /// the request was, and when.
+    static func separateAnswer(_ separate: RequestsJourney.DNS.SeparateAnswer) -> String {
+        let when = relative(separate.age)
+        let server = separate.answer.server.map(RequestsJourney.serverLabel)
+        return switch (separate.answer.byTidemark, server) {
+        case (true, let server?): trf("Tidemark looked the name up %1$@, via %2$@", "Requests", when, server)
+        case (true, nil): trf("Tidemark looked the name up %@", "Requests", when)
+        case (false, let server?): trf("Surge's resolver answered %1$@, via %2$@", "Requests", when, server)
+        case (false, nil): trf("Surge's resolver answered %@", "Requests", when)
+        }
     }
 
     /// `3 min before the request`, `as the request started`, `2 s after the request started`.
