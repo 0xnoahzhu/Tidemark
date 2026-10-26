@@ -487,6 +487,19 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(groups[1].requests == 15)
     }
 
+    /// The list draws groups and entries in one lazy stack, so a group never has an entry's id: the stack would draw the
+    /// site `sentry.io` in the row it kept for the domain `sentry.io`.
+    @Test func groupsNeverTakeAnEntrysID() {
+        let entries = [
+            entry("sentry.io", requests: 4, source: "Brave Browser"),
+            entry("o450.ingest.sentry.io", requests: 2, source: "Cursor"),
+            entry("github.com", requests: 1, source: "Cursor"),
+        ]
+        let groups = InventoryGroup.make(entries, site: naiveSite, unknownNetwork: "Unknown network")
+        #expect(groups.map(\.name) == ["sentry.io", "github.com"])
+        #expect(Set(groups.map(\.id)).isDisjoint(with: entries.map(\.id)))
+    }
+
     @Test func previewsFourNamesThenACount() {
         let group = InventoryGroup(name: "hdslb.com", kind: .domain, names: ["a", "b", "c", "d", "e", "f"], sources: [], requests: 0)
         #expect(group.preview == "a  ·  b  ·  c  ·  d  ·  +2")

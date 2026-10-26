@@ -854,7 +854,9 @@ struct InventoryGroup: Identifiable, Hashable {
     var sources: [InventorySource]
     var requests: Int64
 
-    var id: String { "\(kind.rawValue):\(name)" }
+    /// Never an entry's id: grouping swaps the entries for the groups in the same lazy stack, which draws a group in
+    /// the row it kept for the entry with the same id (the site `sentry.io` as the domain `sentry.io`).
+    var id: String { "group:\(kind.rawValue):\(name)" }
 
     /// `a.com  ·  b.com  ·  c.com  ·  d.com  ·  +3`
     var preview: String {
