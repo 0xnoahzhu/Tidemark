@@ -15,8 +15,8 @@ struct RequestsTable: View {
 
     var model: AppModel
     var rows: [RequestRecord]
-    /// The selected row; nil when rows cannot be selected (History, whose rows open no inspector).
-    var selection: Binding<RequestKey?>?
+    /// The selected row, which the inspector shows.
+    var selection: Binding<RequestKey?>
     var timeStyle: TimeStyle
     /// Reference time for the fresh-row background; nil disables it (History).
     var now: Date?
@@ -62,13 +62,7 @@ struct RequestsTable: View {
         // whatever is left is always shared between the app names and the hosts, Host keeping the wider share.
         // The minimums add up to about the content column of the smallest window; below that the table
         // scrolls horizontally.
-        Group {
-            if let selection {
-                Table(rows, selection: selection) { columns }
-            } else {
-                Table(rows) { columns }
-            }
-        }
+        Table(rows, selection: selection) { columns }
         .alternatingRowBackgrounds()
         // A table reports the sum of its column widths as its minimum, which would push the split view past the
         // window once the inspector opens (see `RequestsView`); narrower than its columns it scrolls horizontally.
@@ -123,7 +117,7 @@ struct RequestsTable: View {
         .alignment(.trailing)
     }
 
-    private var selectedKey: RequestKey? { selection?.wrappedValue }
+    private var selectedKey: RequestKey? { selection.wrappedValue }
 
     /// Fresh rows get the arrival tint, except the selected one, which keeps the system selection.
     private func isFresh(_ record: RequestRecord) -> Bool {

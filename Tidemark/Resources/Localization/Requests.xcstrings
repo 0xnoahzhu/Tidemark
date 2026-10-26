@@ -12,6 +12,17 @@
         }
       }
     },
+    "%1$@ reported it at %2$@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 于 %2$@ 报告"
+          }
+        }
+      }
+    },
     "%1$@ rows · query %2$@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19,6 +30,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@ 行 · 查询 %2$@"
+          }
+        }
+      }
+    },
+    "%1$@, %2$@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，%2$@"
+          }
+        }
+      }
+    },
+    "%1$lld A, %2$lld AAAA" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld 条 A，%2$lld 条 AAAA"
           }
         }
       }
@@ -34,6 +67,28 @@
         }
       }
     },
+    "%@ after the request started" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求开始后 %@"
+          }
+        }
+      }
+    },
+    "%@ before the request" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求前 %@"
+          }
+        }
+      }
+    },
     "%@ is not monitored, so this only lands in the global log." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -41,6 +96,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 没有被监控，这条只记在全局日志里。"
+          }
+        }
+      }
+    },
+    "%lld d" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 天"
+          }
+        }
+      }
+    },
+    "%lld h" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 小时"
+          }
+        }
+      }
+    },
+    "%lld min" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 分钟"
+          }
+        }
+      }
+    },
+    "%lld s" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 秒"
           }
         }
       }
@@ -56,6 +155,28 @@
         }
       }
     },
+    "Address Surge connected to" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 连接的地址"
+          }
+        }
+      }
+    },
+    "Address Surge matched rules on" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 匹配规则用的地址"
+          }
+        }
+      }
+    },
     "All apps" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63,6 +184,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "全部 App"
+          }
+        }
+      }
+    },
+    "All direct" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部直连"
           }
         }
       }
@@ -85,6 +217,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "全部时间"
+          }
+        }
+      }
+    },
+    "Answer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应答"
+          }
+        }
+      }
+    },
+    "Answered from Surge's cache" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由 Surge 的缓存应答"
           }
         }
       }
@@ -118,6 +272,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "App · 进程"
+          }
+        }
+      }
+    },
+    "as the request started" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求开始时"
+          }
+        }
+      }
+    },
+    "Broken pipe" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管道已断开"
           }
         }
       }
@@ -177,6 +353,39 @@
         }
       }
     },
+    "Closed after a while without traffic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一段时间没有流量后关闭"
+          }
+        }
+      }
+    },
+    "Closed by the app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由 App 关闭"
+          }
+        }
+      }
+    },
+    "Closed by the server" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由服务器关闭"
+          }
+        }
+      }
+    },
     "Completed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -184,6 +393,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已完成"
+          }
+        }
+      }
+    },
+    "Connected to %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连到 %@"
           }
         }
       }
@@ -199,6 +419,50 @@
         }
       }
     },
+    "Connection closed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接已关闭"
+          }
+        }
+      }
+    },
+    "Connection reset" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接被重置"
+          }
+        }
+      }
+    },
+    "Connector" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接器"
+          }
+        }
+      }
+    },
+    "Copy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制"
+          }
+        }
+      }
+    },
     "Copy as JSON" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -210,6 +474,94 @@
         }
       }
     },
+    "Copy Surge's log of this request" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制 Surge 对这条请求的日志"
+          }
+        }
+      }
+    },
+    "Couldn't load related records" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载相关记录"
+          }
+        }
+      }
+    },
+    "destination" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目标"
+          }
+        }
+      }
+    },
+    "Destination unreachable (ICMP)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目标不可达（ICMP）"
+          }
+        }
+      }
+    },
+    "DNS" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DNS"
+          }
+        }
+      }
+    },
+    "Ended" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结束"
+          }
+        }
+      }
+    },
+    "Entered" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "进入"
+          }
+        }
+      }
+    },
+    "entry" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "入口"
+          }
+        }
+      }
+    },
     "Every request Surge sees, kept in PostgreSQL" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -217,6 +569,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Surge 看到的每个请求，都存进 PostgreSQL"
+          }
+        }
+      }
+    },
+    "exit IP" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出口 IP"
+          }
+        }
+      }
+    },
+    "Exit IP changed to %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出口 IP 变为 %@"
           }
         }
       }
@@ -265,6 +639,50 @@
         }
       }
     },
+    "From Surge's cache" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自 Surge 的缓存"
+          }
+        }
+      }
+    },
+    "from this Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从本机直连"
+          }
+        }
+      }
+    },
+    "Global · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全局 · %@"
+          }
+        }
+      }
+    },
+    "Hidden" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已收起"
+          }
+        }
+      }
+    },
     "History" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -283,6 +701,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "主机"
+          }
+        }
+      }
+    },
+    "HTTP proxy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP 代理"
+          }
+        }
+      }
+    },
+    "In global proxy mode the request rides the proxy's open connection, so no connect on the network is timed." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全局代理模式下，请求走代理已打开的连接，所以没有网络上的连接可以计时。"
+          }
+        }
+      }
+    },
+    "IP shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示的 IP"
+          }
+        }
+      }
+    },
+    "Journey" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经过"
           }
         }
       }
@@ -331,6 +793,17 @@
         }
       }
     },
+    "Lasted %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "持续 %@"
+          }
+        }
+      }
+    },
     "Live" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -353,6 +826,61 @@
         }
       }
     },
+    "Looked up" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已查询"
+          }
+        }
+      }
+    },
+    "Looked up by Tidemark" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由 Tidemark 查询"
+          }
+        }
+      }
+    },
+    "Looked up in %1$@ via %2$@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经 %2$@ 查询，用时 %1$@"
+          }
+        }
+      }
+    },
+    "Looked up in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查询用时 %@"
+          }
+        }
+      }
+    },
+    "Looked up via %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经 %@ 查询"
+          }
+        }
+      }
+    },
     "Mac" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -364,6 +892,17 @@
         }
       }
     },
+    "Matched" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匹配"
+          }
+        }
+      }
+    },
     "Matched %@ directly" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -371,6 +910,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "直接匹配到 %@"
+          }
+        }
+      }
+    },
+    "Matched on" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匹配所用"
           }
         }
       }
@@ -415,6 +965,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新"
+          }
+        }
+      }
+    },
+    "New host %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新主机 %@"
+          }
+        }
+      }
+    },
+    "New IP %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新 IP %@"
+          }
+        }
+      }
+    },
+    "New site %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新站点 %@"
           }
         }
       }
@@ -474,6 +1057,28 @@
         }
       }
     },
+    "node" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "节点"
+          }
+        }
+      }
+    },
+    "node · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "节点 · %@"
+          }
+        }
+      }
+    },
     "Not written yet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -481,6 +1086,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "尚未写入"
+          }
+        }
+      }
+    },
+    "Notifications" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知"
           }
         }
       }
@@ -507,6 +1123,17 @@
         }
       }
     },
+    "Opened a new connection" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新建了连接"
+          }
+        }
+      }
+    },
     "Pause Recording…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -529,6 +1156,17 @@
         }
       }
     },
+    "policy group" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "策略组"
+          }
+        }
+      }
+    },
     "Process chain" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -536,6 +1174,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "进程链"
+          }
+        }
+      }
+    },
+    "Proxy error" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理错误"
+          }
+        }
+      }
+    },
+    "proxy server" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理服务器"
           }
         }
       }
@@ -580,6 +1240,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在写入 PostgreSQL，点按以暂停。"
+          }
+        }
+      }
+    },
+    "rejected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已拒绝"
+          }
+        }
+      }
+    },
+    "Related" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "相关"
           }
         }
       }
@@ -661,6 +1343,17 @@
         }
       }
     },
+    "Reused an open connection" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复用了已打开的连接"
+          }
+        }
+      }
+    },
     "Rolled up to %2$@ through %1$lld parent process" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -679,6 +1372,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "经过 %1$lld 层父进程归到 %2$@"
+          }
+        }
+      }
+    },
+    "Route" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "路由"
+          }
+        }
+      }
+    },
+    "Router-level hops aren't visible to Surge." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 看不到路由器层面的跳数。"
           }
         }
       }
@@ -716,6 +1431,39 @@
         }
       }
     },
+    "Server" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器"
+          }
+        }
+      }
+    },
+    "Shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已展开"
+          }
+        }
+      }
+    },
+    "Site probe of %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的站点探测"
+          }
+        }
+      }
+    },
     "Size" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -723,6 +1471,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "大小"
+          }
+        }
+      }
+    },
+    "SNI" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SNI"
           }
         }
       }
@@ -749,6 +1508,39 @@
         }
       }
     },
+    "Sub-rule" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "子规则"
+          }
+        }
+      }
+    },
+    "Surge first chose %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 起初选了 %@。"
+          }
+        }
+      }
+    },
+    "Surge has not said anything about this request yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 还没有提供这条请求的任何信息。"
+          }
+        }
+      }
+    },
     "Surge isn't connected" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -756,6 +1548,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Surge 未连接"
+          }
+        }
+      }
+    },
+    "Surge log (%lld line)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 日志（%lld 行）"
+          }
+        }
+      }
+    },
+    "Surge log (%lld lines)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 日志（%lld 行）"
+          }
+        }
+      }
+    },
+    "Surge marked it failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 标记为失败"
+          }
+        }
+      }
+    },
+    "Surge rejected it" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Surge 拒绝了它"
           }
         }
       }
@@ -789,6 +1625,72 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "过滤会匹配主机、远端 IP、进程和 App。"
+          }
+        }
+      }
+    },
+    "The host is this IP address" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主机本身就是这个 IP 地址"
+          }
+        }
+      }
+    },
+    "The proxy resolved the name on its side, which this Mac can't see." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理在它那一侧解析了域名，这台 Mac 看不到结果。"
+          }
+        }
+      }
+    },
+    "Through Surge (takeover mode %lld)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经由 Surge（接管模式 %lld）"
+          }
+        }
+      }
+    },
+    "Through Surge's HTTP proxy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经由 Surge 的 HTTP 代理"
+          }
+        }
+      }
+    },
+    "Through Surge's virtual interface (VIF)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经由 Surge 的虚拟网卡（VIF）"
+          }
+        }
+      }
+    },
+    "Through Surge's virtual interface (VIF), as UDP" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "经由 Surge 的虚拟网卡（VIF），UDP"
           }
         }
       }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Requests page: the live table with its inspector, and the stored history (which has no inspector).
+/// Requests page: the live table and the stored history, each opening the selected request in the inspector.
 struct RequestsView: View {
     @Environment(AppModel.self) private var model
     /// History has been shown since the page opened (see `RequestsHistoryView.init`).
@@ -22,7 +22,7 @@ struct RequestsView: View {
         // content asks for none; the table scrolls horizontally instead.
         .frame(minWidth: 0, maxWidth: .infinity)
         .inspector(isPresented: Binding(
-            get: { nav.requestsLive && nav.selectedRequest != nil },
+            get: { nav.selectedRequest != nil },
             set: { if !$0 { nav.selectedRequest = nil } }
         )) {
             // The inspector's minimum size must not follow its content: its host title and URL wrap, so a
@@ -109,15 +109,16 @@ private struct RequestsRecordingButton: View {
     }
 }
 
-/// Resolves the selected live request and keeps showing the last version once it has scrolled out of the
-/// live buffer.
+/// Resolves the selected request among the rows Live or History shows, and keeps showing the last version once it
+/// has scrolled out of the live buffer or left History's results.
 private struct RequestsInspectorHost: View {
     @Environment(AppModel.self) private var model
     @State private var cached: RequestRecord?
 
     var body: some View {
         let key = model.nav.selectedRequest
-        let current = key.flatMap { key in model.live.rows.first { $0.key == key } }
+        let rows = model.nav.requestsLive ? model.live.rows : model.requestsHistory.rows
+        let current = key.flatMap { key in rows.first { $0.key == key } }
         let record = current ?? (cached?.key == key ? cached : nil)
         Group {
             if let record {

@@ -1,13 +1,19 @@
 import SwiftUI
 
-/// Inspector of the selected request: process chain, connection, timing and storage.
+/// Inspector of the selected request, live or stored: process chain, connection, its journey through Surge, timing,
+/// related records and storage.
 struct RequestsInspector: View {
     @Environment(AppModel.self) private var model
     var record: RequestRecord
     var close: () -> Void
 
+    /// Tidemark's records about the request, loaded when it is shown.
+    @State private var details: RequestsInspectorDetails?
+
     var body: some View {
         let identity = model.requestsIdentity(for: record)
+        // Details of the request shown before stay out until this one's arrive.
+        let details = details?.key == record.key ? details : nil
         VStack(spacing: 0) {
             RequestsInspectorHeader(record: record, close: close)
             Divider()
@@ -15,7 +21,9 @@ struct RequestsInspector: View {
                 VStack(alignment: .leading, spacing: 18.px) {
                     RequestsInspectorChain(record: record, identity: identity)
                     RequestsInspectorConnection(record: record)
+                    RequestsInspectorJourney(record: record, details: details)
                     RequestsInspectorTiming(record: record)
+                    RequestsInspectorRelated(record: record, details: details)
                     RequestsInspectorStored(record: record)
                 }
                 .padding(.horizontal, 16.px)
@@ -25,6 +33,10 @@ struct RequestsInspector: View {
             .scrollEdgeEffectStyle(.soft, for: .vertical)
             Divider()
             RequestsInspectorActions(record: record, identity: identity)
+        }
+        .task(id: RequestsInspectorDetails.Source(record)) {
+            let loaded = await RequestsInspectorDetails.load(for: record, model: model)
+            if !Task.isCancelled { self.details = loaded }
         }
     }
 }
@@ -239,6 +251,12 @@ private struct RequestsInspectorTiming: View {
                     .foregroundStyle(Theme.ink3)
             } else {
                 TimingBar(phases: phases)
+                if phases.contains(where: { $0.kind == .local }) {
+                    Text(tr("In global proxy mode the request rides the proxy's open connection, so no connect on the network is timed.", "Requests"))
+                        .font(.design(11))
+                        .foregroundStyle(Theme.ink3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }

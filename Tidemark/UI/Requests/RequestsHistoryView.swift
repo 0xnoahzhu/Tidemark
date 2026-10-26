@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// History mode of the Requests page: filters, a histogram and every stored request matching them. The next
-/// page of rows loads when the table is scrolled to its end.
+/// page of rows loads when the table is scrolled to its end; a selected row opens in the inspector, as in Live.
 struct RequestsHistoryView: View {
     @Environment(AppModel.self) private var model
     var history: RequestsHistoryModel
@@ -34,7 +34,7 @@ struct RequestsHistoryView: View {
     private static let unloaded = RequestsHistoryModel()
 
     var body: some View {
-        let nav = model.nav
+        @Bindable var nav = model.nav
         let key = RequestsHistoryKey(
             scope: model.devices.scope,
             range: nav.history.range,
@@ -68,8 +68,10 @@ struct RequestsHistoryView: View {
 
             Divider()
 
-            // As in the design, History rows are not selectable: the inspector belongs to the live table.
-            RequestsTable(model: model, rows: showsRows ? results.rows : [], timeStyle: .dayClock, now: nil, showsHostBadges: false) {
+            RequestsTable(
+                model: model, rows: showsRows ? results.rows : [], selection: $nav.selectedRequest, timeStyle: .dayClock, now: nil,
+                showsHostBadges: false
+            ) {
                 Task { await history.loadMore(database: model.database) }
             }
             .scrollEdgeEffectStyle(.hard, for: .top)
