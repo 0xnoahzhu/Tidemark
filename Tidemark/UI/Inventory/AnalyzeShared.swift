@@ -165,13 +165,14 @@ enum AnalyzeFormat {
         }
     }
 
-    /// Fills the single `%@` of a localized `format` with `value` in a heavier, darker style.
-    static func emphasized(_ format: String, _ value: String, weight: Font.Weight = .semibold) -> AttributedString {
+    /// Fills the single `%@` of a localized `format` with `value` in a heavier, darker style. The run's font replaces
+    /// the `Text`'s, so it takes the sentence's design `size` in px.
+    static func emphasized(_ format: String, _ value: String, size: CGFloat, weight: Font.Weight = .semibold) -> AttributedString {
         let parts = format.components(separatedBy: "%@")
         var result = AttributedString(parts.first ?? "")
         guard parts.count > 1 else { return result }
         var highlighted = AttributedString(value)
-        highlighted.swiftUI.font = .system(size: 12, weight: weight)
+        highlighted.swiftUI.font = .design(size, weight)
         highlighted.swiftUI.foregroundColor = Theme.ink
         result += highlighted
         result += AttributedString(parts.dropFirst().joined(separator: "%@"))

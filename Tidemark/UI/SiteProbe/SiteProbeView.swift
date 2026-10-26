@@ -243,8 +243,8 @@ struct SiteProbeView: View {
 
     private var footer: some View {
         Text(AnalyzeFormat.emphasized("%@ " + tr("The probe browser is a WKWebView with its own proxy setting (macOS 14+). Load the page, then click around: everything it does goes only to a port Tidemark opens for this session and on to Surge, so every connection belongs to this URL until you press Stop. Surge's records fill in the IP, policy and rule.", "SiteProbe"),
-                                      tr("How attribution works.", "SiteProbe")))
-            .font(.system(size: 11.5))
+                                      tr("How attribution works.", "SiteProbe"), size: 11.5))
+            .font(.design(11.5))
             .foregroundStyle(Theme.ink2)
             .lineSpacing(3)
             .frame(maxWidth: .infinity, alignment: .leading)

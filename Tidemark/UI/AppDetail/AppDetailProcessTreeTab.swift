@@ -21,8 +21,8 @@ struct AppDetailProcessTreeTab: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(AnalyzeFormat.emphasized(
                     tr("Surge reports each request's process and its parent. Tidemark walks up that chain until it reaches a monitored app, so everything below rolls up to %@, including processes that have already exited. Process IDs get reused, so each one is stored together with its start time.", "AppDetail"),
-                    app.name))
-                    .font(.system(size: 12))
+                    app.name, size: 12))
+                    .font(.design(12))
                     .foregroundStyle(Theme.ink2)
                     .lineSpacing(3)
                     .frame(maxWidth: 780, alignment: .leading)
