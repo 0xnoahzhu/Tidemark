@@ -10,9 +10,10 @@ struct AppDetailProcessTreeTab: View {
     @State private var nodes: [ProcessNode] = []
     @State private var loaded = false
 
-    private static let columns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 200), .fixed(70), .fixed(80), .fixed(84)]
+    fileprivate static let columns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 200), .fixed(70), .fixed(80), .fixed(84)]
 
     var body: some View {
+        let onlyThisMac = pageShowsOnlyThisMac
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text(AnalyzeFormat.emphasized(
@@ -44,7 +45,7 @@ struct AppDetailProcessTreeTab: View {
                             .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
                     }
                     ForEach(nodes) { node in
-                        row(node)
+                        AppDetailProcessRow(node: node, appPath: app.path, running: isRunning(node, pageShowsOnlyThisMac: onlyThisMac))
                     }
                 }
                 .padding(.vertical, 2)
@@ -60,58 +61,9 @@ struct AppDetailProcessTreeTab: View {
         }
     }
 
-    private func row(_ node: ProcessNode) -> some View {
-        let running = AppDetailProcessTree.isRunning(node, thisDeviceID: model.devices.thisDeviceID,
-                                                     pageShowsOnlyThisMac: pageShowsOnlyThisMac,
-                                                     check: model.processes.isRunning(pid:startTime:))
-        return AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
-            HStack(spacing: 7) {
-                if node.depth > 0 {
-                    Text(verbatim: "└─").font(Theme.mono(11)).foregroundStyle(Theme.ink3)
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text(node.name)
-                            .fontWeight(node.depth == 0 ? .semibold : .medium)
-                            .lineLimit(1)
-                        Text(verbatim: "pid \(node.pid)")
-                            .font(Theme.mono(10.5))
-                            .foregroundStyle(Theme.ink3)
-                            .fixedSize()
-                    }
-                    if let path = node.path {
-                        Text(AppDetailProcessPath.display(path, depth: node.depth, appPath: app.path))
-                            .font(Theme.mono(10.5))
-                            .foregroundStyle(Theme.ink3)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .help(path)
-                    }
-                }
-            }
-            .padding(.leading, CGFloat(node.depth) * 22)
-
-            Text(Fmt.count(node.domainCount)).font(Theme.mono(11.5)).frame(maxWidth: .infinity, alignment: .trailing)
-            Text(Fmt.count(node.requestCount)).font(Theme.mono(11.5)).frame(maxWidth: .infinity, alignment: .trailing)
-            stateChip(running)
-        }
-        .font(.system(size: 12))
-        .foregroundStyle(Theme.ink)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
-        .frame(minHeight: 40)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
-    }
-
-    private func stateChip(_ running: Bool) -> some View {
-        let ok = Theme.tint(150)
-        return Text(running ? tr("Running", "AppDetail") : tr("Exited", "AppDetail"))
-            .font(.system(size: 11, weight: .medium))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 1)
-            .background(running ? ok.background : Theme.fill, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-            .foregroundStyle(running ? ok.foreground : Theme.ink2)
-            .fixedSize()
+    private func isRunning(_ node: ProcessNode, pageShowsOnlyThisMac: Bool) -> Bool {
+        AppDetailProcessTree.isRunning(node, thisDeviceID: model.devices.thisDeviceID, pageShowsOnlyThisMac: pageShowsOnlyThisMac,
+                                       check: model.processes.isRunning(pid:startTime:))
     }
 
     /// Nodes without a Mac (older rows) can still be checked when the page shows only this Mac.
@@ -134,6 +86,64 @@ struct AppDetailProcessTreeTab: View {
             loaded = true
             try? await Task.sleep(for: .seconds(10))
         }
+    }
+}
+
+/// One process of the tree. It takes plain values (no model), so an update elsewhere on the page leaves it alone.
+private struct AppDetailProcessRow: View {
+    var node: ProcessNode
+    var appPath: String
+    var running: Bool
+
+    var body: some View {
+        AnalyzeColumnsLayout(columns: AppDetailProcessTreeTab.columns, spacing: 12) {
+            HStack(spacing: 7) {
+                if node.depth > 0 {
+                    Text(verbatim: "└─").font(Theme.mono(11)).foregroundStyle(Theme.ink3)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text(node.name)
+                            .fontWeight(node.depth == 0 ? .semibold : .medium)
+                            .lineLimit(1)
+                        Text(verbatim: "pid \(node.pid)")
+                            .font(Theme.mono(10.5))
+                            .foregroundStyle(Theme.ink3)
+                            .fixedSize()
+                    }
+                    if let path = node.path {
+                        Text(AppDetailProcessPath.display(path, depth: node.depth, appPath: appPath))
+                            .font(Theme.mono(10.5))
+                            .foregroundStyle(Theme.ink3)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(path)
+                    }
+                }
+            }
+            .padding(.leading, CGFloat(node.depth) * 22)
+
+            Text(Fmt.count(node.domainCount)).font(Theme.mono(11.5)).frame(maxWidth: .infinity, alignment: .trailing)
+            Text(Fmt.count(node.requestCount)).font(Theme.mono(11.5)).frame(maxWidth: .infinity, alignment: .trailing)
+            stateChip
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(Theme.ink)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .frame(minHeight: 40)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
+    }
+
+    private var stateChip: some View {
+        let ok = Theme.tint(150)
+        return Text(running ? tr("Running", "AppDetail") : tr("Exited", "AppDetail"))
+            .font(.system(size: 11, weight: .medium))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 1)
+            .background(running ? ok.background : Theme.fill, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .foregroundStyle(running ? ok.foreground : Theme.ink2)
+            .fixedSize()
     }
 }
 

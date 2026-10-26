@@ -8,10 +8,10 @@ struct AppDetailRequestsTab: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.systemPrefersReducedResourceUsage) private var reducedResources
     var app: MonitoredApp
-    /// Requests stored for the app (header counter).
-    var storedCount: Int64
     /// The app is not installed on the selected Mac; rows from every Mac are shown.
     var absent: Bool
+    /// The page's counters (requests stored for the app).
+    var counters: AppDetailCounters
 
     @State private var expanded: RequestKey?
     @State private var history: [RequestRecord] = []
@@ -34,6 +34,7 @@ struct AppDetailRequestsTab: View {
         let rows = live ? liveRows() : history
         let _ = freshTick
         let now = Date.now
+        let badges = deviceBadges()
 
         VStack(spacing: 0) {
             statusLine(live: live)
@@ -47,7 +48,7 @@ struct AppDetailRequestsTab: View {
                     LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                         Section {
                             ForEach(Array(rows.enumerated()), id: \.element.key) { index, record in
-                                row(record, index: index, history: !live, now: now)
+                                row(record, index: index, history: !live, now: now, badges: badges)
                                 if expanded == record.key {
                                     AppDetailRequestCard(record: record, app: app)
                                         .padding(.horizontal, 14)
@@ -107,11 +108,7 @@ struct AppDetailRequestsTab: View {
                 (true, tr("Live", "AppDetail")),
                 (false, tr("History", "AppDetail")),
             ])
-            Text(trf("%@ stored", "AppDetail", Fmt.count(storedCount)))
-                .font(.system(size: 11.5))
-                .foregroundStyle(Theme.ink3)
-                .lineLimit(1)
-                .fixedSize()
+            AppDetailStoredCount(app: app, absent: absent, counters: counters)
             Spacer(minLength: 0)
             FilterField(prompt: tr("Filter host, IP, process", "AppDetail"), text: $nav.appRequestSearch, width: 200)
         }
@@ -134,6 +131,14 @@ struct AppDetailRequestsTab: View {
 
     private var showsDevice: Bool { model.devices.showsDeviceBadges || (absent && model.devices.devices.count > 1) }
 
+    /// Each Mac's badge, looked up once per update and handed to the rows as plain values: the Macs' list also
+    /// changes whenever one writes (its row count), and rows that read it would all be redrawn every time.
+    private func deviceBadges() -> [DeviceID: AppDetailDeviceBadge]? {
+        guard showsDevice else { return nil }
+        return Dictionary(model.devices.devices.map { ($0.id, AppDetailDeviceBadge(shortName: $0.shortName, hue: $0.hue)) },
+                          uniquingKeysWith: { first, _ in first })
+    }
+
     private func liveRows() -> [RequestRecord] {
         let scope = scope
         let query = model.nav.appRequestSearch.trimmingCharacters(in: .whitespaces).lowercased()
@@ -149,11 +154,11 @@ struct AppDetailRequestsTab: View {
             || record.processName.lowercased().contains(query)
     }
 
-    private func row(_ record: RequestRecord, index: Int, history: Bool, now: Date) -> some View {
+    private func row(_ record: RequestRecord, index: Int, history: Bool, now: Date, badges: [DeviceID: AppDetailDeviceBadge]?) -> some View {
         let isExpanded = expanded == record.key
         let isFresh = !history && RequestsPresentation.isFresh(record, now: now)
         let background: Color = isExpanded ? Theme.accentTint : isFresh ? Theme.fresh : index.isMultiple(of: 2) ? .clear : Theme.zebra
-        return AppDetailRequestRow(record: record, history: history, showsDevice: showsDevice)
+        return AppDetailRequestRow(record: record, history: history, badge: badges.map { $0[record.deviceID] ?? .unknown })
             .padding(.horizontal, 20)
             .frame(height: 28)
             .background(background)
@@ -215,12 +220,37 @@ struct AppDetailRequestsTab: View {
     }
 }
 
+/// "1,204 stored": the app's stored requests, in a view of its own so the counters' updates don't redraw the tab.
+private struct AppDetailStoredCount: View {
+    @Environment(AppModel.self) private var model
+    var app: MonitoredApp
+    var absent: Bool
+    var counters: AppDetailCounters
+
+    var body: some View {
+        Text(trf("%@ stored", "AppDetail", Fmt.count(counters.stats(for: app, absent: absent, model: model).requests)))
+            .font(.system(size: 11.5))
+            .foregroundStyle(Theme.ink3)
+            .lineLimit(1)
+            .fixedSize()
+    }
+}
+
+/// A Mac's badge in the request rows.
+private struct AppDetailDeviceBadge: Equatable {
+    var shortName: String
+    var hue: Double
+
+    /// A Mac the device list doesn't name (yet), drawn like `DeviceState.shortName` / `hue` draw it.
+    static let unknown = AppDetailDeviceBadge(shortName: "?", hue: 240)
+}
+
 /// One 28-point row of an app's request table.
 private struct AppDetailRequestRow: View {
-    @Environment(AppModel.self) private var model
     var record: RequestRecord
     var history: Bool
-    var showsDevice: Bool
+    /// The Mac's badge, when rows show them.
+    var badge: AppDetailDeviceBadge?
 
     var body: some View {
         AnalyzeColumnsLayout(columns: AppDetailRequestsTab.columns) {
@@ -230,8 +260,8 @@ private struct AppDetailRequestRow: View {
                 .lineLimit(1)
 
             HStack(spacing: 6) {
-                if showsDevice {
-                    DeviceBadge(shortName: model.devices.shortName(record.deviceID), hue: model.devices.hue(record.deviceID))
+                if let badge {
+                    DeviceBadge(shortName: badge.shortName, hue: badge.hue)
                 }
                 if record.chain.count > 1 {
                     Text(verbatim: "└").font(Theme.mono(11)).foregroundStyle(Theme.ink3)
