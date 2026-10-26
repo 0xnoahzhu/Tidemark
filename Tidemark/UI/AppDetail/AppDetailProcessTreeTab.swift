@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// "Process Tree" tab of a monitored app: every process whose requests roll up to the app, indented
-/// under its parent, with its domains, requests and whether it still runs. It opens with the tree it showed
-/// last for the app (`AppDetailCache`) and reads it again in the background.
+/// under its parent, with its domains, requests and whether it still runs. It shows the tree it showed last for
+/// the app (`AppDetailCache`) right after its first frame and reads it again in the background.
 struct AppDetailProcessTreeTab: View {
     @Environment(AppModel.self) private var model
     var app: MonitoredApp
@@ -10,17 +10,8 @@ struct AppDetailProcessTreeTab: View {
     var scope: DeviceScope
     var cache: AppDetailCache
 
-    @State private var nodes: [ProcessNode]
-    @State private var loaded: Bool
-
-    init(app: MonitoredApp, scope: DeviceScope, cache: AppDetailCache) {
-        self.app = app
-        self.scope = scope
-        self.cache = cache
-        let cached = cache.tree(AppDetailCache.Key(appID: app.id, scope: scope))
-        _nodes = State(initialValue: cached ?? [])
-        _loaded = State(initialValue: cached != nil)
-    }
+    @State private var nodes: [ProcessNode] = []
+    @State private var loaded = false
 
     fileprivate static let columns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 200), .fixed(70), .fixed(80), .fixed(84)]
 
@@ -86,8 +77,15 @@ struct AppDetailProcessTreeTab: View {
 
     private func refresh() async {
         let key = AppDetailCache.Key(appID: app.id, scope: scope)
-        // Another scope (the tab stays when the sidebar's Mac changes): what the tab last showed for it.
-        if let cached = cache.tree(key), cached != nodes { nodes = cached }
+        // What the tab last showed for the app and scope (the tab stays when the sidebar's Mac changes), while it
+        // reads the database. SwiftUI can start this task while it draws the tab, so the rows wait for the next turn
+        // of the run loop: the switch to the tab draws as fast as an empty tab, and the rows follow in the next frame.
+        if let cached = cache.tree(key) {
+            await Task.yield()
+            if Task.isCancelled { return }
+            if cached != nodes { nodes = cached }
+            if !loaded { loaded = true }
+        }
         while !Task.isCancelled {
             if let fresh = try? await model.database.processTree(appID: key.appID, scope: key.scope), !Task.isCancelled {
                 if fresh != nodes { nodes = fresh }

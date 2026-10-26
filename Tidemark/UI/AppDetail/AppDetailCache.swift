@@ -1,8 +1,9 @@
 import Foundation
 
 /// What the app pages' Domains & IPs and Process Tree tabs showed last, per app and scope. The main window keeps
-/// it, so a tab opens with its last list at once and refreshes it in the background, rather than starting empty
-/// and waiting for the database. It is not observable: each tab keeps its own state and only starts from here.
+/// it, so a tab shows its last list right after its first frame and refreshes it in the background, rather than
+/// staying empty while it waits for the database. It is not observable: each tab keeps its own state and only
+/// starts from here.
 @MainActor
 final class AppDetailCache {
     struct Key: Hashable {

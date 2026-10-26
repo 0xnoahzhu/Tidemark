@@ -4,9 +4,9 @@ import UniformTypeIdentifiers
 /// "Domains & IPs" tab of a monitored app: every domain (grouped by site) and every IP it used, each
 /// listed once, with a search field and CSV export. Selecting a domain highlights the IPs it resolved to.
 ///
-/// The tab opens with what it showed last for the app (`AppDetailCache`) and reads the database again in the
-/// background; the summary is computed off the main actor, and only when the hosts, the search or a NEW mark
-/// changed.
+/// The tab shows what it showed last for the app (`AppDetailCache`) right after its first frame and reads the
+/// database again in the background; the summary is computed off the main actor, and only when the hosts, the
+/// search or a NEW mark changed.
 struct AppDetailInventoryTab: View {
     @Environment(AppModel.self) private var model
     var app: MonitoredApp
@@ -16,21 +16,13 @@ struct AppDetailInventoryTab: View {
     var search: String
     var cache: AppDetailCache
 
-    @State private var content: Content
+    @State private var content = Content()
     @State private var exportDocument: AnalyzeCSVDocument?
     @State private var isExporting = false
     @State private var exportError: (any Error)?
 
     fileprivate static let domainColumns: [AnalyzeColumnsLayout.Column] = [.flexible(weight: 1, min: 150), .fixed(104), .fixed(70), .fixed(64)]
     fileprivate static let ipColumns: [AnalyzeColumnsLayout.Column] = [.fixed(150), .flexible(weight: 1, min: 90), .fixed(56)]
-
-    init(app: MonitoredApp, scope: DeviceScope, search: String, cache: AppDetailCache) {
-        self.app = app
-        self.scope = scope
-        self.search = search
-        self.cache = cache
-        _content = State(initialValue: Self.cached(AppDetailCache.Key(appID: app.id, scope: scope), search: search, in: cache) ?? Content())
-    }
 
     /// The hosts and the summary shown, with what they were read and computed for.
     private struct Content {
@@ -300,12 +292,15 @@ struct AppDetailInventoryTab: View {
 
     private func refresh(_ key: AppDetailCache.Key) async {
         if content.key != key {
-            // Another scope (the tab stays when the sidebar's Mac changes): what the tab last showed for it, or
-            // nothing rather than the previous list while the new one loads.
+            // Nothing rather than another scope's list (the tab stays when the sidebar's Mac changes).
+            if !content.hosts.isEmpty { content = Content() }
+            // Then what the tab last showed for the app and scope, while it reads the database. SwiftUI can start
+            // this task while it draws the tab, so the lists wait for the next turn of the run loop: the switch to the
+            // tab draws as fast as an empty tab, and the lists follow in the next frame.
             if let cached = Self.cached(key, search: model.nav.appInventorySearch, in: cache) {
+                await Task.yield()
+                if Task.isCancelled { return }
                 content = cached
-            } else if !content.hosts.isEmpty {
-                content = Content()
             }
         }
         while !Task.isCancelled {
