@@ -7,15 +7,16 @@ import SwiftUI
 /// Hosted by `StatusItemController` in a Liquid Glass panel, over which it lays the design's panel glass color
 /// (`GlassSurface.panel`, which follows Settings › General › Liquid Glass), so its text stays legible over any
 /// desktop. Every action calls `onDismiss` first so the panel closes before the main window or Settings come
-/// forward.
+/// forward, at once rather than fading out when Tidemark activates to show them.
 struct MenuBarPanel: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
 
-    /// Closes the panel (ends the status item's expanded-interface session).
-    var onDismiss: @MainActor () -> Void = {}
+    /// Closes the panel (ends the status item's expanded-interface session): fading it out like a menu when
+    /// `animated`, at once otherwise.
+    var onDismiss: @MainActor (_ animated: Bool) -> Void = { _ in }
 
     /// The design's 320 px, which `StatusItemController` also sizes the panel's window and glass to.
     static let width = 320.px
@@ -157,13 +158,10 @@ struct MenuBarPanel: View {
             }
             .buttonStyle(DesignButtonStyle(fillsWidth: true))
             Button(tr("Settings…", "MenuBar")) {
-                onDismiss()
-                DockPresence.willShowWindow()
-                NSApp.activate()
-                openSettings()
+                activate { openSettings() }
             }
             Button {
-                onDismiss()
+                onDismiss(true)
                 AppDelegate.requestQuit()
             } label: {
                 Text(tr("Quit", "MenuBar")).foregroundStyle(Theme.ink2)
@@ -179,10 +177,17 @@ struct MenuBarPanel: View {
     // MARK: Actions
 
     private func showMainWindow() {
-        onDismiss()
+        activate { openWindow(id: WindowID.main) }
+    }
+
+    /// Brings Tidemark forward to show one of its windows. The panel goes at once rather than fading out: while it,
+    /// a non-activating panel, is key, Tidemark becomes active only once it has gone, and until then the new window
+    /// shows with an inactive title bar.
+    private func activate(_ show: () -> Void) {
+        onDismiss(false)
         DockPresence.willShowWindow()
         NSApp.activate()
-        openWindow(id: WindowID.main)
+        show()
     }
 
     private func open(_ alert: AlertItem) {

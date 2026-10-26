@@ -77,12 +77,14 @@ final class StatusItemController: NSObject {
         button.setAccessibilityLabel(label)
     }
 
-    /// Closes the panel: cancels the session (the delegate then hides the panel) or hides it directly.
-    func dismiss() {
+    /// Closes the panel: cancels the session (the delegate then hides the panel) or hides it directly. Unless
+    /// `animated`, the panel goes at once, before the session ends.
+    func dismiss(animated: Bool = true) {
+        if !animated { closePanel(animated: false) }
         if let session = statusItem.expandedInterfaceSession {
             session.cancel()
         } else {
-            closePanel(animated: true)
+            closePanel(animated: animated)
         }
     }
 
@@ -107,7 +109,7 @@ final class StatusItemController: NSObject {
     /// Builds the panel's SwiftUI content. The model is passed explicitly: views hosted by AppKit do not
     /// inherit SwiftUI environment objects.
     private func installContent() -> NSView {
-        let root = MenuBarPanel(onDismiss: { [weak self] in self?.dismiss() })
+        let root = MenuBarPanel(onDismiss: { [weak self] animated in self?.dismiss(animated: animated) })
             .lineHeight(Theme.lineHeight)
             .fixedSize()
             .onGeometryChange(for: CGSize.self, of: { $0.size }) { [weak self] size in
@@ -154,14 +156,18 @@ final class StatusItemController: NSObject {
     private func closePanel(animated: Bool) {
         removeEventMonitors()
         guard let panel, panel.isVisible else { return }
+        let closing = presentation
         guard animated else {
             panel.orderOut(nil)
-            releaseContent()
+            // On the next turn: the panel's own content may be closing it, from an action that is still running.
+            Task { @MainActor [weak self] in
+                guard let self, presentation == closing else { return }
+                releaseContent()
+            }
             return
         }
         // Fade out like a menu. The window is ordered out on a timer rather than in the animation's
         // completion handler, so it never lingers when the animation is skipped.
-        let closing = presentation
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
             panel.animator().alphaValue = 0

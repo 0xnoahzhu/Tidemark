@@ -326,7 +326,9 @@ Leaving the Dock while active, Tidemark first hands the focus back to the app th
 into a window activates Tidemark first: the menu bar panel's Open Window, Settings… and alerts, a notification's View,
 the App Intents (`TidemarkIntents.showMainWindow`) and the menu commands. Each calls `DockPresence.willShowWindow()`
 before it activates, which turns Tidemark regular first, so it activates as a regular app and brings its menus into
-the menu bar with it; if no window opens after all, it leaves the Dock again 250 ms later. Turning regular while
+the menu bar with it; if no window opens after all, it leaves the Dock again 250 ms later. The menu bar panel goes at
+once before it activates, rather than fading out: while the panel, a non-activating panel, is key, Tidemark becomes
+active only after it has gone, and the new window's title bar stays inactive until then. Turning regular while
 already frontmost (the system brought Tidemark forward as an agent: opened again from Finder, Spotlight or the Dock,
 or for a foreground App Intent) leaves the previous app's menus in the menu bar, and activating an active app does
 nothing, so Tidemark then lends the activation to the Dock and takes it back as it resigns, which takes the focus
