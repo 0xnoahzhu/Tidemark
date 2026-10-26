@@ -261,6 +261,17 @@
         }
       }
     },
+    "Choose a host to show its %@ requests in History" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择一个主机，在历史中显示 %@ 发往它的请求"
+          }
+        }
+      }
+    },
     "Connection" : {
       "localizations" : {
         "zh-Hans" : {
@@ -857,6 +868,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "显示"
+          }
+        }
+      }
+    },
+    "Show %1$@ requests that reached %2$@ in History" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在历史中显示 %1$@ 到达 %2$@ 的请求"
+          }
+        }
+      }
+    },
+    "Show %1$@ requests to %2$@ in History" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在历史中显示 %1$@ 发往 %2$@ 的请求"
           }
         }
       }

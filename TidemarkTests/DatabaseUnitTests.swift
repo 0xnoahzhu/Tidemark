@@ -162,6 +162,18 @@ struct DatabaseUnitTests {
         #expect(PostgresDatabase.TimeWindow(RequestQuery(range: .all), now: now) == .init(lower: nil))
     }
 
+    /// An IP filter compares the stored address (`requests_remote_ip_started_idx`); a value that is no IP finds nothing
+    /// rather than failing the cast.
+    @Test func filtersOnTheAddressARequestReached() {
+        func filters(_ query: RequestQuery) -> String {
+            var sql = PostgresDatabase.SQL("SELECT 1 FROM requests r")
+            PostgresDatabase.appendFilters(query, window: .init(lower: nil), to: &sql)
+            return sql.text
+        }
+        #expect(filters(RequestQuery(range: .all, remoteIP: "[2001:DB8::1]")) == "SELECT 1 FROM requests r WHERE r.remote_ip = $1::inet")
+        #expect(filters(RequestQuery(range: .all, remoteIP: "api2.cursor.sh")) == "SELECT 1 FROM requests r WHERE false")
+    }
+
     @Test func poolsCarrySessionLimits() {
         let main = Dictionary(uniqueKeysWithValues: PostgresDatabase.SessionLimits.main.parameters)
         let writer = Dictionary(uniqueKeysWithValues: PostgresDatabase.SessionLimits.writer.parameters)
@@ -304,8 +316,8 @@ struct DatabaseUnitTests {
         let added = v4Statements[0].components(separatedBy: "ADD COLUMN IF NOT EXISTS").dropFirst()
         #expect(added.count == 7 && added.allSatisfy { !$0.uppercased().contains("DEFAULT") && !$0.uppercased().contains("NOT NULL") })
         #expect(v4.requiresVersion == 1)
-        #expect(v4.concurrentSteps.map(\.indexName) == ["requests_host_started_idx", "dns_answers_domain_idx", "proxy_errors_target_idx",
-                                                         "requests_ended_error_idx"])
+        #expect(v4.concurrentSteps.map(\.indexName) == ["requests_host_started_idx", "requests_remote_ip_started_idx", "dns_answers_domain_idx",
+                                                         "proxy_errors_target_idx", "requests_ended_error_idx"])
         // The partial index serves `RequestQuery.endedWithError` only while its predicate is the query's condition.
         guard case .createIndex(_, "requests", let errorIndex)? = v4.concurrentSteps.last else { Issue.record("no index of errors"); return }
         let condition = PostgresDatabase.endedWithErrorCondition.dropFirst().dropLast().replacingOccurrences(of: "r.", with: "")

@@ -42,6 +42,7 @@ struct RequestsHistoryView: View {
             policy: nav.history.policy,
             status: nav.history.status,
             host: nav.history.host,
+            remoteIP: nav.history.remoteIP,
             endedWithError: nav.history.endedWithError,
             search: nav.requestSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         )
@@ -77,7 +78,7 @@ struct RequestsHistoryView: View {
                 Task { await history.loadMore(database: model.database) }
             }
             .scrollEdgeEffectStyle(.hard, for: .top)
-            .overlay { RequestsHistoryOverlay(history: results, search: key.search, host: key.host, endedWithError: key.endedWithError) }
+            .overlay { RequestsHistoryOverlay(history: results, search: key.search, host: key.host ?? key.remoteIP, endedWithError: key.endedWithError) }
         }
         .task {
             guard !showsRows else { return }
@@ -117,18 +118,19 @@ private struct RequestsHistoryKey: Hashable {
     var policy: String?
     var status: StatusFilter
     var host: String?
+    var remoteIP: String?
     var endedWithError: Bool
     var search: String
 
     var query: RequestQuery {
         RequestQuery(
             scope: scope, range: range, appID: appID, policy: policy, status: status, search: search, host: host,
-            endedWithError: endedWithError
+            remoteIP: remoteIP, endedWithError: endedWithError
         )
     }
 }
 
-/// Range, app, policy and status menus and the exact host; row count and query time. The filters wrap onto a second
+/// Range, app, policy and status menus and the exact host or IP; row count and query time. The filters wrap onto a second
 /// line where the page is narrow (the inspector open in a small window).
 private struct RequestsHistoryFilterBar: View {
     @Environment(AppModel.self) private var model
@@ -170,7 +172,13 @@ private struct RequestsHistoryFilterBar: View {
                 Text(RequestsHistoryLabels.status(.endedWithError)).tag(RequestsStatusChoice.endedWithError)
             }
             if let host = nav.history.host {
-                RequestsHostChip(host: host) { nav.history.host = nil }
+                RequestsHostChip(title: tr("Host", "Requests"), host: host, help: host) { nav.history.host = nil }
+            }
+            if let ip = nav.history.remoteIP {
+                RequestsHostChip(
+                    title: tr("IP", "Requests"), host: ip,
+                    help: trf("Every request that reached %@, to it or to a domain that resolved to it", "Requests", ip)
+                ) { nav.history.remoteIP = nil }
             }
             Group {
                 if history.isLoading {
@@ -257,6 +265,7 @@ private struct RequestsHistogramUnavailable: View {
 private struct RequestsHistoryOverlay: View {
     var history: RequestsHistoryModel
     var search: String
+    /// The exact host or IP filtered on.
     var host: String?
     var endedWithError: Bool
 
@@ -267,15 +276,10 @@ private struct RequestsHistoryOverlay: View {
             if search.isEmpty {
                 let title = host.map { trf("No requests to %@ in this range", "Requests", $0) } ?? tr("No requests in this range", "Requests")
                 // How a request ended is stored since schema v4: older requests tell it only in their notes, which the
-                // query does not read, though the inspector does. An IP's count on Domains & IPs also takes in the
-                // requests to domains that resolved to it, which are stored under those domains.
-                let message = if endedWithError {
-                    tr("“Ended with an error” finds only requests recorded since Tidemark began storing how requests end. Try a longer time range or fewer filters.", "Requests")
-                } else if let host, HostName.isIPAddress(host) {
-                    tr("History finds the requests made to this IP address itself. Requests to domains that resolved to it are listed under those domains.", "Requests")
-                } else {
-                    tr("Try a longer time range or fewer filters.", "Requests")
-                }
+                // query does not read, though the inspector does.
+                let message = endedWithError
+                    ? tr("“Ended with an error” finds only requests recorded since Tidemark began storing how requests end. Try a longer time range or fewer filters.", "Requests")
+                    : tr("Try a longer time range or fewer filters.", "Requests")
                 EmptyState(systemImage: "clock", title: title, message: message)
             } else {
                 EmptyState(systemImage: "magnifyingglass", title: trf("No requests match “%@”", "Requests", search), message: tr("The filter looks at host, remote IP, process and app.", "Requests"))

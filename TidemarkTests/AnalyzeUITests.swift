@@ -523,7 +523,7 @@ private final class SlowStopProbeActions: ProbeActions {
 }
 
 /// What a row of Domains & IPs, or of an app's Domains & IPs tab, opens in History: the stored requests to its exact
-/// host over all time, as the row counts them, and on an app's tab only that app's.
+/// domain, or that reached its exact IP, over all time, as the row counts them, and on an app's tab only that app's.
 @Suite @MainActor struct InventoryRequestsTests {
     private func entry(_ value: String, kind: HostKind = .domain) -> InventoryEntry {
         InventoryEntry(kind: kind, value: value, sources: [], firstSeen: .now, lastSeen: .now, requestCount: 1, geo: nil)
@@ -564,16 +564,42 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(nav.history.range == .all)
         #expect(nav.history.appID == nil)
 
+        // An IP opens every request that reached it, as its row counts them.
+        nav.open(.inventory)
+        InventoryRequests.open("104.18.19.125", in: nav)
+        #expect(nav.history.remoteIP == "104.18.19.125" && nav.history.host == nil && nav.history.appID == nil)
+        InventoryRequests.open("api2.cursor.sh", in: nav)
+        #expect(nav.history.host == "api2.cursor.sh" && nav.history.remoteIP == nil)
+
         nav.open(.app(UIMainFixtures.cursor.id), tab: .inventory)
         nav.history.range = .last7Days
-        nav.openRequests(forHost: "104.18.19.125", app: UIMainFixtures.cursor.id, range: InventoryRequests.range)
+        let link = AppDetailRequestsLink(appID: UIMainFixtures.cursor.id, appName: "Cursor")
+        link.open("104.18.19.125", in: nav)
         #expect(nav.page == .requests)
-        #expect(nav.history.host == "104.18.19.125" && nav.history.appID == UIMainFixtures.cursor.id && nav.history.range == .all)
+        #expect(nav.history.remoteIP == "104.18.19.125" && nav.history.appID == UIMainFixtures.cursor.id && nav.history.range == .all)
 
         // Without a range, as from the inspector, the time range stays.
         nav.history.range = .last24Hours
         nav.openRequests(forHost: "api.github.com")
         #expect(nav.history.range == .last24Hours && nav.history.appID == nil)
+    }
+
+    /// A count's help says what it opens: every request to a domain or that reached an IP, or on an app's tab the app's.
+    @Test func helpSaysWhatACountOpens() {
+        Localizer.shared.override = "en"
+        #expect(InventoryRequests.help(hosts: ["api2.cursor.sh"]) == "Show every stored request to api2.cursor.sh in History")
+        #expect(InventoryRequests.help(hosts: ["104.18.19.125"]) == "Show every stored request that reached 104.18.19.125 in History")
+        #expect(InventoryRequests.help(hosts: ["104.18.19.125", "104.18.18.125"]) == "Choose a host to show its stored requests in History")
+        let link = AppDetailRequestsLink(appID: UIMainFixtures.cursor.id, appName: "Cursor")
+        #expect(link.help(hosts: ["api2.cursor.sh"]) == "Show Cursor requests to api2.cursor.sh in History")
+        #expect(link.help(hosts: ["2001:db8::1"]) == "Show Cursor requests that reached 2001:db8::1 in History")
+        #expect(link.help(hosts: ["api2.cursor.sh", "cursor.sh"]) == "Choose a host to show its Cursor requests in History")
+
+        Localizer.shared.override = "zh-Hans"
+        defer { Localizer.shared.override = "en" }
+        guard Localizer.shared.bundle != nil else { return }
+        #expect(InventoryRequests.help(hosts: ["104.18.19.125"]) == "在历史中显示到达 104.18.19.125 的全部已存请求")
+        #expect(link.help(hosts: ["api2.cursor.sh"]) == "在历史中显示 Cursor 发往 api2.cursor.sh 的请求")
     }
 
     /// The demo lists a host with as many requests as History then finds for it, everywhere and for one app.
@@ -591,16 +617,18 @@ private final class SlowStopProbeActions: ProbeActions {
         #expect(domain.value == "api2.cursor.sh" && domain.requestCount == 3)
         let all = try await database.queryRequests(RequestQuery(range: InventoryRequests.range, host: InventoryRequests.hosts(of: domain)[0]))
         #expect(all.totalCount == domain.requestCount)
-        // An IP counts the requests to its domains too; History finds those under the domains.
+        // An IP counts the requests to its domains too, and History finds every request that reached it.
         let ip = try #require(entries.first { $0.kind == .ip })
         #expect(ip.value == "104.18.19.125" && ip.requestCount == 4)
-        #expect(try await database.queryRequests(RequestQuery(range: .all, host: ip.value)).totalCount == 1)
+        #expect(try await database.queryRequests(RequestQuery(range: InventoryRequests.range, remoteIP: InventoryRequests.hosts(of: ip)[0])).totalCount == 4)
 
         let appHosts = try await database.appHosts(cursor, scope: .all)
         let appDomain = try #require(appHosts.first { $0.kind == .domain })
         #expect(appDomain.requestCount == 2)
         #expect(try await database.queryRequests(RequestQuery(range: .all, appID: cursor, host: appDomain.value)).totalCount == 2)
-        #expect(appHosts.first { $0.kind == .ip }?.hosts == ["api2.cursor.sh"])
+        let appIP = try #require(appHosts.first { $0.kind == .ip })
+        #expect(appIP.hosts == ["api2.cursor.sh"] && appIP.requestCount == 3)
+        #expect(try await database.queryRequests(RequestQuery(range: .all, appID: cursor, remoteIP: appIP.value)).totalCount == 3)
         // One Mac lists only what that Mac saw.
         #expect(try await database.inventory(kind: .domain, search: "", scope: .device(UIMainFixtures.otherMac)).map(\.requestCount) == [1])
     }

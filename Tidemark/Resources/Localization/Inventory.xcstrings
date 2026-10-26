@@ -345,6 +345,17 @@
         }
       }
     },
+    "Show every stored request that reached %@ in History" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在历史中显示到达 %@ 的全部已存请求"
+          }
+        }
+      }
+    },
     "Show every stored request to %@ in History" : {
       "extractionState" : "manual",
       "localizations" : {

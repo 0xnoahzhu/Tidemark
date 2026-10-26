@@ -404,6 +404,10 @@ extension PostgresDatabase {
         }
         // `requests_host_started_idx` (v4) serves one host newest first.
         if let host = query.host.map(Self.exactHost) { conditions.append("r.host = \(sql.bind(host))") }
+        // `requests_remote_ip_started_idx` (v4) serves one IP newest first; a value that is no IP matches nothing.
+        if let ip = query.remoteIP {
+            conditions.append(Self.inetText(ip).map { "r.remote_ip = \(sql.bind($0))::inet" } ?? "false")
+        }
         if query.endedWithError { conditions.append(Self.endedWithErrorCondition) }
         let search = query.search.trimmingCharacters(in: .whitespacesAndNewlines)
         if !search.isEmpty {
@@ -456,7 +460,7 @@ extension PostgresDatabase {
 
     private func totalCount(for query: RequestQuery, window: TimeWindow, searchApps: [AppID]) async throws -> Int64 {
         let unfiltered = window.lower == nil && query.appID == nil && query.policy == nil && query.status == .any
-            && query.host == nil && !query.endedWithError && query.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && query.host == nil && query.remoteIP == nil && !query.endedWithError && query.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if unfiltered {
             switch query.scope {
             case .all:

@@ -4,7 +4,8 @@ import UniformTypeIdentifiers
 
 /// "Domains & IPs" tab of a monitored app: every domain (grouped by site) and every IP it used, each
 /// listed once, with a search field and CSV export. Selecting a domain highlights the IPs it resolved to. A row's count
-/// and context menu open the app's requests to that host in History, filtered to the app as the count is.
+/// and context menu open the app's requests to that host in History, filtered to the app as the count is
+/// (`AppDetailRequestsLink`).
 ///
 /// The tab shows what it showed last for the app (`AppDetailCache`) right after its first frame and reads the
 /// database again in the background; the summary is computed off the main actor, and only when the hosts, the
@@ -209,7 +210,7 @@ struct AppDetailInventoryTab: View {
                         ForEach(summary.groups) { group in
                             siteRow(group, showsFirstSeen: showsFirstSeen)
                             ForEach(group.hosts) { host in
-                                AppDetailDomainRow(appID: app.id, host: host, selected: selected == host.value, showsFirstSeen: showsFirstSeen)
+                                AppDetailDomainRow(requests: requestsLink, host: host, selected: selected == host.value, showsFirstSeen: showsFirstSeen)
                             }
                         }
                     } header: {
@@ -251,7 +252,8 @@ struct AppDetailInventoryTab: View {
                 Text(AnalyzeFormat.seen(group.firstSeen)).font(.design(12)).foregroundStyle(Theme.ink2).lineLimit(1)
             }
             Text(AppDetailInventoryFormat.lastSeen(group.lastSeen)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
-            AnalyzeRequestsCount(count: group.requests, font: Theme.mono(11, weight: .semibold), hosts: hosts, open: openRequests)
+            AnalyzeRequestsCount(count: group.requests, font: Theme.mono(11, weight: .semibold), hosts: hosts,
+                                 help: requestsLink.help(hosts: hosts), open: openRequests)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12.5))
@@ -263,7 +265,12 @@ struct AppDetailInventoryTab: View {
     }
 
     private func openRequests(_ host: String) {
-        model.nav.openRequests(forHost: host, app: app.id, range: InventoryRequests.range)
+        requestsLink.open(host, in: model.nav)
+    }
+
+    /// What the rows open in History.
+    private var requestsLink: AppDetailRequestsLink {
+        AppDetailRequestsLink(appID: app.id, appName: app.name)
     }
 
     // MARK: IPs
@@ -335,7 +342,7 @@ struct AppDetailInventoryTab: View {
 
     private func ipRow(_ ip: AppHost, selected: String?) -> some View {
         let highlighted = selected.map { ip.hosts.contains($0) } ?? false
-        return AppDetailIPRow(appID: app.id, ip: ip, highlighted: highlighted, dimmed: selected != nil && !highlighted)
+        return AppDetailIPRow(requests: requestsLink, ip: ip, highlighted: highlighted, dimmed: selected != nil && !highlighted)
     }
 
     @ViewBuilder
@@ -441,7 +448,7 @@ struct AppDetailInventoryTab: View {
 /// A domain under its site.
 private struct AppDetailDomainRow: View {
     @Environment(AppModel.self) private var model
-    var appID: AppID
+    var requests: AppDetailRequestsLink
     var host: AppHost
     var selected: Bool
     var showsFirstSeen: Bool
@@ -459,7 +466,8 @@ private struct AppDetailDomainRow: View {
                 Text(AnalyzeFormat.seen(host.firstSeen)).foregroundStyle(Theme.ink2).lineLimit(1)
             }
             Text(AppDetailInventoryFormat.lastSeen(host.lastSeen)).font(Theme.mono(11)).foregroundStyle(Theme.ink2).lineLimit(1)
-            AnalyzeRequestsCount(count: host.requestCount, font: Theme.mono(11), hosts: hosts, open: openRequests)
+            AnalyzeRequestsCount(count: host.requestCount, font: Theme.mono(11), hosts: hosts, help: requests.help(hosts: hosts),
+                                 open: openRequests)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12))
@@ -477,7 +485,7 @@ private struct AppDetailDomainRow: View {
     }
 
     private func openRequests(_ value: String) {
-        model.nav.openRequests(forHost: value, app: appID, range: InventoryRequests.range)
+        requests.open(value, in: model.nav)
     }
 }
 
@@ -487,7 +495,7 @@ private struct AppDetailDomainRow: View {
 /// rows whose state changes.
 private struct AppDetailIPRow: View {
     @Environment(AppModel.self) private var model
-    var appID: AppID
+    var requests: AppDetailRequestsLink
     var ip: AppHost
     /// A domain that resolved to it is selected.
     var highlighted: Bool
@@ -517,7 +525,8 @@ private struct AppDetailIPRow: View {
                         .help(ip.hosts.joined(separator: "\n"))
                 }
             }
-            AnalyzeRequestsCount(count: ip.requestCount, font: Theme.mono(11), hosts: hosts, open: openRequests)
+            AnalyzeRequestsCount(count: ip.requestCount, font: Theme.mono(11), hosts: hosts, help: requests.help(hosts: hosts),
+                                 open: openRequests)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12))
@@ -532,7 +541,7 @@ private struct AppDetailIPRow: View {
     }
 
     private func openRequests(_ value: String) {
-        model.nav.openRequests(forHost: value, app: appID, range: InventoryRequests.range)
+        requests.open(value, in: model.nav)
     }
 }
 
@@ -621,6 +630,29 @@ extension InventoryRequests {
     /// The domains a site's row lists (those the search keeps), in its order.
     static func hosts(of group: AppDetailInventorySummary.SiteGroup) -> [String] {
         group.hosts.map { RequestsHostFilter.normalized($0.value) }
+    }
+}
+
+/// What an app's rows open in History: the app's requests to a domain, or that reached an IP, over all time
+/// (`InventoryRequests.open`).
+struct AppDetailRequestsLink: Equatable {
+    var appID: AppID
+    var appName: String
+
+    @MainActor
+    func open(_ host: String, in nav: Navigation) {
+        InventoryRequests.open(host, in: nav, app: appID)
+    }
+
+    /// The help of a row's count: what it opens.
+    @MainActor
+    func help(hosts: [String]) -> String {
+        guard hosts.count == 1, let host = hosts.first else {
+            return trf("Choose a host to show its %@ requests in History", "AppDetail", appName)
+        }
+        return HostName.isIPAddress(host)
+            ? trf("Show %1$@ requests that reached %2$@ in History", "AppDetail", appName, host)
+            : trf("Show %1$@ requests to %2$@ in History", "AppDetail", appName, host)
     }
 }
 

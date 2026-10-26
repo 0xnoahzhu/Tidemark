@@ -606,6 +606,17 @@
         }
       }
     },
+    "Every request that reached %@, to it or to a domain that resolved to it" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "到达 %@ 的全部请求：直接发往它的，以及发往解析到它的域名的"
+          }
+        }
+      }
+    },
     "exit IP" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -727,17 +738,6 @@
         }
       }
     },
-    "History finds the requests made to this IP address itself. Requests to domains that resolved to it are listed under those domains." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "历史只查找直接发往这个 IP 地址的请求。发往解析到它的域名的请求，列在那些域名之下。"
-          }
-        }
-      }
-    },
     "Host" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -767,6 +767,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "全局代理模式下，请求走了代理已打开的连接，所以没有网络上的连接可以计时。"
+          }
+        }
+      }
+    },
+    "IP" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IP"
           }
         }
       }

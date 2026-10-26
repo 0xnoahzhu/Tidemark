@@ -132,17 +132,38 @@ enum InventoryPresentation {
 }
 
 /// What a row of Domains & IPs or of an app's Domains & IPs tab opens in History (pure, so it can be tested): the
-/// stored requests to one exact host, over all time, as the row counts them. A site or a network offers each of its
-/// hosts rather than a filter History does not have.
+/// stored requests to one exact domain, or that reached one exact IP, over all time, as the row counts them. A site or
+/// a network offers each of its hosts rather than a filter History does not have.
 enum InventoryRequests {
     /// The rows count every request a host has had.
     static let range: HistoryRange = .all
 
-    /// The domain or IP an entry's requests are stored under.
+    /// The domain or IP an entry counts.
     static func hosts(of entry: InventoryEntry) -> [String] { [RequestsHostFilter.normalized(entry.value)] }
 
     /// A site's domains or a network's IPs, in the row's order.
     static func hosts(of group: InventoryGroup) -> [String] { group.names.map(RequestsHostFilter.normalized) }
+
+    /// Opens a row's host in History, and for an app's row only that app's requests. An IP opens every request that
+    /// reached it (`RequestQuery.remoteIP`), since a row counts an IP for the requests to the domains that resolved to
+    /// it as well as for those to it as an IP literal.
+    @MainActor
+    static func open(_ host: String, in nav: Navigation, app: AppID? = nil) {
+        if HostName.isIPAddress(host) {
+            nav.openRequests(reaching: host, app: app, range: range)
+        } else {
+            nav.openRequests(forHost: host, app: app, range: range)
+        }
+    }
+
+    /// The help of a Domains & IPs row's count: what it opens.
+    @MainActor
+    static func help(hosts: [String]) -> String {
+        guard hosts.count == 1, let host = hosts.first else { return tr("Choose a host to show its stored requests in History", "Inventory") }
+        return HostName.isIPAddress(host)
+            ? trf("Show every stored request that reached %@ in History", "Inventory", host)
+            : trf("Show every stored request to %@ in History", "Inventory", host)
+    }
 }
 
 // MARK: - List
@@ -528,7 +549,8 @@ private struct InventoryEntryRow: View {
             InventorySourcesList(model: model, sources: entry.sources)
             Text(AnalyzeFormat.seen(entry.firstSeen)).foregroundStyle(Theme.ink2)
             Text(AnalyzeFormat.seen(entry.lastSeen, timeOnlyToday: true)).foregroundStyle(Theme.ink2)
-            AnalyzeRequestsCount(count: entry.requestCount, font: Theme.mono(11), hosts: hosts, open: openRequests)
+            AnalyzeRequestsCount(count: entry.requestCount, font: Theme.mono(11), hosts: hosts, help: InventoryRequests.help(hosts: hosts),
+                                 open: openRequests)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12))
@@ -548,7 +570,7 @@ private struct InventoryEntryRow: View {
     }
 
     private func openRequests(_ host: String) {
-        model.nav.openRequests(forHost: host, range: InventoryRequests.range)
+        InventoryRequests.open(host, in: model.nav)
     }
 
     private var accessibilityText: String {
@@ -594,7 +616,8 @@ private struct InventoryGroupRow: View {
                         .help(InventorySourcesList.displayTitle(source))
                 }
             }
-            AnalyzeRequestsCount(count: group.requests, font: Theme.mono(11), hosts: hosts, open: openRequests)
+            AnalyzeRequestsCount(count: group.requests, font: Theme.mono(11), hosts: hosts, help: InventoryRequests.help(hosts: hosts),
+                                 open: openRequests)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .font(.design(12))
@@ -611,7 +634,7 @@ private struct InventoryGroupRow: View {
     }
 
     private func openRequests(_ host: String) {
-        model.nav.openRequests(forHost: host, range: InventoryRequests.range)
+        InventoryRequests.open(host, in: model.nav)
     }
 
     private var accessibilityText: String {

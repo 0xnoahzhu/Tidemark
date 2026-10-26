@@ -618,6 +618,20 @@ struct RequestsHostHistoryTests {
         #expect(nav.selectedRequest == key)
     }
 
+    /// An IP opens every request that reached it, in place of a host; a host replaces it again.
+    @Test func opensHistoryOnOneIP() {
+        let nav = Navigation()
+        nav.openRequests(forHost: "api2.cursor.sh")
+        nav.openRequests(reaching: " 104.18.19.125 ", app: M.cursor.id, range: .all)
+        #expect(nav.page == .requests && !nav.requestsLive)
+        #expect(nav.history.remoteIP == "104.18.19.125" && nav.history.host == nil)
+        #expect(nav.history.appID == M.cursor.id && nav.history.range == .all)
+        nav.openRequests(forHost: "api2.cursor.sh")
+        #expect(nav.history.host == "api2.cursor.sh" && nav.history.remoteIP == nil)
+        nav.openRequests(reaching: "[2001:DB8::1]")
+        #expect(nav.history.remoteIP == "2001:db8::1" && nav.history.host == nil)
+    }
+
     @Test func theStatusMenuSetsTheErrorFilter() {
         let nav = Navigation()
         let status = RequestsStatusChoice.binding(nav)
@@ -645,6 +659,12 @@ struct RequestsHostHistoryTests {
         #expect(anyHost.totalCount == 1)
         let histogram = try await database.histogram(RequestQuery(range: .all, host: "api.github.com"), buckets: 4)
         #expect(histogram.counts.reduce(0, +) == 1)
+
+        // An IP finds every request that reached it, whatever host it named.
+        let elsewhere = M.record(id: 4, host: "api.github.com", ip: "140.82.112.6")
+        let byIP = ShellDemoDatabase(rows: [reset, closed, other, elsewhere])
+        #expect(try await byIP.queryRequests(RequestQuery(range: .all, remoteIP: "104.18.19.125")).rows.map(\.key.surgeID) == [2, 3, 1])
+        #expect(try await byIP.queryRequests(RequestQuery(range: .all, remoteIP: "104.18.19.125", endedWithError: true)).totalCount == 1)
     }
 
     @Test func keepsResultsOnlyForTheSameHostAndEnding() async {
@@ -656,6 +676,9 @@ struct RequestsHostHistoryTests {
         #expect(!history.keeps(query))
         query.host = "api2.cursor.sh"
         query.endedWithError = true
+        #expect(!history.keeps(query))
+        query.endedWithError = false
+        query.remoteIP = "104.18.19.125"
         #expect(!history.keeps(query))
     }
 }

@@ -26,14 +26,18 @@ enum RequestsStatusChoice: Hashable {
     }
 }
 
-/// `Host api2.cursor.sh ✕`: the exact host History shows, on the accent tint, removed by its button.
+/// `Host api2.cursor.sh ✕` or `IP 104.18.19.125 ✕`: the exact host or IP History shows, on the accent tint, removed
+/// by its button.
 struct RequestsHostChip: View {
+    /// `Host`, or `IP` for the requests that reached an address.
+    var title: String
     var host: String
+    var help: String
     var remove: () -> Void
 
     var body: some View {
         HStack(spacing: 5.px) {
-            Text(tr("Host", "Requests"))
+            Text(title)
                 .foregroundStyle(Theme.accentInk.opacity(0.75))
             Text(host)
                 .lineLimit(1)
@@ -56,7 +60,7 @@ struct RequestsHostChip: View {
         .frame(maxWidth: 260.px)
         .background(Theme.accentTint, in: RoundedRectangle(cornerRadius: 7.px, style: .continuous))
         .fixedSize(horizontal: false, vertical: true)
-        .help(host)
+        .help(help)
     }
 }
 

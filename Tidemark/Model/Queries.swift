@@ -39,6 +39,9 @@ struct RequestQuery: Hashable, Sendable {
     var search: String = ""
     /// Only requests to exactly this host (domain or IP literal), nil = all.
     var host: String? = nil
+    /// Only requests that reached exactly this IP address, nil = all: those whose remote IP it is, whatever host they
+    /// named, as Domains & IPs count an IP. A request to an IP literal has the literal as its remote IP.
+    var remoteIP: String? = nil
     /// Only requests whose connection ended with an error (`RequestEndReason`), whatever their `status`: Surge
     /// marks resets and broken pipes completed.
     var endedWithError = false

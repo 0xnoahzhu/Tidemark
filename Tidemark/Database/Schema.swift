@@ -126,6 +126,9 @@ enum Schema {
     ///
     /// * `requests_host_started_idx`: one host's requests, newest first (`requests(forHost:)`, History with an
     ///   exact host). `host` and `started_at` never change once written, so progress rewrites stay HOT.
+    /// * `requests_remote_ip_started_idx`: the requests that reached one IP, newest first (`RequestQuery.remoteIP`,
+    ///   History opened from an IP of Domains & IPs). `remote_ip` changes only when the address becomes known or
+    ///   another source names another one, so progress rewrites stay HOT.
     /// * `dns_answers_domain_idx`, `proxy_errors_target_idx`: a host's answers and errors on every Mac (the primary
     ///   keys lead with the Mac).
     /// * `requests_ended_error_idx`: the requests that ended with an error (`RequestQuery.endedWithError`), newest
@@ -134,6 +137,7 @@ enum Schema {
     ///   in the rewrite that completes a request, which leaves `requests_active_idx` anyway, so no HOT update is lost.
     private static let v4Indexes: [ConcurrentStep] = [
         .createIndex(name: "requests_host_started_idx", table: "requests", definition: "(host, started_at DESC)"),
+        .createIndex(name: "requests_remote_ip_started_idx", table: "requests", definition: "(remote_ip, started_at DESC)"),
         .createIndex(name: "dns_answers_domain_idx", table: "dns_answers", definition: "(domain, resolved_at DESC)"),
         .createIndex(name: "proxy_errors_target_idx", table: "proxy_errors", definition: "(target_host, at DESC)"),
         .createIndex(

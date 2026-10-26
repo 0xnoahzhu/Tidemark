@@ -28,7 +28,7 @@ engine start time in milliseconds.
 | 1 | Initial tables. |
 | 2 | `egress_checks.network_type` / `has_ipv6`; `requests` fillfactor 80; the btree on `requests.updated_at` replaced by a BRIN index (so rewriting a request row can stay a HOT update on PostgreSQL 16+); one trigram index over host, process name, remote IP and bundle path for searches, replacing the separate `host`, host-trigram and remote-IP indexes; `host_sources_last_seen_idx` dropped (no query used it); `schema_migrations.requires_version`. |
 | 3 | `requests_active_idx`, a partial index on `requests (device_id, surge_session) WHERE state = 'active'`, so closing the requests left active by an ended Surge session or by a crash reads only the rows still active; `autosummarize = on` for the BRIN index on `requests.updated_at`, so block ranges are summarized as they fill instead of at the next vacuum. Index changes only: every older Tidemark keeps writing. |
-| 4 | What happened to a request on its way ([Request details](#request-details)): `requests.timing`, `entry_mode`, `original_policy`, `modified`, `end_reason`, `remote_ip_source` and `remote_ip_resolved_at` (nullable, no default: a catalog-only change); the tables `dns_answers` and `proxy_errors`; `requests_host_started_idx` on `requests (host, started_at DESC)`, `requests_ended_error_idx` on `requests (started_at DESC)` for the requests that ended with an error (a partial index whose predicate is History's "ended with an error" filter, so that filter over all time never reads the rows before v4) and an index by host on each new table, built concurrently. Additive only (`requires_version` 1): every older Tidemark keeps writing, and its writes never touch the new columns. |
+| 4 | What happened to a request on its way ([Request details](#request-details)): `requests.timing`, `entry_mode`, `original_policy`, `modified`, `end_reason`, `remote_ip_source` and `remote_ip_resolved_at` (nullable, no default: a catalog-only change); the tables `dns_answers` and `proxy_errors`; `requests_host_started_idx` on `requests (host, started_at DESC)`, `requests_remote_ip_started_idx` on `requests (remote_ip, started_at DESC)` for the requests that reached one IP (History opened from an IP of Domains & IPs), `requests_ended_error_idx` on `requests (started_at DESC)` for the requests that ended with an error (a partial index whose predicate is History's "ended with an error" filter, so that filter over all time never reads the rows before v4) and an index by host on each new table, built concurrently. Additive only (`requires_version` 1): every older Tidemark keeps writing, and its writes never touch the new columns. |
 
 Indexes are built and dropped `CONCURRENTLY`, so an upgrade does not block reads or writes (v3's BRIN
 setting locks that index for a moment and gives up after 3 s, to try again). Tidemark builds whose schema
@@ -332,6 +332,15 @@ WHERE host = 'api.github.com'
 ORDER BY started_at DESC LIMIT 50;
 ```
 
+Every request that reached an IP, whatever host it named, as Domains & IPs count an IP (a request to an IP literal
+has the literal as its remote IP), newest first by `requests_remote_ip_started_idx` (v4):
+
+```sql
+SELECT started_at, host, process_name, remote_ip_source, policy_path FROM requests
+WHERE remote_ip = '104.18.19.125'
+ORDER BY started_at DESC LIMIT 50;
+```
+
 Requests of the last day that ended with an error, although Surge reported them completed (served by
 `requests_ended_error_idx` (v4) when the condition is written exactly as its predicate):
 
@@ -366,7 +375,8 @@ GROUP BY host ORDER BY requests DESC LIMIT 25;
 * **Size** — `requests` grows by roughly 2–3 KB per row including its indexes (about 1.3 KB of row data). Check it
   with `SELECT pg_size_pretty(pg_total_relation_size('requests'));`. At about 60,000 requests a day, v4's columns add
   15–25 B a row in global-proxy mode and 60–80 B in rule mode (1–5 MB a day), `requests_host_started_idx` about 3 MB a
-  day and `requests_ended_error_idx` about 0.1 MB (about 6% of requests end with an error); `dns_answers` gets a row
+  day, `requests_remote_ip_started_idx` about 2 MB and `requests_ended_error_idx` about 0.1 MB (about 6% of requests
+  end with an error); `dns_answers` gets a row
   per resolution: in global-proxy mode nearly all are Tidemark's own lookups, about one per hostname in use per TTL of
   its answer, so roughly 3,000–10,000 rows a day on a busy Mac (1–4 MB at about 400 B a row with its indexes; the
   1,000 a day measured before Tidemark honoured Surge's expiry counted almost none of them), more in rule mode,

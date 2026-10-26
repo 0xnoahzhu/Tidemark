@@ -162,6 +162,8 @@ struct AnalyzeRequestsCount: View {
     var font: Font
     /// The exact hosts it opens, as requests store them.
     var hosts: [String]
+    /// What it opens (`InventoryRequests.help`).
+    var help: String
     var open: (String) -> Void
 
     @State private var hovering = false
@@ -170,7 +172,6 @@ struct AnalyzeRequestsCount: View {
         Group {
             if hosts.count == 1, let host = hosts.first {
                 Button { open(host) } label: { label }
-                    .help(trf("Show every stored request to %@ in History", "Inventory", host))
             } else {
                 Menu {
                     AnalyzeRequestsHostItems(hosts: hosts, open: open)
@@ -179,11 +180,11 @@ struct AnalyzeRequestsCount: View {
                 }
                 .menuStyle(.button)
                 .menuIndicator(.hidden)
-                .help(tr("Choose a host to show its stored requests in History", "Inventory"))
             }
         }
         .buttonStyle(.plain)
         .disabled(hosts.isEmpty)
+        .help(help)
         .onHover { hovering = $0 }
         .pointerStyle(.link)
     }

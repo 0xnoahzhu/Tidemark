@@ -36,6 +36,7 @@ struct ShellDemoDatabase: TidemarkDatabase {
         let lower = query.range.lowerBound(now: now)
         let needle = query.search.trimmingCharacters(in: .whitespaces).lowercased()
         let host = query.host.map(RequestsHostFilter.normalized)
+        let ip = query.remoteIP.map(RequestsHostFilter.normalized)
         return rows.filter { r in
             guard query.scope.includes(r.deviceID) else { return false }
             if let lower, r.startedAt < lower { return false }
@@ -48,6 +49,7 @@ struct ShellDemoDatabase: TidemarkDatabase {
             case .failed: if r.state != .failed && r.state != .rejected { return false }
             }
             if let host, r.host != host { return false }
+            if let ip, r.remoteIP.map(RequestsHostFilter.normalized) != ip { return false }
             if query.endedWithError, !r.endedWithError { return false }
             if !needle.isEmpty {
                 let app = r.appID.flatMap { appNames[$0] } ?? ""

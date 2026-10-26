@@ -42,7 +42,7 @@ struct DatabaseLiveTests {
             // Every index step is in effect.
             let built = try await indexes(db)
             for name in ["requests_active_idx", "requests_updated_brin_idx", "requests_search_trgm_idx", "requests_host_started_idx",
-                         "dns_answers_domain_idx", "proxy_errors_target_idx", "requests_ended_error_idx"] {
+                         "requests_remote_ip_started_idx", "dns_answers_domain_idx", "proxy_errors_target_idx", "requests_ended_error_idx"] {
                 #expect(built[name] == true, "\(name)")
             }
             #expect(try await indexOptions(db, "requests_updated_brin_idx") == ["pages_per_range=16", "autosummarize=on"])
@@ -1373,11 +1373,11 @@ struct DatabaseLiveTests {
 
             #expect(try await db.migrate() == 4)
             let upgraded = try await indexes(db)
-            for name in ["requests_host_started_idx", "dns_answers_domain_idx", "proxy_errors_target_idx", "requests_ended_error_idx",
-                         "dns_answers_pkey", "proxy_errors_pkey"] {
+            for name in ["requests_host_started_idx", "requests_remote_ip_started_idx", "dns_answers_domain_idx", "proxy_errors_target_idx",
+                         "requests_ended_error_idx", "dns_answers_pkey", "proxy_errors_pkey"] {
                 #expect(upgraded[name] == true, "\(name)")
             }
-            #expect(upgraded.count == before.count + 6)
+            #expect(upgraded.count == before.count + 7)
             let rows = try await db.queryRequests(RequestQuery(range: .all)).rows
             #expect(rows.count == 3)
             #expect(rows.allSatisfy { $0.remoteIP == "140.82.112.6" && $0.endReason == nil && $0.timing == nil && $0.remoteIPSource == nil })
@@ -1464,6 +1464,13 @@ struct DatabaseLiveTests {
             udp.endReason = "ICMP closed"
             udp.state = .completed
             rows.append(udp)
+            // Three requests to GitHub's addresses, one as an IP literal.
+            for (id, host, ip) in [(21, "github.com", "140.82.112.3"), (22, "140.82.112.3", "140.82.112.3"), (23, "github.com", "140.82.112.4")] {
+                var row = Fixture.request(device: mac.id, id: Int64(id), host: host)
+                row.startedAt = start.addingTimeInterval(Double(id))
+                row.remoteIP = ip
+                rows.append(row)
+            }
             let ids = try await db.upsertRequests(rows)
 
             let first = try await db.requests(forHost: "API.GitHub.com", query: RequestQuery(range: .all, limit: 3))
@@ -1476,18 +1483,25 @@ struct DatabaseLiveTests {
             #expect(try await db.requests(forHost: "api.github.com", query: RequestQuery(range: .all, endedWithError: true)).totalCount == 3)
             #expect(try await db.queryRequests(RequestQuery(range: .all, status: .failed)).totalCount == 0, "the state stays Surge's")
             #expect(try await db.histogram(RequestQuery(range: .all, host: "api.github.com"), buckets: 4).counts.reduce(0, +) == 7)
+            // An IP finds every request that reached it, whatever host it named.
+            let reached = try await db.queryRequests(RequestQuery(range: .all, remoteIP: "140.82.112.3"))
+            #expect(reached.totalCount == 2 && reached.rows.map(\.key.surgeID) == [22, 21])
+            #expect(try await db.queryRequests(RequestQuery(range: .all, remoteIP: "api.github.com")).totalCount == 0)
 
-            // The exact host is served by its index.
+            // The exact host and the IP are served by their indexes.
             try await db.execute("ANALYZE requests")
-            let planned = try await db.withTransaction { connection in
-                _ = try await connection.query("SET LOCAL enable_seqscan = off", logger: PostgresDatabase.logger).collect()
-                var sql = PostgresDatabase.SQL("EXPLAIN SELECT 1 FROM requests r")
-                PostgresDatabase.appendFilters(RequestQuery(range: .all, host: "api.github.com"), window: .init(lower: nil), to: &sql)
-                sql.append(" ORDER BY r.started_at DESC LIMIT 50")
-                return try await connection.query(sql.query, logger: PostgresDatabase.logger).collect()
-                    .map { try $0.makeRandomAccess()[0].decode(String.self) }.joined(separator: "\n")
+            for (query, index) in [(RequestQuery(range: .all, host: "api.github.com"), "requests_host_started_idx"),
+                                   (RequestQuery(range: .all, remoteIP: "140.82.112.3"), "requests_remote_ip_started_idx")] {
+                let planned = try await db.withTransaction { connection in
+                    _ = try await connection.query("SET LOCAL enable_seqscan = off", logger: PostgresDatabase.logger).collect()
+                    var sql = PostgresDatabase.SQL("EXPLAIN SELECT 1 FROM requests r")
+                    PostgresDatabase.appendFilters(query, window: .init(lower: nil), to: &sql)
+                    sql.append(" ORDER BY r.started_at DESC LIMIT 50")
+                    return try await connection.query(sql.query, logger: PostgresDatabase.logger).collect()
+                        .map { try $0.makeRandomAccess()[0].decode(String.self) }.joined(separator: "\n")
+                }
+                #expect(planned.contains(index), "\(planned)")
             }
-            #expect(planned.contains("requests_host_started_idx"), "\(planned)")
             // So are the requests that ended with an error, over all time: their count, the histogram's start and pages.
             for statement in ["SELECT count(*) FROM requests r", "SELECT min(r.started_at) FROM requests r", "SELECT 1 FROM requests r"] {
                 let plannedErrors = try await db.withTransaction { connection in
