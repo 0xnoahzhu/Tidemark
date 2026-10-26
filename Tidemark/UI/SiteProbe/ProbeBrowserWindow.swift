@@ -69,10 +69,12 @@ struct ProbeBrowserWindow: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12.px)
-            .frame(minWidth: 200.px, idealWidth: 420.px, maxWidth: 560.px)
+            .frame(minWidth: 120.px, idealWidth: 420.px, maxWidth: 560.px)
             // In a narrow window the address shortens before the toolbar moves it to the overflow menu.
             .toolbarItemCompressible()
         }
+        // Then the address is the first item to go to the overflow menu, before Desktop / iPhone.
+        .visibilityPriority(.low)
 
         ToolbarSpacer(.flexible)
 
@@ -112,6 +114,8 @@ struct ProbeBrowserWindow: View {
                 .disabled(ProbeWebSession.normalizedURL(web.urlDraft) == nil || web.isBusy)
             }
         }
+        // Stop and Start Probe go to the overflow menu last.
+        .visibilityPriority(.high)
     }
 
     private var address: String {
