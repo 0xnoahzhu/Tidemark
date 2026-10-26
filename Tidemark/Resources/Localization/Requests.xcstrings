@@ -727,13 +727,13 @@
         }
       }
     },
-    "In global proxy mode the request rides the proxy's open connection, so no connect on the network is timed." : {
+    "In global proxy mode the request rode the proxy's open connection, so no connect on the network is timed." : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "全局代理模式下，请求走代理已打开的连接，所以没有网络上的连接可以计时。"
+            "value" : "全局代理模式下，请求走了代理已打开的连接，所以没有网络上的连接可以计时。"
           }
         }
       }

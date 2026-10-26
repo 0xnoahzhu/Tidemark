@@ -139,6 +139,38 @@ struct RequestTimingSegmentTests {
         #expect(phases.map(\.kind) == [.clientHello, .local, .transfer])
         #expect(RequestTiming.isGlobalProxy(F.globalModeReset()))
         #expect(!RequestTiming.isGlobalProxy(F.ruleModeLookup()))
+        #expect(RequestTiming.ridesOpenConnection(F.globalModeReset()))
+    }
+
+    /// Global proxy mode alone does not make the setup local: a DIRECT global policy connects to the destination,
+    /// and a proxy may open a new connection.
+    @Test func timesAConnectInGlobalModeWhereOneWasMade() {
+        let direct = F.record(
+            host: "example.com", started: "10:00:00.000000", setup: "10:00:00.030000", completed: "10:00:01.000000",
+            notes: [
+                "10:00:00.000000 [Connection] Handled by VIF",
+                "10:00:00.001000 [Rule] Global proxy outbound mode: DIRECT",
+                "10:00:00.001100 [Rule] Policy decision path: DIRECT",
+            ],
+            policy: ["DIRECT"], remoteIP: "93.184.215.14", remoteAddress: "93.184.215.14"
+        )
+        #expect(RequestTiming.isGlobalProxy(direct))
+        #expect(RequestTiming.phases(for: direct).map(\.kind) == [.connect, .transfer])
+
+        let opened = F.record(
+            host: "example.com", started: "10:00:00.000000", setup: "10:00:00.180000", completed: "10:00:01.000000",
+            notes: [
+                "10:00:00.000000 [Connection] Handled by VIF",
+                "10:00:00.001000 [Rule] Global proxy outbound mode: AI",
+                "10:00:00.001100 [Rule] Policy decision path: AI -> AT&T-RackNerd-Hysteria2",
+                "10:00:00.001500 [Connection-Pool] Create a new master connector: SGHysteriaMasterConnector-3",
+                "10:00:00.180000 [Connector] Master connector is now ready",
+            ]
+        )
+        #expect(!RequestTiming.ridesOpenConnection(opened))
+        #expect(RequestTiming.phases(for: opened).map(\.kind) == [.connect, .transfer])
+        let connection = RequestsJourney(record: opened).stages.compactMap { if case .connection(let c) = $0 { c } else { nil } }.first
+        #expect(connection?.reused == false)
     }
 
     @Test func aHelloReadAfterTheRuleIsNoWait() {

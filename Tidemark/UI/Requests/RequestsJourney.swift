@@ -347,15 +347,9 @@ extension RequestsJourney {
                         decisionOffset = offset
                     }
                 case "connection-pool", "connector":
-                    guard connection == nil else { continue }
-                    let lowered = text.lowercased()
-                    if lowered.hasPrefix("use an existing") {
-                        // `Use an existing master connector: SGHysteriaMasterConnector-2`
-                        let connector = Self.value(after: ":", in: text)
-                        connection = Connection(offset: offset, reused: true, connector: connector)
-                    } else if lowered.contains("new") || lowered.contains("create") {
-                        connection = Connection(offset: offset, reused: false, connector: nil)
-                    }
+                    guard connection == nil, let reused = RequestTiming.reusesConnection(note) else { continue }
+                    // `Use an existing master connector: SGHysteriaMasterConnector-2`
+                    connection = Connection(offset: offset, reused: reused, connector: reused ? Self.value(after: ":", in: text) : nil)
                 default:
                     break
                 }

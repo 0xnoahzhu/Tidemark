@@ -11,7 +11,7 @@ struct TimingPhase: Hashable, Sendable {
         case dns
         /// Rule evaluation and Surge's outbound connection.
         case connect
-        /// The same stretch in global proxy mode, where the request rides the proxy's shared connection: Surge's own
+        /// The same stretch in global proxy mode when the request rode an open connection of its proxy: Surge's own
         /// work on this Mac, not a connect on the network.
         case local
         case transfer
@@ -67,7 +67,7 @@ enum RequestTiming {
         let durations: [TimingPhase.Kind: TimeInterval] = [
             .clientHello: hello,
             .dns: dns,
-            isGlobalProxy(record) ? .local : .connect: setup - hello - dns,
+            ridesOpenConnection(record) ? .local : .connect: setup - hello - dns,
             .transfer: end.timeIntervalSince(setupEnd),
         ]
         return TimingPhase.Kind.allCases.compactMap { kind in
@@ -117,5 +117,29 @@ enum RequestTiming {
             guard let note = parse(note: raw) else { return false }
             return note.tag.caseInsensitiveCompare("Rule") == .orderedSame && note.text.hasPrefix("Global proxy outbound mode")
         }
+    }
+
+    /// In global proxy mode, the request rode an open connection of its proxy (`[Connection-Pool] Use an existing
+    /// master connector: …`), so its setup timed only Surge's own work on this Mac. The mode alone does not say so: a
+    /// DIRECT global policy connects to the destination, and a proxy may open a new connection.
+    static func ridesOpenConnection(_ record: RequestRecord) -> Bool {
+        guard isGlobalProxy(record), let final = record.finalPolicy?.uppercased(), final != "DIRECT", !final.hasPrefix("REJECT") else {
+            return false
+        }
+        for raw in record.notes {
+            if let note = parse(note: raw), let reused = reusesConnection(note) { return reused }
+        }
+        return false
+    }
+
+    /// What a note says of the outbound connection: true when Surge reused an open one (`Use an existing master
+    /// connector: SGHysteriaMasterConnector-2`), false when it opened a new one, nil when the note says neither.
+    static func reusesConnection(_ note: Note) -> Bool? {
+        let tag = note.tag.lowercased()
+        guard tag == "connection-pool" || tag == "connector" else { return nil }
+        let text = note.text.lowercased()
+        if text.hasPrefix("use an existing") { return true }
+        if text.contains("new") || text.contains("create") { return false }
+        return nil
     }
 }

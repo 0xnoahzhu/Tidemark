@@ -307,7 +307,7 @@ private struct RequestsInspectorTiming: View {
             } else {
                 TimingBar(phases: phases)
                 if phases.contains(where: { $0.kind == .local }) {
-                    Text(tr("In global proxy mode the request rides the proxy's open connection, so no connect on the network is timed.", "Requests"))
+                    Text(tr("In global proxy mode the request rode the proxy's open connection, so no connect on the network is timed.", "Requests"))
                         .font(.design(11))
                         .foregroundStyle(Theme.ink3)
                         .fixedSize(horizontal: false, vertical: true)
