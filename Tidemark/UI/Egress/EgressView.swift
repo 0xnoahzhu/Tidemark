@@ -7,23 +7,19 @@ struct EgressView: View {
     var body: some View {
         let egress = model.egress
         ScrollView {
-            HStack(alignment: .top, spacing: 14) {
-                VStack(spacing: 14) {
+            EgressPageLayout(layout: .current) {
+                VStack(spacing: EgressLayout.current.gap) {
                     EgressCurrentCard(sample: egress.current, lastChecked: egress.lastChecked, proxyMode: egress.proxyMode,
                                       currentRule: egress.currentRule, isChecking: egress.isChecking)
                     EgressPolicyCard(samples: Self.ordered(egress.samples), isChecking: egress.isChecking)
                     EgressChangesCard(changes: egress.changes)
                 }
-                .frame(maxWidth: .infinity)
-                VStack(spacing: 14) {
-                    EgressLookupCard(current: egress.current)
-                    EgressThisMacCard(network: egress.network)
-                }
-                .frame(width: 310)
+                EgressLookupCard(current: egress.current)
+                EgressThisMacCard(network: egress.network)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 22)
+            .padding(.horizontal, EgressLayout.current.padding)
+            .padding(.top, 18.px)
+            .padding(.bottom, 22.px)
         }
         .background(Theme.bg3)
         .pageToolbar(tr("Egress IP", "Egress"), subtitle: tr("What the outside world sees, for each policy", "Egress")) {
@@ -60,18 +56,18 @@ struct EgressView: View {
     }
 }
 
-/// Shared look of the Egress page cards (white, 14 pt corners, hairline).
+/// Shared look of the Egress page cards (white, 14 px corners, hairline).
 private struct EgressCard<Content: View>: View {
-    var padding = EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0)
+    var padding = EdgeInsets(top: 4.px, leading: 0, bottom: 4.px, trailing: 0)
     @ViewBuilder var content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { content }
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.04), radius: 1, y: 1)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14.px, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14.px, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.04), radius: 1.px, y: 1.px)
     }
 }
 
@@ -86,24 +82,24 @@ private struct EgressCurrentCard: View {
     var isChecking: Bool
 
     var body: some View {
-        EgressCard(padding: EdgeInsets(top: 18, leading: 20, bottom: 18, trailing: 20)) {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 8) {
+        EgressCard(padding: EdgeInsets(top: 18.px, leading: 20.px, bottom: 18.px, trailing: 20.px)) {
+            VStack(alignment: .leading, spacing: 9.px) {
+                HStack(spacing: 8.px) {
                     StatusDot(color: sample?.error == nil && sample != nil ? Theme.live : Theme.ink3, size: 7.px,
                               pulsing: isChecking && !reduceMotion)
                     Text(tr("Current egress", "Egress")).fontWeight(.semibold).foregroundStyle(Theme.ink)
                     if let mode = EgressFormat.modeLabel(proxyMode) { Text(mode) }
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 8.px)
                     if let lastChecked {
                         Text(trf("Checked %@", "Egress", Fmt.hms(lastChecked)))
                     }
                 }
-                .font(.system(size: 11.5))
+                .font(.design(11.5))
                 .foregroundStyle(Theme.ink2)
 
                 if let sample {
                     Text(sample.ip ?? "—")
-                        .font(.system(size: 34, weight: .semibold, design: .monospaced))
+                        .font(Theme.mono(34, weight: .semibold))
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
@@ -112,37 +108,60 @@ private struct EgressCurrentCard: View {
                     let detail = EgressFormat.detail(sample)
                     if !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 13))
+                            .font(.design(13))
                             .foregroundStyle(Theme.ink2)
                     }
-                    HStack(spacing: 6) {
-                        PolicyChip(policyPath: sample.policyPath)
+                    HStack(spacing: 6.px) {
+                        if !sample.policyPath.isEmpty {
+                            EgressChip(text: sample.policyDisplay, colors: Theme.tint(Theme.policyHue(sample.policyPath)), weight: .medium)
+                                .help(sample.policyDisplay)
+                        }
                         if let rule = EgressFormat.ruleLabel(proxyMode: proxyMode, currentRule: currentRule) {
-                            AnalyzePill(text: rule, style: .neutral)
+                            EgressChip(text: rule)
                         }
                         if let ipv6 = sample.hasIPv6 {
-                            AnalyzePill(text: ipv6 ? tr("IPv6", "Egress") : tr("No IPv6", "Egress"), style: .neutral)
+                            EgressChip(text: ipv6 ? tr("IPv6", "Egress") : tr("No IPv6", "Egress"))
                         }
-                        if let latency = sample.latencyMs { AnalyzePill(text: "\(latency) ms", style: .neutral) }
+                        if let latency = sample.latencyMs { EgressChip(text: "\(latency) ms") }
                         if let error = sample.error {
                             Text(EgressFormat.error(error))
-                                .font(.system(size: 11.5))
+                                .font(.design(11.5))
                                 .foregroundStyle(Theme.failed)
                                 .lineLimit(1)
                                 .help(error)
                         }
                     }
-                    .padding(.top, 2)
+                    .padding(.top, 2.px)
                 } else {
                     Text(isChecking ? tr("Checking…", "Egress") : tr("Not checked yet", "Egress"))
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(.design(22, .semibold))
                         .foregroundStyle(Theme.ink3)
                     Text(tr("Press Check All to look up the external IP through every policy.", "Egress"))
-                        .font(.system(size: 12.5))
+                        .font(.design(12.5))
                         .foregroundStyle(Theme.ink2)
                 }
             }
         }
+    }
+}
+
+/// A chip of the current-egress card. The design draws the policy and the facts beside it alike, 11.5 px text in a
+/// 6 px rounded rectangle, a little larger than the tables' policy chip: the facts on the fill, the policy in its
+/// group's tint.
+private struct EgressChip: View {
+    var text: String
+    var colors: (background: Color, foreground: Color) = (Theme.fill, Theme.ink2)
+    var weight: Font.Weight = .regular
+
+    var body: some View {
+        Text(text)
+            .font(.design(11.5, weight))
+            .lineLimit(1)
+            .padding(.horizontal, 8.px)
+            .padding(.vertical, 2.px)
+            .background(colors.background, in: RoundedRectangle(cornerRadius: 6.px, style: .continuous))
+            .foregroundStyle(colors.foreground)
+            .fixedSize()
     }
 }
 
@@ -152,44 +171,39 @@ private struct EgressPolicyCard: View {
     var samples: [EgressSample]
     var isChecking: Bool
 
-    /// Policy takes room before Location (which holds a country name) and stops at 200 pt, so chips such as
-    /// `AI › AT&T-RackNerd-Hysteria2` are whole, as in the current-egress card.
-    private static let columns: [AnalyzeColumnsLayout.Column] = [
-        .flexible(weight: 1.3, min: 128, max: 200), .fixed(150), .flexible(weight: 1, min: 70),
-        .flexible(weight: 1.3, min: 90), .fixed(56),
-    ]
+    private static let columns = EgressLayout.current.policyColumns
 
     var body: some View {
         EgressCard {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(tr("By policy", "Egress")).font(.system(size: 13, weight: .semibold))
+            HStack(alignment: .firstTextBaseline, spacing: 8.px) {
+                Text(tr("By policy", "Egress")).font(.design(13, .semibold))
                 Text(tr("The lookup goes out through each policy in turn", "Egress"))
-                    .font(.system(size: 11.5))
+                    .font(.design(11.5))
                     .foregroundStyle(Theme.ink2)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 16.px)
+            .padding(.top, 12.px)
+            .padding(.bottom, 8.px)
 
-            AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
+            AnalyzeColumnsLayout(columns: Self.columns, spacing: EgressLayout.current.columnSpacing) {
                 Text(tr("Policy", "Egress"))
                 Text(tr("Egress IP", "Egress"))
                 Text(tr("Location", "Egress"))
                 Text(tr("Network", "Egress"))
                 Text(tr("Latency", "Egress")).frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .font(.system(size: 11, weight: .semibold))
+            .font(.design(11, .semibold))
             .foregroundStyle(Theme.ink2)
-            .padding(.horizontal, 16)
-            .frame(height: 26)
+            .padding(.horizontal, 16.px)
+            .frame(height: 26.px)
 
             if samples.isEmpty {
                 Text(isChecking ? tr("Checking…", "Egress") : tr("No policies checked yet.", "Egress"))
-                    .font(.system(size: 12))
+                    .font(.design(12))
                     .foregroundStyle(Theme.ink3)
-                    .padding(.horizontal, 16)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 16.px)
+                    .frame(maxWidth: .infinity, minHeight: 44.px, alignment: .leading)
                     .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
             }
             ForEach(samples) { sample in
@@ -200,14 +214,14 @@ private struct EgressPolicyCard: View {
 
     private func row(_ sample: EgressSample) -> some View {
         let network = [sample.network, EgressFormat.networkType(sample.networkType)].compactMap { $0 }.filter { !$0.isEmpty }
-        return AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
+        return AnalyzeColumnsLayout(columns: Self.columns, spacing: EgressLayout.current.columnSpacing) {
             PolicyChip(policyPath: sample.policyPath, maxWidth: .infinity)
-            HStack(spacing: 6) {
+            HStack(spacing: 6.px) {
                 Text(sample.ip ?? "—").font(Theme.mono(11.5)).lineLimit(1).truncationMode(.middle).layoutPriority(1).textSelection(.enabled)
                 if sample.isCurrent {
                     Text(tr("NOW", "Egress"))
-                        .font(.system(size: 9, weight: .bold))
-                        .tracking(0.45)
+                        .font(.design(9, .bold))
+                        .tracking(0.45 * UIScale.factor)
                         .foregroundStyle(Theme.accentInk)
                         .fixedSize()
                 }
@@ -226,9 +240,9 @@ private struct EgressPolicyCard: View {
                 .font(Theme.mono(11))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .font(.system(size: 12))
-        .padding(.horizontal, 16)
-        .frame(height: 34)
+        .font(.design(12))
+        .padding(.horizontal, 16.px)
+        .frame(height: 34.px)
         .background(sample.isCurrent ? Theme.fresh : .clear)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
@@ -239,38 +253,36 @@ private struct EgressPolicyCard: View {
 private struct EgressChangesCard: View {
     var changes: [EgressChange]
 
-    private static let columns: [AnalyzeColumnsLayout.Column] = [
-        .fixed(110), .fixed(128), .flexible(weight: 1, min: 128, max: 200), .flexible(weight: 1, min: 100),
-    ]
+    private static let columns = EgressLayout.current.changesColumns
 
     var body: some View {
         EgressCard {
             Text(tr("Changes", "Egress"))
-                .font(.system(size: 13, weight: .semibold))
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+                .font(.design(13, .semibold))
+                .padding(.horizontal, 16.px)
+                .padding(.top, 12.px)
+                .padding(.bottom, 8.px)
             if changes.isEmpty {
                 Text(tr("No changes recorded yet. A new current egress IP is logged here with its likely cause.", "Egress"))
-                    .font(.system(size: 12))
+                    .font(.design(12))
                     .foregroundStyle(Theme.ink3)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16.px)
+                    .padding(.vertical, 12.px)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
             }
             // Up to 50 changes: only the rows scrolled into view are built.
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(changes) { change in
-                    AnalyzeColumnsLayout(columns: Self.columns, spacing: 12) {
+                    AnalyzeColumnsLayout(columns: Self.columns, spacing: EgressLayout.current.columnSpacing) {
                         Text(AnalyzeFormat.seen(change.changedAt, timeOnlyToday: true)).foregroundStyle(Theme.ink2).lineLimit(1)
                         Text(change.ip).font(Theme.mono(11.5)).lineLimit(1).textSelection(.enabled)
                         PolicyChip(policyPath: change.policyPath, maxWidth: .infinity)
                         Text(EgressView.localizedReason(change.reason)).foregroundStyle(Theme.ink2).lineLimit(1)
                     }
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 16)
-                    .frame(height: 32)
+                    .font(.design(12))
+                    .padding(.horizontal, 16.px)
+                    .frame(height: 32.px)
                     .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 0.5) }
                 }
             }
@@ -292,35 +304,35 @@ private struct EgressLookupCard: View {
     private var suggestion: String? { current?.ip }
 
     var body: some View {
-        EgressCard(padding: EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16)) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(tr("Look up an IP", "Egress")).font(.system(size: 13, weight: .semibold))
-                HStack(spacing: 6) {
+        EgressCard(padding: EdgeInsets(top: 14.px, leading: 16.px, bottom: 14.px, trailing: 16.px)) {
+            VStack(alignment: .leading, spacing: 10.px) {
+                Text(tr("Look up an IP", "Egress")).font(.design(13, .semibold))
+                // The design's 28 px field and button.
+                HStack(spacing: 6.px) {
                     TextField(text: $query, prompt: Text(verbatim: suggestion ?? "1.1.1.1")) {
                         Text(tr("IP address", "Egress"))
                     }
-                    .textFieldStyle(.bordered)
-                    .textInputBorderShape(.roundedRectangle)
                     .font(Theme.mono(12))
                     .autocorrectionDisabled()
                     .onSubmit(lookUp)
+                    .designField(horizontalPadding: 10)
                     Button(tr("Look Up", "Egress"), action: lookUp)
-                        .buttonStyle(.glassProminent)
-                        .tint(Theme.accent)
+                        .buttonStyle(DesignButtonStyle(kind: .accent, horizontalPadding: 12))
                         .disabled(address.isEmpty || isLookingUp)
                 }
-                VStack(alignment: .leading, spacing: 7) {
-                    KeyValueRow(tr("Country", "Egress"), EgressFormat.location(result?.country) ?? "—", labelWidth: 84.px)
-                    KeyValueRow("ASN", result?.asn.map { "AS\($0)" } ?? "—", mono: true, labelWidth: 84.px)
-                    KeyValueRow(tr("Organization", "Egress"), result?.organization ?? "—", labelWidth: 84.px)
-                    KeyValueRow(tr("Type", "Egress"), EgressFormat.type(result?.networkType) ?? "—", labelWidth: 84.px)
-                    KeyValueRow(tr("Reverse DNS", "Egress"), result?.reverseDNS ?? "—", mono: true, labelWidth: 84.px)
+                VStack(alignment: .leading, spacing: 7.px) {
+                    KeyValueRow(tr("Country", "Egress"), EgressFormat.location(result?.country) ?? "—", labelWidth: EgressLayout.current.labelWidth)
+                    KeyValueRow("ASN", result?.asn.map { "AS\($0)" } ?? "—", mono: true, labelWidth: EgressLayout.current.labelWidth)
+                    KeyValueRow(tr("Organization", "Egress"), result?.organization ?? "—", labelWidth: EgressLayout.current.labelWidth)
+                    KeyValueRow(tr("Type", "Egress"), EgressFormat.type(result?.networkType) ?? "—", labelWidth: EgressLayout.current.labelWidth)
+                    KeyValueRow(tr("Reverse DNS", "Egress"), result?.reverseDNS ?? "—", mono: true, labelWidth: EgressLayout.current.labelWidth)
                 }
                 .redacted(reason: isLookingUp ? .placeholder : [])
                 Text(EgressFormat.sourcesNote)
-                    .font(.system(size: 11))
+                    .font(.design(11))
                     .foregroundStyle(Theme.ink3)
-                    .lineSpacing(2)
+                    // The design's `line-height: 1.45` for this note.
+                    .lineHeight(.multiple(factor: 1.45))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -369,15 +381,15 @@ private struct EgressThisMacCard: View {
     var network: ThisMacNetwork?
 
     var body: some View {
-        EgressCard(padding: EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16)) {
-            VStack(alignment: .leading, spacing: 9) {
-                Text(tr("This Mac", "Egress")).font(.system(size: 13, weight: .semibold))
-                VStack(alignment: .leading, spacing: 7) {
-                    KeyValueRow(tr("Interface", "Egress"), interface, labelWidth: 84.px)
-                    KeyValueRow(tr("Local IP", "Egress"), network?.localIP ?? "—", mono: true, labelWidth: 84.px)
-                    KeyValueRow(tr("Router", "Egress"), network?.router ?? "—", mono: true, labelWidth: 84.px)
-                    KeyValueRow("DNS", dns, mono: true, labelWidth: 84.px)
-                    KeyValueRow("Surge", surgeMode, labelWidth: 84.px)
+        EgressCard(padding: EdgeInsets(top: 14.px, leading: 16.px, bottom: 14.px, trailing: 16.px)) {
+            VStack(alignment: .leading, spacing: 9.px) {
+                Text(tr("This Mac", "Egress")).font(.design(13, .semibold))
+                VStack(alignment: .leading, spacing: 7.px) {
+                    KeyValueRow(tr("Interface", "Egress"), interface, labelWidth: EgressLayout.current.labelWidth)
+                    KeyValueRow(tr("Local IP", "Egress"), network?.localIP ?? "—", mono: true, labelWidth: EgressLayout.current.labelWidth)
+                    KeyValueRow(tr("Router", "Egress"), network?.router ?? "—", mono: true, labelWidth: EgressLayout.current.labelWidth)
+                    KeyValueRow("DNS", dns, mono: true, labelWidth: EgressLayout.current.labelWidth)
+                    KeyValueRow("Surge", surgeMode, labelWidth: EgressLayout.current.labelWidth)
                 }
             }
         }
@@ -396,6 +408,98 @@ private struct EgressThisMacCard: View {
     private var surgeMode: String {
         guard let mode = network?.surgeMode, !mode.isEmpty else { return "—" }
         return EgressFormat.surgeMode(mode)
+    }
+}
+
+// MARK: - Layout
+
+/// The Egress page's widths at a UI scale. The tables' fixed columns and minimums fit the text they hold: text grows
+/// with the scale, and SF a little less than its size, so widths in design px fit it at every factor.
+struct EgressLayout: Equatable {
+    /// The layout at the app's factor.
+    static let current = EgressLayout()
+
+    /// The page's padding at either side.
+    var padding: CGFloat
+    /// Between the cards.
+    var gap: CGFloat
+    /// The lookup and This Mac column.
+    var sideWidth: CGFloat
+    /// A table's padding at either side, within its card.
+    var tablePadding: CGFloat
+    /// Between the columns of By policy and Changes.
+    var columnSpacing: CGFloat
+    /// The label column of the lookup and This Mac cards, as the inspector's: `Reverse DNS` and `Organization` in 12 px
+    /// on one line.
+    var labelWidth: CGFloat
+    /// By policy: Policy takes room before Location (which holds a country name) and stops at 200 px, so chips such as
+    /// `AI › AT&T-RackNerd-Hysteria2` are whole, as in the current-egress card. Egress IP holds the widest IPv4
+    /// address in 11.5 px SF Mono with the NOW tag, and Latency `9999 ms` and its title.
+    var policyColumns: [AnalyzeColumnsLayout.Column]
+    /// Changes: the time (`Yesterday 23:59` at most), the IP in 11.5 px SF Mono, the policy and the reason.
+    var changesColumns: [AnalyzeColumnsLayout.Column]
+
+    init(factor: CGFloat = UIScale.factor) {
+        func px(_ length: CGFloat) -> CGFloat { UIScale.length(length, factor: factor) }
+        padding = px(20)
+        gap = px(14)
+        sideWidth = px(310)
+        tablePadding = px(16)
+        columnSpacing = px(12)
+        labelWidth = px(84)
+        policyColumns = [.flexible(weight: 1.3, min: px(128), max: px(200)), .fixed(px(150)), .flexible(weight: 1, min: px(70)),
+                         .flexible(weight: 1.3, min: px(90)), .fixed(px(56))]
+        changesColumns = [.fixed(px(110)), .fixed(px(128)), .flexible(weight: 1, min: px(128), max: px(200)), .flexible(weight: 1, min: px(100))]
+    }
+
+    /// The narrowest the left column gets: both tables at their columns' minimums.
+    var tablesMinimum: CGFloat {
+        max(policyColumns.minimumWidth(spacing: columnSpacing), changesColumns.minimumWidth(spacing: columnSpacing)) + 2 * tablePadding
+    }
+
+    /// Whether a page whose cards have `width` between the page's padding holds the tables beside the lookup and This
+    /// Mac column.
+    func showsSideColumn(width: CGFloat) -> Bool {
+        width - gap - sideWidth >= tablesMinimum
+    }
+}
+
+/// The page's two columns: the current egress, By policy and Changes (the first subview) on the left, and the lookup
+/// and This Mac cards (the other two) in a column on the right. A page too narrow for the tables beside that column,
+/// such as the minimum window's, puts the two cards side by side below the others. Either way they are the same
+/// views, so what was typed into the lookup survives a resize.
+private struct EgressPageLayout: Layout {
+    var layout: EgressLayout
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? layout.tablesMinimum + layout.gap + layout.sideWidth
+        let frames = frames(width: width, subviews: subviews)
+        return CGSize(width: width, height: frames.map(\.maxY).max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (subview, frame) in zip(subviews, frames(width: bounds.width, subviews: subviews)) {
+            subview.place(at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: frame.width, height: frame.height))
+        }
+    }
+
+    private func frames(width: CGFloat, subviews: Subviews) -> [CGRect] {
+        guard subviews.count == 3 else { return subviews.map { _ in .zero } }
+        func height(_ index: Int, _ width: CGFloat) -> CGFloat {
+            subviews[index].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+        }
+        let gap = layout.gap
+        if layout.showsSideColumn(width: width) {
+            let side = layout.sideWidth
+            let main = CGRect(x: 0, y: 0, width: width - gap - side, height: height(0, width - gap - side))
+            let lookup = CGRect(x: width - side, y: 0, width: side, height: height(1, side))
+            return [main, lookup, CGRect(x: width - side, y: lookup.maxY + gap, width: side, height: height(2, side))]
+        }
+        let main = CGRect(x: 0, y: 0, width: width, height: height(0, width))
+        let half = (width - gap) / 2
+        return [main, CGRect(x: 0, y: main.maxY + gap, width: half, height: height(1, half)),
+                CGRect(x: half + gap, y: main.maxY + gap, width: half, height: height(2, half))]
     }
 }
 
