@@ -126,8 +126,8 @@ enum InventoryPresentation {
 // MARK: - List
 
 /// The Domains & IPs table: a pinned header and lazily built rows in one scroll view, laid out like the native
-/// table it replaced (the inset style's header, row padding and alternating rounded rows). Flat and grouped
-/// rows share the scroll view, so grouping only swaps the rows.
+/// table it replaced (the inset style's header, row padding and alternating rounded rows, continued below the last
+/// row). Flat and grouped rows share the scroll view, so grouping only swaps the rows.
 private struct InventoryList: View {
     let model: AppModel
     var entries: [InventoryEntry]
@@ -146,6 +146,7 @@ private struct InventoryList: View {
                         ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
                             InventoryGroupRow(model: model, group: group, striped: index % 2 == 1)
                         }
+                        InventoryEmptyRows(first: groups.count)
                     } header: {
                         InventoryHeaderRow(columns: InventoryColumnsLayout.groupColumns, titles: [
                             (tr("Site or network", "Inventory"), .leading),
@@ -159,6 +160,7 @@ private struct InventoryList: View {
                         ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                             InventoryEntryRow(model: model, entry: entry, striped: index % 2 == 1)
                         }
+                        InventoryEmptyRows(first: entries.count)
                     } header: {
                         InventoryHeaderRow(columns: InventoryColumnsLayout.entryColumns, titles: [
                             (tr("Name", "Inventory"), .leading),
@@ -222,6 +224,8 @@ private enum InventoryTableMetrics {
     static let verticalInset: CGFloat = 5
     static let headerHeight: CGFloat = 28
     static let rowPadding: CGFloat = 4
+    /// The height of the empty rows below the last one.
+    static let emptyRowHeight: CGFloat = 24
 
     static let background = Color(nsColor: .controlBackgroundColor)
     static let headerText = Color(nsColor: .headerTextColor)
@@ -283,6 +287,34 @@ private struct InventoryRowStripe: View {
             .fill(InventoryTableMetrics.stripe)
             .padding(.leading, 10)
             .padding(.trailing, 10.5)
+    }
+}
+
+/// The empty rows the native table draws below its last one, down to the bottom of the window: alternate rounded
+/// rows on a 24 pt pitch whose parity continues the rows'. They hang below the list's end, so they take no room
+/// and a long list never scrolls to them.
+private struct InventoryEmptyRows: View {
+    /// The index the first empty row would have.
+    var first: Int
+
+    var body: some View {
+        Color.clear
+            .frame(height: 0)
+            .overlay(alignment: .top) {
+                Canvas { context, size in
+                    let pitch = InventoryTableMetrics.emptyRowHeight
+                    var index = first % 2 == 1 ? 0 : 1
+                    while CGFloat(index) * pitch < size.height {
+                        let rect = CGRect(x: 10, y: CGFloat(index) * pitch, width: max(0, size.width - 20.5), height: pitch)
+                        context.fill(RoundedRectangle(cornerRadius: 6, style: .continuous).path(in: rect),
+                                     with: .color(InventoryTableMetrics.stripe))
+                        index += 2
+                    }
+                }
+                .containerRelativeFrame(.vertical, alignment: .top)
+                .allowsHitTesting(false)
+            }
+            .accessibilityHidden(true)
     }
 }
 
