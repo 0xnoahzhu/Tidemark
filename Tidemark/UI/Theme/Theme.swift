@@ -93,11 +93,7 @@ enum Theme {
     static func deviceColor(hue: Double) -> Color { Color(oklch: 0.62, 0.14, hue) }
 
     // Typography (sizes in design px, drawn at `UIScale.factor`)
-    static let body = Font.design(13)
-    static let small = Font.design(12)
-    static let caption = Font.design(11)
     static let sectionLabel = Font.design(11, .semibold)
-    static let title = Font.design(15, .bold)
     static func mono(_ size: CGFloat = 12, weight: Font.Weight = .regular) -> Font {
         .designMono(size, weight)
     }
