@@ -90,38 +90,6 @@ extension PostgresDatabase {
         return Int32(clamping: Int64((seconds * 1_000).rounded()))
     }
 
-    // MARK: - Host insights
-
-    /// Hosts are matched case-insensitively (stored lowercased).
-    func hostInsight(_ host: String, language: String) async throws -> HostInsight? {
-        guard let row = try await rows("""
-            SELECT host, language, category, operator_name, summary, concern, model, created_at
-            FROM host_insights WHERE host = \(host.lowercased()) AND language = \(language)
-            """).first else { return nil }
-        let read = PostgresRowReader(row)
-        return HostInsight(
-            host: try read("host"),
-            category: HostCategory(rawValue: try read("category", as: String.self)) ?? .unknown,
-            operatorName: try read("operator_name"),
-            summary: try read("summary"),
-            concern: try read("concern"),
-            language: try read("language"),
-            model: try read("model"),
-            createdAt: try read("created_at")
-        )
-    }
-
-    func saveHostInsight(_ insight: HostInsight) async throws {
-        try await execute("""
-            INSERT INTO host_insights (host, language, category, operator_name, summary, concern, model, created_at)
-            VALUES (\(insight.host.lowercased()), \(insight.language), \(insight.category.rawValue), \(insight.operatorName),
-                    \(insight.summary), \(insight.concern), \(insight.model), \(insight.createdAt))
-            ON CONFLICT (host, language) DO UPDATE SET
-                category = excluded.category, operator_name = excluded.operator_name, summary = excluded.summary,
-                concern = excluded.concern, model = excluded.model, created_at = excluded.created_at
-            """)
-    }
-
     // MARK: - Egress
 
     /// Stores one check round and prunes this Mac's samples older than 30 days.

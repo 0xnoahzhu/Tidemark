@@ -10,7 +10,6 @@ struct SurgeCLIClientTests {
         let client = SurgeCLIClient(endpoint: SurgeEndpoint(cliPath: "/usr/local/bin/surge-cli"))
         let status = client.invocation(["status"])
         #expect(status.arguments == ["--raw", "status"])
-        #expect(status.input == nil)
         #expect(status.label == "status")
         #expect(status.timeout == .seconds(20))
         #expect(client.invocation(["test-policy", "POLICY::abc"]).timeout == .seconds(60))
@@ -18,20 +17,7 @@ struct SurgeCLIClientTests {
         #expect(client.invocation(["http", "probe", "https://example.com"]).timeout == .seconds(60))
     }
 
-    @Test func sendsTheRemotePasswordOnStandardInputOnly() async throws {
-        let cli = try await SurgeFakeCLI(#"printf '%s\n' "$*"; cat"#)
-        defer { cli.remove() }
-        let client = cli.client(remote: "10.0.0.2:6171", password: "correct horse")
-        let invocation = client.invocation(["status"])
-        #expect(invocation.arguments == ["--raw", "--remote", "10.0.0.2:6171", "--password-stdin", "status"])
-        #expect(!invocation.arguments.contains { $0.contains("correct horse") })
-
-        let output = try await SurgeCLIClient.execute(invocation, killGrace: .seconds(1))
-        #expect(output.exitStatus == 0)
-        #expect(String(decoding: output.stdout, as: UTF8.self) == "--raw --remote 10.0.0.2:6171 --password-stdin status\ncorrect horse\n")
-    }
-
-    @Test func keepsStandardInputEmptyForTheLocalInstance() async throws {
+    @Test func keepsStandardInputEmpty() async throws {
         let cli = try await SurgeFakeCLI(#"cat; printf 'done'"#)
         defer { cli.remove() }
         let output = try await SurgeCLIClient.execute(cli.client().invocation(["status"]), killGrace: .seconds(1))
@@ -272,8 +258,8 @@ private struct SurgeFakeCLI {
         }
     }
 
-    func client(remote: String? = nil, password: String? = nil, timeouts: SurgeCLIClient.Timeouts = .init()) -> SurgeCLIClient {
-        SurgeCLIClient(endpoint: SurgeEndpoint(cliPath: path, remote: remote, password: password), timeouts: timeouts)
+    func client(timeouts: SurgeCLIClient.Timeouts = .init()) -> SurgeCLIClient {
+        SurgeCLIClient(endpoint: SurgeEndpoint(cliPath: path), timeouts: timeouts)
     }
 
     func remove() {

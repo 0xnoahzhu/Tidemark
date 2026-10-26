@@ -25,14 +25,12 @@ final class CaptureEngine {
 
     /// Receives Surge signals (policy switches, reloads, restarts, wake) to schedule egress checks.
     weak var egress: EgressMonitor?
-    /// Builds a client when the surge-cli path, the remote controller or its password changes. When nil the
-    /// engine keeps its client and only restarts the stream.
+    /// Builds a client when the surge-cli path changes. When nil the engine keeps its client and only restarts
+    /// the stream.
     var makeSurgeClient: ((SurgeEndpoint) -> any SurgeClient)?
     /// Builds a database for a connection URL (password included). Used when the URL changes, and for testing
     /// new settings. When nil the engine reconnects its instance.
     var makeDatabase: ((String) -> any TidemarkDatabase)?
-    /// Called on the main actor after the engine switched to a new database (services that read it follow).
-    var databaseChanged: ((any TidemarkDatabase) -> Void)?
     /// Releases a database the engine no longer uses (closes its connection pool).
     var retireDatabase: (@Sendable (any TidemarkDatabase) async -> Void)?
     /// The PostgreSQL URL the settings describe (`Preferences.connectionURL`). Read only when `makeDatabase` is
@@ -67,8 +65,6 @@ final class CaptureEngine {
     private var lastEnvironment: SurgeEnvironment?
     private var observedScope: DeviceScope = .all
     private var observedPreferences: PreferenceValues?
-    /// Device the pipeline currently writes under.
-    private var appliedRecordingDevice: DeviceID
     /// The connection URL the current database was built with; nil when unknown.
     private(set) var currentDatabaseURL: String?
     private var reconnectAttempt = 0
@@ -89,7 +85,7 @@ final class CaptureEngine {
     /// stale and must not be applied.
     var catalogGeneration = 0
 
-    /// Preferences the engine reacts to. (Settings offer no remote Surge, so nothing changes `surgeRemote`.)
+    /// Preferences the engine reacts to.
     private struct PreferenceValues: Equatable {
         var cliPath: String
         var databaseURL: String
@@ -123,10 +119,9 @@ final class CaptureEngine {
         self.classifier = classifier
         self.probeRegistry = probeRegistry
         let preferences = model.preferences
-        appliedRecordingDevice = CaptureDeviceInfo.recordingDeviceID(preferences)
         settingsDatabaseURL = { preferences.connectionURL }
         pipeline = CapturePipeline(
-            settings: Self.settings(preferences, surge: surge),
+            settings: Self.settings(preferences),
             database: database,
             surge: surge,
             processes: processes,
@@ -137,14 +132,12 @@ final class CaptureEngine {
         )
     }
 
-    /// The device rows are written under (this Mac, or the remote Surge's row).
-    var recordingDeviceID: DeviceID { CaptureDeviceInfo.recordingDeviceID(model.preferences) }
+    /// This Mac's row in `devices`: every row is written under it.
     var thisDeviceID: DeviceID { model.preferences.thisDeviceID }
 
-    private static func settings(_ preferences: Preferences, surge: any SurgeClient) -> CaptureSettings {
+    private static func settings(_ preferences: Preferences) -> CaptureSettings {
         CaptureSettings(
-            deviceID: CaptureDeviceInfo.recordingDeviceID(preferences),
-            isRemote: surge.endpoint.remote != nil,
+            deviceID: preferences.thisDeviceID,
             batchRows: preferences.batchRows,
             batchInterval: preferences.batchInterval,
             ownExecutablePath: Bundle.main.executablePath
@@ -294,7 +287,6 @@ final class CaptureEngine {
         model.database = database
         currentDatabaseURL = url
         resetOtherMacRows()
-        databaseChanged?(database)
         await pipeline.setServices(surge: surge, database: database)
         if let retire = retireDatabase { Task.detached { await retire(old) } }
     }
@@ -367,9 +359,9 @@ final class CaptureEngine {
         }
     }
 
-    /// Upserts this Mac's row (and the remote Surge's row) and loads every device. A Mac registering its derived ID
-    /// for the first time (`DeviceIdentity`) keeps the name, color and age its earlier ID had, whose rows are merged
-    /// into it in the background (`scheduleLegacyDeviceMerge`).
+    /// Upserts this Mac's row and loads every device. A Mac registering its derived ID for the first time
+    /// (`DeviceIdentity`) keeps the name, color and age its earlier ID had, whose rows are merged into it in the
+    /// background (`scheduleLegacyDeviceMerge`).
     private func registerDevices() async {
         let existing = (try? await database.devices()) ?? []
         let id = thisDeviceID
@@ -380,13 +372,12 @@ final class CaptureEngine {
         let device = Device(
             id: id, name: name, model: CaptureDeviceInfo.modelDescription(product: product) ?? current?.model ?? earlier?.model,
             shortName: CaptureDeviceInfo.shortName(name: name, product: product),
-            hue: current?.hue ?? earlier?.hue ?? CaptureDeviceInfo.hue(for: id), isRemoteSurge: false,
+            hue: current?.hue ?? earlier?.hue ?? CaptureDeviceInfo.hue(for: id),
             rowCount: current?.rowCount ?? 0, lastWriteAt: current?.lastWriteAt, createdAt: current?.createdAt ?? earlier?.createdAt ?? .now
         )
         do { try await database.upsertDevice(device) } catch {
             Self.log.error("Registering this Mac failed: \(error.localizedDescription, privacy: .public)")
         }
-        if let remote = remoteDevice(existing: existing) { try? await database.upsertDevice(remote) }
         await refreshDevices()
     }
 
@@ -411,20 +402,6 @@ final class CaptureEngine {
             await engine.refreshDevices()
             await engine.reloadScoped()
         }
-    }
-
-    private func remoteDevice(existing: [Device]) -> Device? {
-        let remote = model.preferences.surgeRemote.trimmingCharacters(in: .whitespaces)
-        guard !remote.isEmpty else { return nil }
-        let id = recordingDeviceID
-        let current = existing.first { $0.id == id }
-        let tag = model.preferences.surgeRemoteTag.trimmingCharacters(in: .whitespaces)
-        let name = tag.isEmpty ? remote : tag
-        return Device(
-            id: id, name: name, model: "\(remote) · remote Surge gateway", shortName: Device.shortName(for: name),
-            hue: current?.hue ?? CaptureDeviceInfo.hue(for: id), isRemoteSurge: true,
-            rowCount: current?.rowCount ?? 0, lastWriteAt: current?.lastWriteAt, createdAt: current?.createdAt ?? .now
-        )
     }
 
     // MARK: Surge stream
@@ -468,12 +445,10 @@ final class CaptureEngine {
                 streamConnectedAt = .now
                 attempt = 0
                 let backfill = Task { [surge, pipeline] in
-                    // One after the other: every request `dump recent` lists started before `dump active` was
-                    // taken, so its start times also date that listing on a remote Surge's clock.
-                    let recentRequests = try? await surge.recentRequests()
-                    guard !Task.isCancelled else { return }
                     let fetchedAt = Date.now
-                    let activeListing = try? await Self.activeListing(surge)
+                    async let recent = try? surge.recentRequests()
+                    async let active = try? Self.activeListing(surge)
+                    let (recentRequests, activeListing) = await (recent, active)
                     guard !Task.isCancelled else { return }
                     await pipeline.ingestBackfill((recentRequests ?? []) + (activeListing?.requests ?? []), epoch: epoch)
                     // Requests that ended while the stream was away get no completion event. A listing that may
@@ -483,8 +458,7 @@ final class CaptureEngine {
                         if await pipeline.activeListingProblem(listed, undecodable: activeListing.undecodable, fetchedAt: fetchedAt) == nil {
                             await pipeline.reconcileActive(Set(listed.map(\.id)), fetchedAt: fetchedAt, epoch: epoch)
                         }
-                        await pipeline.closeVanished(listed, undecodable: activeListing.undecodable, recent: recentRequests ?? [],
-                                                     fetchedAt: fetchedAt, epoch: epoch)
+                        await pipeline.closeVanished(listed, undecodable: activeListing.undecodable, fetchedAt: fetchedAt, epoch: epoch)
                     }
                 }
                 defer { backfill.cancel() }
@@ -610,29 +584,20 @@ final class CaptureEngine {
         }
     }
 
-    /// A new surge-cli path, remote controller or remote password rebuilds the client; a new recording
-    /// device (local ↔ remote) switches the rows' device. The old stream is stopped and its requests written
-    /// first, so nothing it still delivers lands under the new device. Without changes, `restartStream`
-    /// only reconnects the stream.
+    /// A new surge-cli path rebuilds the client: the old stream is stopped first. Without a change,
+    /// `restartStream` only reconnects the stream.
     private func applySurgeSettings(restartStream: Bool) async {
         let endpoint = model.preferences.surgeEndpoint
-        let device = recordingDeviceID
-        let clientChanged = makeSurgeClient != nil && endpoint != surge.endpoint
-        let deviceChanged = device != appliedRecordingDevice
-        guard clientChanged || deviceChanged || restartStream else { return }
-        if clientChanged || deviceChanged {
+        if let make = makeSurgeClient, endpoint != surge.endpoint {
             await stopStream()
-            if clientChanged, let make = makeSurgeClient {
-                let client = make(endpoint)
-                surge = client
-                model.surge = client
-                lastEnvironment = nil
-            }
-            appliedRecordingDevice = device
-            await registerDevices()
+            let client = make(endpoint)
+            surge = client
+            model.surge = client
+            lastEnvironment = nil
             await pipeline.setServices(surge: surge, database: database)
-            await pipeline.update(settings: Self.settings(model.preferences, surge: surge))
             surgeStartTime = nil
+        } else if !restartStream {
+            return
         }
         startStream()
     }
@@ -717,7 +682,7 @@ final class CaptureEngine {
             wrote = true
             reconnectAttempt = 0
         }
-        if wrote || update.rowsWritten > 0 { touchRecordingDevice(lastWriteAt: update.lastWriteAt, inserted: Int64(update.rowsWritten)) }
+        if wrote || update.rowsWritten > 0 { touchThisDevice(lastWriteAt: update.lastWriteAt, inserted: Int64(update.rowsWritten)) }
         if live.bufferedRows != update.bufferedRows { live.bufferedRows = update.bufferedRows }
         if let speed = update.speed {
             live.downloadSpeed = speed.in
@@ -760,9 +725,9 @@ final class CaptureEngine {
         debounce("session-check", .milliseconds(300)) { await $0.checkSurgeSession() }
     }
 
-    /// Keeps the recording device's row ("Writing now", row count) current between device refreshes.
-    private func touchRecordingDevice(lastWriteAt: Date?, inserted: Int64) {
-        let id = recordingDeviceID
+    /// Keeps this Mac's row ("Writing now", row count) current between device refreshes.
+    private func touchThisDevice(lastWriteAt: Date?, inserted: Int64) {
+        let id = thisDeviceID
         guard let index = model.devices.devices.firstIndex(where: { $0.id == id }) else { return }
         var device = model.devices.devices[index]
         if let lastWriteAt, device.lastWriteAt.map({ $0 < lastWriteAt }) ?? true { device.lastWriteAt = lastWriteAt }
@@ -872,7 +837,7 @@ final class CaptureEngine {
     private func refreshDevices() async {
         guard databaseReady, var devices = try? await database.devices() else { return }
         // This Mac's own writes are newer than the table's last refresh.
-        let id = recordingDeviceID
+        let id = thisDeviceID
         if let index = devices.firstIndex(where: { $0.id == id }), let written = model.live.lastWriteAt,
            devices[index].lastWriteAt.map({ $0 < written }) ?? true {
             devices[index].lastWriteAt = written
@@ -883,7 +848,7 @@ final class CaptureEngine {
     private func refreshToday() async {
         guard databaseReady else { return }
         let start = Calendar.current.startOfDay(for: .now)
-        guard let count = try? await database.countRequests(since: start, scope: .device(recordingDeviceID)) else { return }
+        guard let count = try? await database.countRequests(since: start, scope: .device(thisDeviceID)) else { return }
         // Rows still buffered are not in the count yet; never step backwards within a day.
         model.live.todayCount = start == todayStart ? max(count, model.live.todayCount) : count
         todayStart = start
@@ -901,7 +866,7 @@ final class CaptureEngine {
     /// poll that includes them starts again from the server's clock.
     private func pollOtherMacRows() async {
         guard databaseReady, model.devices.devices.count > 1 else { return }
-        let me = recordingDeviceID
+        let me = thisDeviceID
         let scope = model.devices.scope
         let includesOthers: Bool = switch scope {
         case .all: true
@@ -932,7 +897,7 @@ final class CaptureEngine {
 
     /// Alerts other Macs wrote since the last poll. Apps this Mac doesn't know yet are loaded first.
     func pollOtherMacAlerts() async {
-        guard databaseReady, let alerts = try? await database.alerts(after: lastAlertID, excluding: recordingDeviceID), !alerts.isEmpty else { return }
+        guard databaseReady, let alerts = try? await database.alerts(after: lastAlertID, excluding: thisDeviceID), !alerts.isEmpty else { return }
         lastAlertID = max(lastAlertID, alerts.map(\.id).max() ?? lastAlertID)
         if alerts.contains(where: { model.catalog.app($0.appID) == nil }) { await refreshSharedState() }
         receive(alerts, fromOtherMac: true)

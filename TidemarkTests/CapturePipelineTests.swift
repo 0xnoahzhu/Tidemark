@@ -22,7 +22,7 @@ struct CapturePipelineTests {
     func makePipeline(database: CaptureFakeDatabase, surge: CaptureFakeSurge, spoolDirectory: URL, probes: ProbeRegistry = ProbeRegistry(),
                       contactGrace: TimeInterval = 0.5) -> CapturePipeline {
         CapturePipeline(
-            settings: CaptureSettings(deviceID: device, isRemote: false, batchRows: 200, batchInterval: 1, ownExecutablePath: ownExecutable),
+            settings: CaptureSettings(deviceID: device, batchRows: 200, batchInterval: 1, ownExecutablePath: ownExecutable),
             database: database, surge: surge, processes: processes, classifier: CaptureFakeClassifier(), probes: probes,
             spool: CaptureSpool(directory: spoolDirectory, limit: 10_000), contactGrace: contactGrace
         )

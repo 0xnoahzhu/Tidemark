@@ -28,7 +28,7 @@ struct CaptureResilienceTests {
                       probes: ProbeRegistry = ProbeRegistry(), contactGrace: TimeInterval = 0,
                       writeTimeout: Duration = .seconds(20)) -> CapturePipeline {
         CapturePipeline(
-            settings: CaptureSettings(deviceID: device, isRemote: false, batchRows: 200, batchInterval: 1, ownExecutablePath: ownExecutable),
+            settings: CaptureSettings(deviceID: device, batchRows: 200, batchInterval: 1, ownExecutablePath: ownExecutable),
             database: database, surge: surge, processes: processes, classifier: CaptureFakeClassifier(), probes: probes,
             spool: CaptureSpool(directory: directory, limit: 10_000), contactGrace: contactGrace, writeTimeout: writeTimeout
         )
@@ -274,27 +274,6 @@ struct CaptureResilienceTests {
         #expect(await database.requestWriteCalls < 20, "the refused batch is split in halves, not written row by row")
         let rejected = (try? String(contentsOf: temp.url.appending(path: "rejected.jsonl"), encoding: .utf8)) ?? ""
         #expect(rejected.split(separator: "\n").count == 1 && rejected.contains("h37.example"))
-    }
-
-    @Test func workQueuedBeforeADeviceSwitchKeepsItsDevice() async throws {
-        let temp = CaptureTempDirectory()
-        let database = CaptureFakeDatabase()
-        let raycast = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
-        let pipeline = makePipeline(database: database, directory: temp.url)
-        await pipeline.setApps([raycast], paused: [])
-        try await pipeline.loadKnownHosts()
-        await pipeline.beginSession(1_000)
-        await pipeline.ingest(nodeRequest(id: 1, host: "api.notion.com"), now: base)
-
-        // Switched to a remote Surge before the queue was written.
-        let gateway = UUID()
-        await pipeline.update(settings: CaptureSettings(deviceID: gateway, isRemote: true, batchRows: 200, batchInterval: 1,
-                                                        ownExecutablePath: ownExecutable), now: base.addingTimeInterval(1))
-        await pipeline.setDatabaseOnline(true)
-        await pipeline.tick(now: base.addingTimeInterval(2))
-        #expect(await database.chains.map(\.deviceID) == [device])
-        #expect(await database.alertsInserted.map(\.deviceID) == [device])
-        #expect(await database.writes.allSatisfy { $0.key.deviceID == device })
     }
 
     @Test func alertsLinkTheirRequestWhileTheSpoolDrains() async throws {

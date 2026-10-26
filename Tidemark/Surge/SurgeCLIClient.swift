@@ -2,10 +2,9 @@ import Foundation
 
 /// `SurgeClient` backed by `surge-cli --raw` (JSON output).
 ///
-/// Every call launches surge-cli as a child process with
-/// `["--raw"] + (remote ? ["--remote", host, "--password-stdin"] : []) + command`; the remote password is
-/// written to standard input, never to argv. One-shot commands time out after 20 s (60 s for `test…` and
-/// `http probe`, which go out to the network); on timeout the child gets SIGTERM, then SIGKILL.
+/// Every call launches surge-cli as a child process with `["--raw"] + command`, reading this Mac's Surge.
+/// One-shot commands time out after 20 s (60 s for `test…` and `http probe`, which go out to the network); on
+/// timeout the child gets SIGTERM, then SIGKILL.
 /// Output is parsed in a `@concurrent` function, so a 300 KB `dump recent` never decodes on the caller's
 /// actor. Commands never change Surge's state.
 struct SurgeCLIClient: SurgeClientDetails {
@@ -144,20 +143,12 @@ struct SurgeCLIClient: SurgeClientDetails {
 
     // MARK: - Running
 
-    /// The full invocation for `command`, with the remote options and password line when configured.
+    /// The full invocation for `command`.
     func invocation(_ command: [String]) -> SurgeInvocation {
-        var arguments = ["--raw"]
-        var input: Data?
-        if let remote = endpoint.remote?.trimmingCharacters(in: .whitespaces), !remote.isEmpty {
-            arguments += ["--remote", remote, "--password-stdin"]
-            input = Data(((endpoint.password ?? "") + "\n").utf8)
-        }
-        arguments += command
         let usesNetwork = command.first?.hasPrefix("test") == true || command.starts(with: ["http", "probe"])
         return SurgeInvocation(
             executable: endpoint.cliPath,
-            arguments: arguments,
-            input: input,
+            arguments: ["--raw"] + command,
             label: command.joined(separator: " "),
             timeout: usesNetwork ? timeouts.network : timeouts.standard
         )

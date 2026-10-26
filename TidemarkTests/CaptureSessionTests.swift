@@ -20,9 +20,9 @@ struct CaptureSessionTests {
         ])
     }
 
-    func makePipeline(database: CaptureFakeDatabase, directory: URL, contactGrace: TimeInterval = 0, remote: Bool = false) -> CapturePipeline {
+    func makePipeline(database: CaptureFakeDatabase, directory: URL, contactGrace: TimeInterval = 0) -> CapturePipeline {
         CapturePipeline(
-            settings: CaptureSettings(deviceID: device, isRemote: remote, batchRows: 200, batchInterval: 1, ownExecutablePath: nil),
+            settings: CaptureSettings(deviceID: device, batchRows: 200, batchInterval: 1, ownExecutablePath: nil),
             database: database, surge: CaptureFakeSurge(), processes: processes, classifier: CaptureFakeClassifier(), probes: ProbeRegistry(),
             spool: CaptureSpool(directory: directory, limit: 10_000), contactGrace: contactGrace
         )
@@ -130,84 +130,13 @@ struct CaptureSessionTests {
         await pipeline.tick(now: base.addingTimeInterval(2))
         let close = try #require(await database.vanishedCloses.first)
         #expect(close.keeping == [6, 7], "requests this run still holds as active are kept too")
+        #expect(close.startedBefore == base, "rows that started after the listing are left alone")
         #expect(await database.rows[activeRow(5).key]?.state == .completed)
         #expect(await database.rows[activeRow(6).key]?.state == .active)
         #expect(await database.rows[activeRow(7).key]?.state == .active)
 
         await pipeline.tick(now: base.addingTimeInterval(3))
         #expect(await database.vanishedCloses.count == 1, "closed once")
-    }
-
-    @Test func aRemoteSurgesListingIsComparedOnItsOwnClock() async throws {
-        let temp = CaptureTempDirectory()
-        let database = CaptureFakeDatabase()
-        // The remote Surge's clock is two hours behind this Mac's. An earlier run left 5, 8 and 9 active: 5
-        // ended long ago, 8 started moments before the newest listed request, 9 started after the listing
-        // (by that Surge's clock, yet long before `base` by this Mac's).
-        func row(_ id: Int64, start: Double) -> RequestRecord {
-            var row = activeRow(id)
-            row.startedAt = Date(timeIntervalSince1970: start)
-            return row
-        }
-        await database.preinsertRow(row(5, start: requestStart - 600))
-        await database.preinsertRow(row(8, start: requestStart + 98))
-        await database.preinsertRow(row(9, start: requestStart + 200))
-        let pipeline = makePipeline(database: database, directory: temp.url, remote: true)
-        await pipeline.setDatabaseOnline(true)
-        let epoch = await pipeline.beginSession(1_000)
-        await pipeline.closeVanished([curl(6, start: requestStart + 100), curl(7, start: requestStart + 50)], fetchedAt: base, epoch: epoch)
-        await pipeline.tick(now: base.addingTimeInterval(1))
-
-        let close = try #require(await database.vanishedCloses.first)
-        #expect(close.startedBefore == Date(timeIntervalSince1970: requestStart + 95), "the newest listed start, less a few seconds")
-        #expect(await database.rows[row(5, start: 0).key]?.state == .completed)
-        #expect(await database.rows[row(8, start: 0).key]?.state == .active)
-        #expect(await database.rows[row(9, start: 0).key]?.state == .active)
-
-        // Without a listed start there is nothing to compare with on that Surge's clock.
-        let silent = makePipeline(database: database, directory: temp.url, remote: true)
-        await silent.setDatabaseOnline(true)
-        let next = await silent.beginSession(1_000)
-        await silent.closeVanished([], fetchedAt: base, epoch: next)
-        await silent.tick(now: base.addingTimeInterval(2))
-        #expect(await database.vanishedCloses.count == 1)
-        #expect(await database.vanishedCounts == 0)
-    }
-
-    @Test func aRemoteSurgesRecentRequestsDateItsListingToo() async throws {
-        let temp = CaptureTempDirectory()
-        let database = CaptureFakeDatabase()
-        // Only a long-lived connection is still open; an earlier run left 9 and 10 active, which ended since.
-        func row(_ id: Int64, start: Double) -> RequestRecord {
-            var row = activeRow(id)
-            row.startedAt = Date(timeIntervalSince1970: start)
-            return row
-        }
-        await database.preinsertRow(row(9, start: requestStart + 200))
-        await database.preinsertRow(row(10, start: requestStart + 298))
-        let pipeline = makePipeline(database: database, directory: temp.url, remote: true)
-        await pipeline.setDatabaseOnline(true)
-        let epoch = await pipeline.beginSession(1_000)
-        // `dump recent`, taken before `dump active`, lists a request that started later than the open one.
-        let recent = [curl(11, start: requestStart + 300, completed: true)]
-        await pipeline.closeVanished([curl(6, start: requestStart - 1_800)], recent: recent, fetchedAt: base, epoch: epoch)
-        await pipeline.tick(now: base.addingTimeInterval(1))
-
-        let close = try #require(await database.vanishedCloses.first)
-        #expect(close.startedBefore == Date(timeIntervalSince1970: requestStart + 295), "the newest start of either listing, less a few seconds")
-        #expect(await database.rows[row(9, start: 0).key]?.state == .completed)
-        #expect(await database.rows[row(10, start: 0).key]?.state == .active)
-
-        // An empty `dump active` is dated by `dump recent` alone.
-        let quiet = CaptureFakeDatabase()
-        await quiet.preinsertRow(row(9, start: requestStart + 200))
-        let idle = makePipeline(database: quiet, directory: temp.url, remote: true)
-        await idle.setDatabaseOnline(true)
-        let next = await idle.beginSession(1_000)
-        await idle.closeVanished([], recent: recent, fetchedAt: base, epoch: next)
-        await idle.tick(now: base.addingTimeInterval(1))
-        #expect(await quiet.vanishedCloses.count == 1)
-        #expect(await quiet.rows[row(9, start: 0).key]?.state == .completed)
     }
 
     @Test func aListingWithUnreadableRecordsClosesNothing() async {

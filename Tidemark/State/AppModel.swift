@@ -23,7 +23,6 @@ final class AppModel {
     @ObservationIgnored var capture: any CaptureActions
     @ObservationIgnored var probeActions: any ProbeActions
     @ObservationIgnored var egressActions: any EgressActions
-    @ObservationIgnored var insights: any HostInsightProviding
 
     init(preferences: Preferences = Preferences()) {
         self.preferences = preferences
@@ -41,7 +40,6 @@ final class AppModel {
         capture = NoopCaptureActions()
         probeActions = NoopProbeActions()
         egressActions = NoopEgressActions()
-        insights = UnavailableHostInsights()
     }
 
     /// Name and tile for a request's app column: the monitored app, else the top-most bundle, else the process.

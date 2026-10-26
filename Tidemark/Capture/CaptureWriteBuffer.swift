@@ -8,7 +8,7 @@ import Foundation
 /// without bound; requests go to the disk spool instead.
 struct CaptureWriteBuffer {
     /// A process chain to upsert, with the app its subtree belongs to and the device it runs on (nil in files
-    /// saved before the device was recorded: the recording device then).
+    /// saved before the device was recorded: this Mac's then).
     struct ChainWrite: Hashable, Sendable, Codable {
         var chain: [ProcessLink]
         var appID: AppID?

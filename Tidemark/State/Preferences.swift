@@ -29,12 +29,6 @@ final class Preferences {
 
     // MARK: Surge
     var surgeCLIPath: String { didSet { set(surgeCLIPath, "surge.cliPath") } }
-    /// `host:port` of a remote Surge controller, empty for this Mac's Surge. Settings offer no remote Surge, so
-    /// nothing in the app sets it (a stored `surge.remote` is ignored); the engine keeps the code path, without a
-    /// password.
-    var surgeRemote = ""
-    /// Device name stored with requests from the remote Surge.
-    var surgeRemoteTag = ""
 
     // MARK: Database
     /// PostgreSQL URL as typed in Settings › Database, password included (Tidemark keeps nothing in the Keychain).
@@ -99,10 +93,7 @@ final class Preferences {
         set { batchRows = newValue.rows; batchInterval = newValue.interval }
     }
 
-    var surgeEndpoint: SurgeEndpoint {
-        let remote = surgeRemote.trimmingCharacters(in: .whitespaces)
-        return SurgeEndpoint(cliPath: surgeCLIPath, remote: remote.isEmpty ? nil : remote, password: nil)
-    }
+    var surgeEndpoint: SurgeEndpoint { SurgeEndpoint(cliPath: surgeCLIPath) }
 
     /// The URL capture connects to: `databaseURL`, unless `TIDEMARK_DATABASE_URL` in the environment overrides it
     /// (development and testing).

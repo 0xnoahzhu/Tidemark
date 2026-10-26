@@ -4,20 +4,20 @@ import PostgresNIO
 extension PostgresDatabase {
     // MARK: - Devices
 
-    /// Inserts or updates the device's identity; never touches `row_count`, `last_write_at` or `created_at`.
+    /// Inserts or updates the device's identity; never touches `row_count`, `last_write_at`, `created_at` or
+    /// `is_remote` (set only on rows earlier versions stored for a remote Surge).
     func upsertDevice(_ device: Device) async throws {
         try await execute("""
-            INSERT INTO devices (id, name, model, short_name, hue, is_remote, created_at)
-            VALUES (\(device.id), \(device.name), \(device.model), \(device.shortName), \(device.hue)::real, \(device.isRemoteSurge), \(device.createdAt))
+            INSERT INTO devices (id, name, model, short_name, hue, created_at)
+            VALUES (\(device.id), \(device.name), \(device.model), \(device.shortName), \(device.hue)::real, \(device.createdAt))
             ON CONFLICT (id) DO UPDATE SET
-                name = excluded.name, model = excluded.model, short_name = excluded.short_name,
-                hue = excluded.hue, is_remote = excluded.is_remote
+                name = excluded.name, model = excluded.model, short_name = excluded.short_name, hue = excluded.hue
             """)
     }
 
     func devices() async throws -> [Device] {
         try await rows("""
-            SELECT id, name, model, short_name, hue, is_remote, row_count, last_write_at, created_at
+            SELECT id, name, model, short_name, hue, row_count, last_write_at, created_at
             FROM devices ORDER BY created_at, name
             """).map { row in
             let read = PostgresRowReader(row)
@@ -27,7 +27,6 @@ extension PostgresDatabase {
                 model: try read("model"),
                 shortName: try read("short_name"),
                 hue: try read.double("hue"),
-                isRemoteSurge: try read("is_remote"),
                 rowCount: try read("row_count"),
                 lastWriteAt: try read("last_write_at"),
                 createdAt: try read("created_at")

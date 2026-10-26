@@ -1069,7 +1069,7 @@ struct DatabaseLiveTests {
         }
     }
 
-    // MARK: - Probes, insights, egress
+    // MARK: - Probes, egress
 
     @Test func probeSessionsRoundTrip() async throws {
         try await withTestDatabase { db in
@@ -1104,29 +1104,6 @@ struct DatabaseLiveTests {
             let ended = (try #require(stored.endedAt), try #require(session.endedAt))
             #expect(Fixture.close(ended.0, ended.1))
             #expect(try await db.probeSessions(limit: 1).count == 1)
-        }
-    }
-
-    @Test func hostInsightsRoundTrip() async throws {
-        try await withTestDatabase { db in
-            #expect(try await db.hostInsight("api2.cursor.sh", language: "en") == nil)
-            let insight = HostInsight(host: "API2.cursor.sh", category: .aiInference, operatorName: "Anysphere",
-                                      summary: "Cursor's model gateway.", concern: nil, language: "en", model: "AFM 3 Core", createdAt: Fixture.now)
-            try await db.saveHostInsight(insight)
-            var chinese = insight
-            chinese.language = "zh-Hans"
-            chinese.summary = "Cursor 的模型网关。"
-            chinese.concern = "会发送代码片段"
-            try await db.saveHostInsight(chinese)
-
-            let english = try #require(try await db.hostInsight("api2.CURSOR.sh", language: "en"))
-            #expect(english.host == "api2.cursor.sh")
-            #expect(english.category == .aiInference && english.operatorName == "Anysphere" && english.concern == nil)
-            #expect(try await db.hostInsight("api2.cursor.sh", language: "zh-Hans")?.summary == "Cursor 的模型网关。")
-
-            chinese.category = .telemetry
-            try await db.saveHostInsight(chinese)
-            #expect(try await db.hostInsight("api2.cursor.sh", language: "zh-Hans")?.category == .telemetry)
         }
     }
 
@@ -1807,9 +1784,11 @@ struct DatabaseLiveTests {
         try await withTestDatabase { db in
             let old = Fixture.device("Old ID")
             let new = Fixture.device("New ID")
-            var remote = Fixture.device("Remote Surge")
-            remote.isRemoteSurge = true
+            let remote = Fixture.device("Remote Surge")
             for device in [old, new, remote] { try await db.upsertDevice(device) }
+            // A row an earlier version stored for a remote Surge; upserting the row again keeps that.
+            try await db.execute("UPDATE devices SET is_remote = true WHERE id = \(remote.id)")
+            try await db.upsertDevice(remote)
             try await db.upsertRequests((1...3).map { Fixture.request(device: old.id, id: $0) } + [Fixture.request(device: remote.id, id: 1)])
 
             // The old ID wrote moments ago: nothing moves.
@@ -1876,10 +1855,9 @@ struct DatabaseLiveTests {
 
     @Test func aMacsOtherIDsShareItsSurgeSessionsOrProcesses() async throws {
         try await withTestDatabase { db in
-            func device(_ name: String, minutes: Double, remote: Bool = false) -> Device {
+            func device(_ name: String, minutes: Double) -> Device {
                 var device = Fixture.device(name)
                 device.createdAt = Fixture.now.addingTimeInterval(minutes * 60)
-                device.isRemoteSurge = remote
                 return device
             }
             let mac = device("This Mac", minutes: 0)
@@ -1887,9 +1865,11 @@ struct DatabaseLiveTests {
             let current = device("Current Surge session", minutes: 2)
             let processes = device("Same processes", minutes: 3)
             let oneProcess = device("One process", minutes: 4)
-            let remote = device("Remote Surge", minutes: 5, remote: true)
+            let remote = device("Remote Surge", minutes: 5)
             let other = device("Other Mac", minutes: 6)
             for device in [mac, earlier, current, processes, oneProcess, remote, other] { try await db.upsertDevice(device) }
+            // A row an earlier version stored for a remote Surge.
+            try await db.execute("UPDATE devices SET is_remote = true WHERE id = \(remote.id)")
             func request(_ device: Device, session: Int64) -> RequestRecord {
                 var row = Fixture.request(device: device.id, id: 1)
                 row.key.session = session
@@ -2034,7 +2014,7 @@ private enum Fixture {
     static func close(_ a: Date, _ b: Date) -> Bool { abs(a.timeIntervalSince(b)) < 0.001 }
 
     static func device(_ name: String) -> Device {
-        Device(id: UUID(), name: name, model: nil, shortName: Device.shortName(for: name), hue: 240, isRemoteSurge: false,
+        Device(id: UUID(), name: name, model: nil, shortName: Device.shortName(for: name), hue: 240,
                rowCount: 0, lastWriteAt: nil, createdAt: now)
     }
 

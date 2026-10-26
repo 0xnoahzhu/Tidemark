@@ -3,10 +3,8 @@ import os
 
 /// Settings the pipeline reads from `Preferences`.
 struct CaptureSettings: Sendable, Equatable {
-    /// Device the rows are written under: this Mac, or the row of a remote Surge.
+    /// Device the rows are written under: this Mac.
     var deviceID: DeviceID
-    /// Surge runs on another machine: there is no local process table.
-    var isRemote: Bool
     var batchRows: Int
     var batchInterval: TimeInterval
     /// Tidemark's own executable. Its requests (site probe forwarders, IP lookups) never roll up to a
@@ -154,9 +152,6 @@ actor CapturePipeline {
     /// after each further one, `deviceMergeMaxRetryInterval` at most.
     let deviceMergeRefusalLimit = 3
     let deviceMergeMaxRetryInterval: TimeInterval = 4 * 3_600
-    /// A remote Surge's `dump active` closes only rows that started this long before the newest start it or the
-    /// `dump recent` taken before it lists (that Surge's clock, which may also step back a little).
-    let remoteListingMargin: TimeInterval = 5
     /// Requests an empty `dump active` listing may end at most. More than that still active (in this pipeline
     /// or in PostgreSQL) is likelier a listing that failed than that many connections ending together.
     let emptyListingLimit = 20
@@ -171,7 +166,7 @@ actor CapturePipeline {
 
     // Session
     var session: Int64 = 0
-    /// Bumped whenever the session or the recording device changes; backfills of an older epoch are dropped.
+    /// Bumped whenever the session changes; backfills of an older epoch are dropped.
     var epoch = 0
     var recording = true
     var entries: [Int64: Entry] = [:]
@@ -187,8 +182,8 @@ actor CapturePipeline {
     var vanishedCloses: [VanishedClose] = []
     /// Earlier ID of this Mac → the ID its rows are merged into (`scheduleDeviceMerge`).
     var deviceMerges: [DeviceID: DeviceID] = [:]
-    /// IDs merged in this launch, or left alone (something still writes under them, a remote Surge): not scheduled
-    /// again before the next launch.
+    /// IDs merged in this launch, or left alone (something still writes under them, a remote Surge's row an earlier
+    /// version stored): not scheduled again before the next launch.
     var settledDevices: Set<DeviceID> = []
     /// When to look for earlier IDs of this Mac by the history they share with it.
     var nextDeviceLookAt = Date.distantPast
@@ -280,7 +275,7 @@ actor CapturePipeline {
         self.sidecar = CaptureSidecar(directory: spool.directory)
         self.contactGrace = contactGrace
         self.writeTimeout = writeTimeout
-        attributor = CaptureAttributor(isRemote: settings.isRemote)
+        attributor = CaptureAttributor()
         buffer = CaptureWriteBuffer(batchRows: settings.batchRows, batchInterval: settings.batchInterval)
     }
 
@@ -289,22 +284,6 @@ actor CapturePipeline {
     func setServices(surge: any SurgeClient, database: any TidemarkDatabase) {
         self.surge = surge
         self.database = database
-    }
-
-    /// Applies new settings. A new recording device (local ↔ remote Surge) ends the old stream's requests:
-    /// they are written (active ones closed) before the in-memory state is dropped.
-    func update(settings new: CaptureSettings, now: Date = .now) {
-        if new.deviceID != settings.deviceID || new.isRemote != settings.isRemote {
-            retireEntries(closingAt: nil, now: now)
-            let apps = attributor.apps
-            attributor = CaptureAttributor(isRemote: new.isRemote)
-            attributor.setApps(apps)
-            clearSessionState()
-            upsertedProcesses.removeAll()
-            epoch += 1
-        }
-        settings = new
-        setBatching(rows: new.batchRows, interval: new.batchInterval)
     }
 
     func setBatching(rows: Int, interval: TimeInterval) {
@@ -444,19 +423,19 @@ actor CapturePipeline {
     }
 
     /// Writes what the current entries still owe before they are dropped: first contacts still in their
-    /// grace period are evaluated, sources are recorded and changed rows are queued. With `closingActive`,
-    /// active requests are closed too (they will never be updated again; at `boundary`, else when last seen).
+    /// grace period are evaluated, sources are recorded and changed rows are queued. With a `boundary` (a new
+    /// Surge session's start), active requests are closed at it too: they will never be updated again.
     ///
-    /// Quitting keeps them active instead: the connection usually outlives Tidemark, and a row stored as
-    /// completed can never become active again. The next launch closes the ones that ended meanwhile
+    /// Quitting (no boundary) keeps them active instead: the connection usually outlives Tidemark, and a row
+    /// stored as completed can never become active again. The next launch closes the ones that ended meanwhile
     /// (`closeVanished` for the same Surge session, `closeActiveRequests` for earlier ones).
-    func retireEntries(closingAt boundary: Date?, closingActive: Bool = true, now: Date) {
+    func retireEntries(closingAt boundary: Date?, now: Date) {
         processContacts(now: now.addingTimeInterval(contactGrace), only: nil)
         for id in Array(entries.keys) {
             guard var entry = entries[id] else { continue }
-            if closingActive, entry.record.state == .active {
+            if let boundary, entry.record.state == .active {
                 entry.record.state = .completed
-                entry.record.completedAt = max(entry.record.startedAt, min(boundary ?? entry.lastSeen, now))
+                entry.record.completedAt = max(entry.record.startedAt, min(boundary, now))
                 entry.finishedAt = now
                 entry.dirty = true
                 markChanged(entry.record, fresh: false)
@@ -549,27 +528,16 @@ actor CapturePipeline {
     /// `emptyListingLimit` of the rows it would close. `undecodable` counts the records surge-cli listed that
     /// could not be decoded.
     ///
-    /// Rows that started after the listing was taken are not in it and are left alone. A local Surge shares
-    /// this Mac's clock, so that is `fetchedAt`. A remote Surge's clock may differ from this Mac's, so its
-    /// listing is compared on that Surge's own clock: every listed request started before the listing, so did
-    /// every request in `recent` (`dump recent`, taken before it), and so did every request that started
-    /// before one of them; with no start time in either, nothing is closed.
-    func closeVanished(_ listing: [SurgeRequest], undecodable: Int = 0, recent: [SurgeRequest] = [], fetchedAt: Date, epoch expected: Int) {
+    /// Rows that started after the listing was taken (`fetchedAt`, on this Mac's clock, which Surge shares) are
+    /// not in it and are left alone.
+    func closeVanished(_ listing: [SurgeRequest], undecodable: Int = 0, fetchedAt: Date, epoch expected: Int) {
         guard expected == epoch, session != 0 else { return }
         if let problem = activeListingProblem(listing, undecodable: undecodable, fetchedAt: fetchedAt) {
             Self.log.error("Not closing requests that dump active left out: \(problem, privacy: .public)")
             return
         }
-        var startedBefore = fetchedAt
-        if settings.isRemote {
-            guard let newest = (listing + recent).compactMap({ CaptureRecordMapper.date($0.startDate) }).max() else {
-                Self.log.info("Not closing requests of the remote Surge: dump active and dump recent gave no start time to compare with")
-                return
-            }
-            startedBefore = newest.addingTimeInterval(-remoteListingMargin)
-        }
         let close = VanishedClose(deviceID: settings.deviceID, session: session, keeping: Set(listing.map(\.id)),
-                                  startedBefore: startedBefore, at: fetchedAt, emptyListing: listing.isEmpty)
+                                  startedBefore: fetchedAt, at: fetchedAt, emptyListing: listing.isEmpty)
         vanishedCloses.removeAll { $0.deviceID == close.deviceID && $0.session == close.session }
         vanishedCloses.append(close)
     }
@@ -806,7 +774,7 @@ actor CapturePipeline {
     }
 
     private func queueChain(_ attribution: CaptureAttributor.Attribution, now: Date) {
-        guard !settings.isRemote, let leaf = attribution.chain.last, let start = leaf.startTime else { return }
+        guard let leaf = attribution.chain.last, let start = leaf.startTime else { return }
         let key = CaptureAttributor.ProcessKey(pid: leaf.pid, startTime: start)
         // Stored processes are upserted again now and then so `last_seen` (Running / Exited) stays fresh.
         if let stored = upsertedProcesses[key], stored.appID == attribution.appID,
@@ -977,7 +945,7 @@ actor CapturePipeline {
     func flushAll(now: Date = .now, final: Bool = false) async {
         for _ in 0..<(final ? 20 : 100) where isFlushing { try? await Task.sleep(for: .milliseconds(50)) }
         if final {
-            retireEntries(closingAt: nil, closingActive: false, now: now)
+            retireEntries(closingAt: nil, now: now)
         } else {
             processContacts(now: now.addingTimeInterval(contactGrace), only: nil)
             for id in Array(entries.keys) {

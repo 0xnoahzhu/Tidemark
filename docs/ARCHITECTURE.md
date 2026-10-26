@@ -21,7 +21,7 @@ domain or IP it has never used before.
 | Directory | Contents | Depends on |
 |---|---|---|
 | `Model/` | Value types shared by every layer (`RequestRecord`, `MonitoredApp`, `AlertItem`, …) | Foundation |
-| `Services/` | Protocols (`SurgeClient`, `ProcessInspecting`, `SiteClassifying`, `TidemarkDatabase`, `CaptureActions`, `ProbeActions`, `EgressActions`, `HostInsightProviding`), Surge wire types, inert placeholders | Model |
+| `Services/` | Protocols (`SurgeClient`, `ProcessInspecting`, `SiteClassifying`, `TidemarkDatabase`, `CaptureActions`, `ProbeActions`, `EgressActions`), Surge wire types, inert placeholders | Model |
 | `State/` | `@MainActor @Observable` state objects and `AppModel`, the root injected into SwiftUI | Model, Services |
 | `Support/` | Formatters, request timing builder, `AppNaming` (an app's name everywhere: Finder's display name of its bundle), `DeviceIdentity` (this Mac's device ID) | Model |
 | `Localization/` | `Localizer`, `tr()` / `trf()` / `trn()` | — |
@@ -31,7 +31,6 @@ domain or IP it has never used before.
 | `Capture/` | `CaptureEngine` + `CapturePipeline`: attribution, first-contact detection, alerts, notifications, write buffer, disk spool, stats | all protocols, State |
 | `Probe/` | Per-session CONNECT proxy and the probe controller | Services, State |
 | `Egress/` | Egress monitor (per-policy external IP, latency, change log, IP lookup) | Services, State |
-| `Insight/` | `HostInsightService`: on-device explanations of hosts (FoundationModels), cached in memory and in `host_insights` | Services |
 | `Intents/` | App Intents: Shortcuts and Siri actions, `MonitoredAppEntity` | State |
 | `UI/` | SwiftUI views; `Theme/` tokens and `Components/` shared views | State |
 | `App/` | `TidemarkApp` scenes, `AppDelegate`, `AppBootstrap` (composition root), commands | everything |
@@ -44,9 +43,9 @@ services on `AppModel` (`model.database`, `model.capture`, `model.probeActions`,
 
 All Surge access goes through `surge-cli --raw` (JSON output). The executable lives at
 `/Applications/Surge.app/Contents/Applications/surge-cli` (also linked from `/usr/local/bin/surge-cli`).
-Tidemark reads this Mac's Surge: Settings offer no remote Surge. The client still supports one, adding `--remote host:port`
-and sending a password on stdin with `--password-stdin` (never in argv). A stream that
-ends or fails is always restarted, with backoff.
+Tidemark reads this Mac's Surge only; there is no remote Surge. A remote controller password that 0.1.0 kept
+in the login keychain (`io.tidemark.Tidemark` / `surge.remote.password`) is never read or deleted; users can
+delete it in Keychain Access. A stream that ends or fails is always restarted, with backoff.
 
 * **Stream** — `watch request request-update real-time-speed environment reload shutdown`. First line is
   `{"result":"Event subscribed"}`. `request` and `request-update` events have the same shape
@@ -98,7 +97,7 @@ The request belongs to the nearest process in the chain (leaf first) whose execu
 monitored app's bundle (`MonitoredApp.contains(processPath:)`), so `node` launched by `Cursor Helper
 (Plugin)` launched by `Cursor` rolls up to Cursor ("Rolled up to Cursor through 2 parent processes").
 Unmonitored requests are shown under the top-most `.app` bundle in the chain (or Surge's
-`pathForStatistics`, the only option for a remote Surge; Surge reports system daemons as the literal
+`pathForStatistics` when the process is gone; Surge reports system daemons as the literal
 `SYSTEM`, which is ignored) and land only in the global log. Tidemark's own requests (the site probe's
 forwarder, IP-info lookups) are never attributed to a monitored app, even when Tidemark was launched from
 inside one's process tree.
@@ -173,7 +172,7 @@ migration runner and every time limit.
   [Surge integration](#surge-integration)). Requests that are still active stay active in PostgreSQL: the
   connection usually outlives Tidemark, and a row stored as completed is never reopened. The next launch
   closes the ones that ended meanwhile (`closeVanished` for the same Surge session, `closeActiveRequests` for
-  earlier ones). A Surge restart or a switch of the recording device still closes the old session's requests.
+  earlier ones). A Surge restart still closes the old session's requests.
 * **Offline** — when PostgreSQL is unreachable rows are appended to a JSON-lines spool in
   `~/Library/Application Support/Tidemark/spool/` (up to 500,000 rows) and replayed on reconnect.
   `shared-state.json` keeps the last known apps and inventory index so attribution and first-contact
@@ -229,9 +228,9 @@ Mac a second time, under an ID stored nowhere. Capture merges every earlier ID o
 * the ID still stored in the preferences, when it differs: the derived ID's row is registered (before writes
   resume, as always) with the earlier row's name, color and age, and the stored ID is forgotten once merged;
 * an ID named in the spool or in `auxiliary.json`;
-* an ID that shares history with this Mac (`devicesSharingHistory`): a Mac (not a remote Surge) that recorded one
-  of this Mac's Surge sessions, identified by that Surge's start time in milliseconds, or two of its processes (PID
-  and start time). Looked for once merging is due, hourly, and right after a merge moved rows, whose sessions lead
+* an ID that shares history with this Mac (`devicesSharingHistory`): a Mac (not a remote Surge's row) that recorded
+  one of this Mac's Surge sessions, identified by that Surge's start time in milliseconds, or two of its processes
+  (PID and start time). Looked for once merging is due, hourly, and right after a merge moved rows, whose sessions lead
   to an ID invented while the preferences could not be read.
 
 Merging waits two minutes after the launch first reached PostgreSQL and for the spool to be replayed, and skips an
@@ -254,8 +253,7 @@ records IP, policy and rule, while Tidemark knows that every connection on that 
 Hosts are recorded with their first/last activity relative to the probe start and the step (page load,
 click, device switch) that first reached them; the waterfall colors same-site hosts with the accent and
 other sites in amber. The proxy matches Surge records to the probe by the forwarder's source port and
-address. The forwarder dials the interface Surge's HTTP listener is bound to. A probe needs this Mac's Surge,
-the only one Tidemark reads: a remote Surge would not see the forwarder's source ports.
+address. The forwarder dials the interface Surge's HTTP listener is bound to.
 
 Stopping a probe waits for the rest of its tail (a probe records until at least 6 s after its first
 page load, so a Stop pressed earlier still catches the page's late requests), lets the last Surge records

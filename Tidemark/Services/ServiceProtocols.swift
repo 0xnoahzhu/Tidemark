@@ -14,10 +14,6 @@ import Foundation
 struct SurgeEndpoint: Hashable, Sendable, Codable {
     /// Absolute path of the surge-cli executable.
     var cliPath: String
-    /// `host:port` of a remote Surge controller (`--remote`); nil for the local instance.
-    var remote: String?
-    /// Password for the remote controller; passed through `--password-stdin`, never argv.
-    var password: String?
 
     static let defaultCLIPaths = [
         "/Applications/Surge.app/Contents/Applications/surge-cli",
@@ -112,7 +108,8 @@ protocol TidemarkDatabase: Sendable {
     /// Nothing else may still write under `from`. With `idleFor`, the merge checks that: it only starts when `from`
     /// wrote nothing during the last `idleFor` (`devices.last_write_at`, on the server's clock), stops when `from`
     /// writes after that moment, and checks again with `from`'s row locked before it deletes it; it then reports
-    /// `stillWriting` (what moved so far stays moved). A remote Surge is never merged, nor merged into (`remoteSurge`).
+    /// `stillWriting` (what moved so far stays moved). A remote Surge's row (`devices.is_remote`, which only earlier
+    /// versions set) is never merged, nor merged into (`remoteSurge`).
     @discardableResult func mergeDevice(_ from: DeviceID, into: DeviceID, idleFor: Duration?) async throws -> DeviceMergeResult
     /// Macs (never remote Surges) other than `device` that recorded a request of one of `device`'s Surge sessions or of
     /// `sessions`, or at least two of `device`'s processes (same PID and start time, to the microsecond): IDs `device`'s
@@ -207,10 +204,6 @@ protocol TidemarkDatabase: Sendable {
     func saveProbeSession(_ session: ProbeSession) async throws
     func probeSessions(limit: Int) async throws -> [ProbeSession]
 
-    // Host insights (on-device model output, shared cache)
-    func hostInsight(_ host: String, language: String) async throws -> HostInsight?
-    func saveHostInsight(_ insight: HostInsight) async throws
-
     // Egress
     func saveEgressSamples(_ samples: [EgressSample], deviceID: DeviceID) async throws
     func latestEgress(deviceID: DeviceID) async throws -> [EgressSample]
@@ -225,7 +218,7 @@ struct DeviceMergeResult: Equatable, Sendable {
         /// `from` wrote within the `idleFor` the merge was given, or after the merge began: something still writes
         /// under it.
         case stillWriting
-        /// `from` or `into` is a remote Surge, not a Mac.
+        /// `from` or `into` is a remote Surge's row an earlier version stored, not a Mac.
         case remoteSurge
     }
 
@@ -474,21 +467,6 @@ protocol ProbeActions: AnyObject {
     func pageDidFinishLoading()
     /// Stops recording, saves the session and returns it.
     @discardableResult func stopProbe() async -> ProbeSession?
-}
-
-/// On-device explanations of hosts (FoundationModels). Results are cached in `host_insights`.
-@MainActor
-protocol HostInsightProviding: AnyObject {
-    /// `false` when Apple Intelligence is off, the model is downloading, or the device is unsupported.
-    var isAvailable: Bool { get }
-    /// Why the model is unavailable, for display (nil when available).
-    var unavailableReason: String? { get }
-    /// Cached insight, or a fresh one from the model.
-    func insight(for context: HostContext) async throws -> HostInsight
-    /// The insight for `host` in the current language from memory or the database, without running the model.
-    func cachedInsight(for host: String) async -> HostInsight?
-    /// Warms the model up (call when the inspector opens and no cached insight exists).
-    func prewarm()
 }
 
 extension ProbeActions {

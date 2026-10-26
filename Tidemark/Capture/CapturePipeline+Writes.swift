@@ -124,7 +124,6 @@ extension CapturePipeline {
     private func writeChains(_ batch: inout CaptureWriteBuffer.Batch, deadline: ContinuousClock.Instant) async throws {
         let database = self.database
         while let chain = batch.chains.first {
-            // Chains queued before a switch between local and remote Surge belong to the device they ran on.
             let device = chain.deviceID ?? settings.deviceID
             do {
                 _ = try await write(until: deadline) { try await database.upsertProcessChain(deviceID: device, chain: chain.chain, appID: chain.appID) }
@@ -332,7 +331,6 @@ extension CapturePipeline {
             if draft.requestKey.session == session, let entry = entries[draft.requestKey.surgeID], entry.record.key == draft.requestKey {
                 rowID = entry.record.rowID
             }
-            // The request's own Mac, also for drafts queued before a switch between local and remote Surge.
             alerts.append(draft.item(deviceID: draft.requestKey.deviceID, requestRowID: rowID, createdAt: now))
         }
         return alerts
@@ -390,7 +388,6 @@ extension CapturePipeline {
     /// IDs found in the spool or in `auxiliary.json` other than this Mac's: earlier IDs of this Mac, merged into its
     /// current one.
     func scheduleEarlierDeviceIDs(_ ids: Set<DeviceID>) {
-        guard !settings.isRemote else { return }
         for id in ids where id != settings.deviceID && !settledDevices.contains(id) && deviceMerges[id] == nil {
             Self.log.info("Found work saved under an earlier ID of this Mac: written under its current ID, and the earlier ID is merged into it")
             scheduleDeviceMerge(from: id, into: settings.deviceID)

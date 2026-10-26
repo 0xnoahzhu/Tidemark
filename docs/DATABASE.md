@@ -86,7 +86,7 @@ loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`)
 
 | Table | One row per | Notes |
 |---|---|---|
-| `devices` | Mac (or remote Surge) writing to the database | `id` is derived from the Mac's hardware UUID ([Device identity](#device-identity)); `row_count` and `last_write_at` drive the "Macs writing to this database" list |
+| `devices` | Mac writing to the database | `id` is derived from the Mac's hardware UUID ([Device identity](#device-identity)); `row_count` and `last_write_at` drive the "Macs writing to this database" list; `is_remote` is set only on rows earlier versions stored for a remote Surge (Tidemark now reads this Mac's Surge only), which are never merged |
 | `apps` | monitored app, shared by every Mac | matched by bundle `path`; `archived_at` set when archived |
 | `app_installs` | (app, Mac) | whether the bundle path exists on that Mac |
 | `requests` | Surge request | the main log; upserted as the request progresses |
@@ -96,7 +96,7 @@ loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`)
 | `alerts` | first contact of a monitored app with a new site, host or IP | `read_at` is null while unread |
 | `mutes` | host pattern earlier versions muted (`host`, `IP` or `*.example.com`) | unused: Tidemark has no mutes and neither reads nor writes it, so every host alerts. Schema v1 creates it with `*.apple.com`, `*.icloud.com` and `*.mzstatic.com`; it stays, since migrations are never edited |
 | `ip_info` | IP address | GeoIP / ASN cache from Surge's databases |
-| `host_insights` | (host, language) | on-device explanations of hosts |
+| `host_insights` | (host, language) | no longer used: it held on-device explanations of hosts, a feature Tidemark removed; the table stays because migrations are never edited |
 | `probe_sessions`, `probe_hosts` | site probe, and each host it reached | `first_ms` / `last_ms` are relative to the probe start |
 | `egress_checks`, `egress_changes` | egress IP per policy per check, and changes of the current egress | |
 | `schema_migrations` | applied migration | |
@@ -175,9 +175,9 @@ ID of the Mac into the derived one ([below](#merging-devices)), however it finds
 * The ID still stored in the preferences, when it differs from the derived one. The derived ID is registered with
   the stored row's name, color and age, and the stored ID is forgotten once merged.
 * An ID named in the spool or in `auxiliary.json`: those only ever hold this Mac's own work.
-* An ID that shares history with the Mac (`devicesSharingHistory`): a Mac, not a remote Surge, that recorded one of
-  the Mac's Surge sessions (a session is identified by that Surge's start time in milliseconds) or at least two of
-  its processes (same PID and start time, to the microsecond). No other Mac shares either. Tidemark looks once
+* An ID that shares history with the Mac (`devicesSharingHistory`): a Mac, not a remote Surge's row, that recorded
+  one of the Mac's Surge sessions (a session is identified by that Surge's start time in milliseconds) or at least
+  two of its processes (same PID and start time, to the microsecond). No other Mac shares either. Tidemark looks once
   merging is due, then hourly, and again right after a merge moved rows: merging the stored ID brings its sessions
   to the derived ID, which finds an ID invented while the preferences could not be read.
 
@@ -200,11 +200,12 @@ maintenance statement timeout and waits at most 1 s for a lock: when capture hol
 transaction fails and is tried again (three times, 1 s apart) rather than capture waiting until it goes offline
 (5 s). Should the two still wait for each other, PostgreSQL ends one of the transactions and that one is tried again.
 
-1. `begin`: nothing to do when `from` does not exist (merged already). A remote Surge is never merged, nor merged
-   into. With `idleFor`, `since` is that long before the server's clock, and a `from` that wrote at or after it
-   (`last_write_at`) is left alone: something still writes under it. Otherwise `into` is created as a copy of `from`
-   when missing; it keeps its name unless it has no requests yet (a row registered moments ago under the computer's
-   name), it exists since the earlier `created_at` of the two and last wrote at the later `last_write_at`.
+1. `begin`: nothing to do when `from` does not exist (merged already). A remote Surge's row (`is_remote`) is never
+   merged, nor merged into. With `idleFor`, `since` is that long before the server's clock, and a `from` that wrote
+   at or after it (`last_write_at`) is left alone: something still writes under it. Otherwise `into` is created as a
+   copy of `from` when missing; it keeps its name unless it has no requests yet (a row registered moments ago under
+   the computer's name), it exists since the earlier `created_at` of the two and last wrote at the later
+   `last_write_at`.
 2. `requests`, 1,000 rows of `from` per transaction (`$3` = their IDs), 250 ms apart, none once `from` wrote at or
    after `since`. A row whose `(surge_session, surge_id)` `into` already has is a duplicate: `into`'s row is locked
    (in key order, like capture's upserts), takes what only the duplicate knew (completion and state, IP, GeoIP,

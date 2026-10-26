@@ -35,7 +35,7 @@ Features that would only add decoration are left out, and section 7 explains why
 | 4.5 | Liquid Glass shell and glass-amount slider | `glassEffect`/`Glass`, `GlassEffectContainer`, `ToolbarSpacer`, `scrollEdgeEffectStyle`, `safeAreaBar`, `Slider` ticks (26); `ToolbarItemVisibilityPriority(lowerThan:)`, `contentMarginsRemoved` (27) | `UI/Shell`, `UI/Requests`, `UI/MenuBar`, `UI/Settings` | M |
 | 4.6 | Site Probe on WebPage with a per-session proxy | `WebPage`/`WebView`, `NetworkListener`/`NetworkConnection` (26), `proxyConfigurations` (14); GPC, `alternateRequest`, `overrideReferrer`, `cookies(for:)`, `os_lockdown_mode_enabled` (27) | `Probe/`, `UI/SiteProbe` | L |
 | 4.7 | Notifications that group and act | `threadIdentifier`, `interruptionLevel`, `relevanceScore`, action icons (12); `appEntityIdentifiers` (27) | `Capture/` notifier | S |
-| 4.8 | On-device host insights (opt-in) | `SystemLanguageModel`, `@Generable` (26); `LanguageModelError`, `variant`, `Error.assetsUnavailable` (27) | `HostInsightProviding` implementation | M |
+| 4.8 | ~~On-device host insights (opt-in)~~ Removed: the design has no place for them | `SystemLanguageModel`, `@Generable` (26); `LanguageModelError`, `variant`, `Error.assetsUnavailable` (27) | none | — |
 | 4.9 | Fast waterfall and histograms | `RectanglePlot`/`BarPlot` (15), `chartXSelection(range:)` (14), conditional `ChartContent` (27) | `UI/SiteProbe`, Requests histogram, sparklines | M |
 | 4.10 | macOS 27 controls | `.pickerStyle(.tabs)`, `.textFieldStyle(.bordered)` + `textInputBorderShape`, `alert(error:)` (27); `ButtonRole.confirm/.close` (26) | all pages, Settings, sheets | S |
 | 4.11 | App Intents core | `allowedExecutionTargets`, `CustomAppIntentErrorConvertible`, lazy `DisplayRepresentation` image, `SyncableEntity` (27); `supportedModes` (26) | new `Intents/` in the app target | M |
@@ -50,7 +50,7 @@ Features that would only add decoration are left out, and section 7 explains why
 - **UI refresh rate.** The live UI slows down when the system asks it to or when nothing is visible. Capture, database writes and alerts never slow down.
 - **Where glass goes.** Glass stays on the control layer: the sidebar, toolbar, menu-bar popover header and floating controls. The sidebar keeps the split view's own glass, and the glass slider tints that glass (`NSGlassEffectView.tintColor`, none at Clear) instead of laying `.clear` or tinted `.regular` glass over it, which stacks on the system glass (section 8, item 1).
 - **Site Probe.** It moves to `WebPage` and `NetworkListener`. macOS 27 adds GPC, referrer and cache-bypass options, plus a hardened WebContent process.
-- **Host insights.** They run on-device only, are opt-in, are labelled as generated, and are never on the alert path. Private Cloud Compute is rejected.
+- **Host insights.** Removed, with Foundation Models: the Tidemark design has no place for an explanation of a host (4.8). Private Cloud Compute was rejected before that.
 - **Menu bar.** `MenuBarExtra` stays for now. A status item using the macOS 27 AppKit expanded-interface API is the planned upgrade (section 5.1).
 
 ---
@@ -635,14 +635,16 @@ center.setNotificationCategories([UNNotificationCategory(identifier: "newHost", 
 
 Status: Typechecked. In the snippet, `AlertItem` scope names and `trf` follow the repository.
 
-### 4.8 On-device host insights (opt-in)
+### 4.8 On-device host insights (removed)
+
+**Status: removed.** Tidemark no longer uses Foundation Models. The Tidemark design has no place for an explanation of a host, so the Requests inspector's About this host section and the notification line went first; the `Insight/` module (`HostInsightService` and its generator), `HostInsightProviding`, `HostInsight`, `HostContext`, `HostCategory` and the database methods that read and wrote `host_insights` followed once nothing could reach them. The `host_insights` table stays in the schema, unused, because migrations are never edited. The rest of this section records the plan as it was.
 
 **APIs**
 - FoundationModels, macOS 26: `SystemLanguageModel.default` (`availability`, `isAvailable`, `supportsLocale(_:)`), `LanguageModelSession(model:instructions:)`, `respond(to:generating:options:)`, `@Generable` (including enums) and `@Guide`.
 - macOS 27: `SystemLanguageModel.variant.displayName` ("AFM 3 Core" / "AFM 3 Core Advanced"), `LanguageModelError`, `SystemLanguageModel.Error.assetsUnavailable` and `LanguageModelSession.Error.concurrentRequests`.
 - `GenerationOptions(samplingMode:temperature:maximumResponseTokens:)`, the `samplingMode` spelling, is back-deployed.
 
-**Where.** The repository already defines `HostInsightProviding`, `HostInsight`, `HostContext`, `HostCategory` and the `host_insights` table keyed by `(host, language)`. This item implements them. The Requests inspector does not show insights: the design has no place for them, so its About this host section (`UI/Components/HostInsightView`) was removed.
+**Where.** The repository defined `HostInsightProviding`, `HostInsight`, `HostContext`, `HostCategory` and the `host_insights` table keyed by `(host, language)`, and this item implemented them. All but the table are gone (see the status above).
 
 **Why.** Surge already supplies the facts: IPs, ASN and organisation, policy, first seen, request count. The model turns them into a category and one sentence, for example "AI inference API operated by Anysphere". That is useful as a second line under a new-site alert. Because the cache is shared in Postgres, each host is classified once across all Macs.
 
@@ -695,7 +697,7 @@ actor InsightGenerator {
 
 **Rules**
 - Insights run on-device only. Not adopted as planned: Settings have no Notifications tab or switch for insights, and notifications never carry them, since the design shows neither.
-- In the UI they are labelled "Generated on this Mac" and phrased as "likely". They never affect first-contact detection, alerts or mutes.
+- In the UI they are labelled "Generated on this Mac" and phrased as "likely". They never affect first-contact detection or alerts.
 - Never delay an alert waiting for a model response.
 - Background requests use non-streaming `respond`; the SDK docs say this reduces `rateLimited` errors.
 - Facts go in the prompt from `HostContext`. Do not use tools: they add latency and gain nothing, because Tidemark already has the facts.
@@ -746,7 +748,7 @@ Status: Typechecked. The survey typechecked `rateMarks`.
 
 **Where and why**
 - **`.tabs` is only for pickers that switch views:** Domains/IPs in Domains & IPs; Current/History/Lookup on Egress IP; inspector sections; Waterfall/Hosts in Site Probe. It reads as tab navigation, and VoiceOver announces it as tabs. Value filters (All/Alerts/Blocked, time range) stay `.segmented`.
-- **`.bordered` with a border shape** is for fields inside content and Settings: DB host/port/user, `surge-cli` path, remote controller and the Egress lookup field. `RoundedBorderTextFieldStyle` is deprecated in 27. The Requests search stays `.searchable` in the toolbar.
+- **`.bordered` with a border shape** is for fields inside content and Settings: DB host/port/user, `surge-cli` path and the Egress lookup field. `RoundedBorderTextFieldStyle` is deprecated in 27. The Requests search stays `.searchable` in the toolbar.
 - **`alert(error:)`** replaces "isPresented + stored error" pairs. It covers Settings "Test connection", migration failures, probe listener bind errors and IP lookup failures. `DatabaseError` is already `LocalizedError`, so the title comes from `errorDescription`.
 
 ```swift
@@ -916,7 +918,7 @@ These are not features to adopt, but they change how existing code behaves or wh
 - **Result builders are unified.** `ContentBuilder` is a typealias for `ViewBuilder`. `toolbar`, `commands` and `accessibilityRotor` take `@ContentBuilder`, and Charts accepts conditionals. Existing `@ViewBuilder` code is unaffected.
 - **`Shape`, `GeometryEffect` and `ShapeView` are now `nonisolated` protocols.** A sparkline or histogram `Shape`'s `path(in:)` must not touch main-actor state. `_RemoveGlobalActorIsolation` is deprecated: annotate with `nonisolated` instead.
 - **`NSStatusItem.view`, `target` and `action` are no longer deprecated.** This matters for 5.1.
-- **`SystemLanguageModel.contextSize` returns the real value on 27.** It was hard-coded to 4096 on 26.0 through 26.3, so size insight batches from it.
+- **`SystemLanguageModel.contextSize` returns the real value on 27.** It was hard-coded to 4096 on 26.0 through 26.3, so size prompts from it (Tidemark no longer uses Foundation Models, see 4.8).
 
 ---
 
@@ -1120,11 +1122,7 @@ These findings are uncertain, or their signatures typecheck but their behaviour 
     - `FileWrapperDocumentWriter` needs a full `FileWrapper`, so `FileWrapper(regularFileWithContents:)` holds the whole CSV in memory.
     - For large exports, check whether returning `FileWrapper(url:)` for a temporary file written incrementally avoids reading it all into memory, or whether a custom `DocumentWriter` with `Destination == URL` can stream.
     - Remember that the survey's `@MainActor` version does not compile.
-12. **FoundationModels at runtime (4.8).** Check:
-    - Which `capabilities` the local model reports.
-    - How often guardrails refuse ordinary hostnames.
-    - Category quality on a sample of 100 real hosts from the inventory.
-    - `rateLimited` frequency while the app runs in the background.
+12. **FoundationModels at runtime (4.8).** No longer applies: host insights were removed.
 13. **`NSStatusItemExpandedInterfaceDelegate` (5.1).** It is compiled only. Panel positioning on multiple displays, focus behaviour and how it interacts with `NSApp.setActivationPolicy(.accessory)` are unverified.
 14. **Localisation with generated symbols (section 3.1).** Before switching `tr()` to generated `LocalizedStringResource` symbols, confirm that resolving a resource with `resource.locale = Localizer.shared.locale` picks the `zh-Hans` table even when the system language is English.
 15. **The 27 SDK writes `anyAppleOS` availability.** When checking whether an API exists on macOS, grep for both `anyAppleOS 27` and `macOS 27`. Otherwise you will wrongly conclude many APIs are missing.

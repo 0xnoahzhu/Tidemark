@@ -65,8 +65,8 @@ final class EgressMonitor: EgressActions {
         self.networkSettleDelay = networkSettleDelay
     }
 
-    /// Device the samples are stored under (the remote Surge's row when one is configured).
-    var deviceID: DeviceID { CaptureDeviceInfo.recordingDeviceID(model.preferences) }
+    /// Device the samples are stored under: this Mac's row.
+    var deviceID: DeviceID { model.preferences.thisDeviceID }
 
     // MARK: Lifecycle
 

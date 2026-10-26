@@ -20,8 +20,8 @@ struct ProbeStartError: Error, LocalizedError, Hashable, Sendable {
 /// waterfall into `model.probe`, and saves finished sessions. Implements `ProbeActions`.
 ///
 /// Surge and the database are read from `model` on every use, so clients the capture engine rebuilds are
-/// picked up automatically. A probe needs this Mac's Surge: the proxy forwards to its HTTP listener and
-/// Surge's records are matched to the probe by the forwarder's source port, which a remote Surge cannot see.
+/// picked up automatically. The proxy forwards to Surge's HTTP listener, and Surge's records are matched to
+/// the probe by the forwarder's source port.
 @MainActor
 final class ProbeController: ProbeActions {
     let model: AppModel
@@ -103,7 +103,7 @@ final class ProbeController: ProbeActions {
 
         let first = ProbeStep(at: 0, label: mode == .iphone ? "Page load · iPhone" : "Page load", url: normalized)
         model.probe.running = ProbeSession(
-            id: id, deviceID: CaptureDeviceInfo.recordingDeviceID(model.preferences), url: normalized, host: host.lowercased(),
+            id: id, deviceID: model.preferences.thisDeviceID, url: normalized, host: host.lowercased(),
             mode: mode, startedAt: startedAt, endedAt: nil, steps: [first], hosts: []
         )
         model.probe.phase = .loading

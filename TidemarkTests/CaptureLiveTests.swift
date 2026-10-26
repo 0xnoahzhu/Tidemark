@@ -20,14 +20,14 @@ struct CaptureLiveTests {
 
     func makePipeline(_ db: CaptureLivePostgres, device: DeviceID, directory: URL) -> CapturePipeline {
         CapturePipeline(
-            settings: CaptureSettings(deviceID: device, isRemote: false, batchRows: 200, batchInterval: 1, ownExecutablePath: nil),
+            settings: CaptureSettings(deviceID: device, batchRows: 200, batchInterval: 1, ownExecutablePath: nil),
             database: db, surge: CaptureFakeSurge(), processes: processes, classifier: CaptureFakeClassifier(), probes: ProbeRegistry(),
             spool: CaptureSpool(directory: directory, limit: 10_000), contactGrace: 0
         )
     }
 
     func device() -> Device {
-        Device(id: UUID(), name: "Capture Test Mac", model: nil, shortName: "CTM", hue: 240, isRemoteSurge: false, rowCount: 0,
+        Device(id: UUID(), name: "Capture Test Mac", model: nil, shortName: "CTM", hue: 240, rowCount: 0,
                lastWriteAt: nil, createdAt: .now)
     }
 

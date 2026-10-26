@@ -125,8 +125,6 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws { try await base.markAllAlertsRead(appID: appID, scope: scope) }
     func saveProbeSession(_ session: ProbeSession) async throws { try await base.saveProbeSession(session) }
     func probeSessions(limit: Int) async throws -> [ProbeSession] { try await base.probeSessions(limit: limit) }
-    func hostInsight(_ host: String, language: String) async throws -> HostInsight? { try await base.hostInsight(host, language: language) }
-    func saveHostInsight(_ insight: HostInsight) async throws { try await base.saveHostInsight(insight) }
     func saveEgressSamples(_ samples: [EgressSample], deviceID: DeviceID) async throws {
         try await base.saveEgressSamples(samples, deviceID: deviceID)
     }

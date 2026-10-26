@@ -1,9 +1,8 @@
-import CryptoKit
 import Foundation
 import IOKit
 import SystemConfiguration
 
-/// Facts about this Mac for its row in `devices`, plus the stable IDs and hues Tidemark derives.
+/// Facts about this Mac for its row in `devices`, plus the stable hues Tidemark derives.
 enum CaptureDeviceInfo {
     /// Hues for device dots and badges (the design uses 240, 150 and 65 for its three Macs).
     static let devicePalette: [Double] = [240, 150, 65, 295, 195, 330, 25]
@@ -65,24 +64,6 @@ enum CaptureDeviceInfo {
     /// A stable tile hue for an app, from its bundle ID (or path).
     static func tileHue(for key: String) -> Double {
         tilePalette[Int(stableHash(key) % UInt64(tilePalette.count))]
-    }
-
-    /// Stable ID of the device row used for requests from a remote Surge, derived from this Mac and the
-    /// remote address so it survives relaunches.
-    static func remoteDeviceID(thisDevice: DeviceID, remote: String) -> DeviceID {
-        let digest = SHA256.hash(data: Data("tidemark-remote|\(thisDevice.uuidString)|\(remote.lowercased())".utf8))
-        var bytes = Array(digest.prefix(16))
-        bytes[6] = (bytes[6] & 0x0F) | 0x50 // version 5 style
-        bytes[8] = (bytes[8] & 0x3F) | 0x80 // RFC 4122 variant
-        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-                           bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
-    }
-
-    /// The device rows are written under: the remote Surge's row when one is configured.
-    @MainActor
-    static func recordingDeviceID(_ preferences: Preferences) -> DeviceID {
-        let remote = preferences.surgeRemote.trimmingCharacters(in: .whitespaces)
-        return remote.isEmpty ? preferences.thisDeviceID : remoteDeviceID(thisDevice: preferences.thisDeviceID, remote: remote)
     }
 
     /// FNV-1a, stable across launches (unlike `hashValue`).

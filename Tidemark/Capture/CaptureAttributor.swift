@@ -4,8 +4,7 @@ import Foundation
 ///
 /// Chains are cached by `(pid, start time)`. A request belongs to the nearest process in its chain (leaf
 /// first) whose executable lives inside a monitored app's bundle; apps that don't include children only
-/// match the leaf. Requests from a remote Surge have no local process table and are attributed by the
-/// process path and Surge's `pathForStatistics` only.
+/// match the leaf.
 struct CaptureAttributor {
     /// Outcome of attributing one request.
     struct Attribution: Hashable, Sendable {
@@ -28,14 +27,12 @@ struct CaptureAttributor {
     private(set) var apps: [MonitoredApp] = []
     /// Bumped whenever `apps` changes, so callers can re-attribute live requests.
     private(set) var appsVersion = 0
-    let isRemote: Bool
     let cacheLimit: Int
 
     private var chains: [ProcessKey: [ProcessLink]] = [:]
     private var latestKey: [Int32: ProcessKey] = [:]
 
-    init(isRemote: Bool, cacheLimit: Int = 4096) {
-        self.isRemote = isRemote
+    init(cacheLimit: Int = 4096) {
         self.cacheLimit = cacheLimit
     }
 
@@ -47,10 +44,10 @@ struct CaptureAttributor {
     }
 
     /// Process ancestry for a request (root → leaf). Falls back to a single link built from Surge's
-    /// process path when the process is gone, the PID was reused, or Surge is remote.
+    /// process path when the process is gone or the PID was reused.
     mutating func chain(pid: Int32?, processPath: String?, startedAt: Date, inspector: any ProcessInspecting) -> [ProcessLink] {
         let fallback = Self.fallbackChain(pid: pid, processPath: processPath)
-        guard !isRemote, let pid, pid > 0 else { return fallback }
+        guard let pid, pid > 0 else { return fallback }
 
         if let live = inspector.process(pid: pid), live.startTime <= startedAt.addingTimeInterval(1) {
             let key = ProcessKey(pid: pid, startTime: live.startTime)

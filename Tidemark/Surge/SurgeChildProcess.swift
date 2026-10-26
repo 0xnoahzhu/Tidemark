@@ -2,13 +2,11 @@ import Darwin
 import Foundation
 import Synchronization
 
-/// One surge-cli command line: the executable, its full argv and what to feed its standard input.
+/// One surge-cli command line: the executable and its full argv.
 struct SurgeInvocation: Sendable, Hashable {
     var executable: String
     var arguments: [String]
-    /// Written to the child's standard input before launch (the remote password line), or nil for `/dev/null`.
-    var input: Data?
-    /// The command as shown in errors, without `--raw`, `--remote` or anything secret (e.g. `dump recent`).
+    /// The command as shown in errors, without `--raw` (e.g. `dump recent`).
     var label: String
     /// Maximum run time of a one-shot command; ignored for `watch`.
     var timeout: Duration
@@ -52,20 +50,7 @@ final class SurgeChildProcess: Sendable {
         let errors = Pipe()
         process.standardOutput = output
         process.standardError = errors
-        if let input = invocation.input {
-            // The pipe buffer holds the short password line, so writing before launch never blocks and
-            // never raises SIGPIPE; closing the write end gives surge-cli a clean end of file.
-            let pipe = Pipe()
-            do {
-                try pipe.fileHandleForWriting.write(contentsOf: input)
-                try pipe.fileHandleForWriting.close()
-            } catch {
-                throw .commandFailed(command: invocation.label, message: error.localizedDescription)
-            }
-            process.standardInput = pipe
-        } else {
-            process.standardInput = FileHandle.nullDevice
-        }
+        process.standardInput = FileHandle.nullDevice
 
         let (statusStream, statusContinuation) = AsyncStream.makeStream(of: Int32.self, bufferingPolicy: .bufferingNewest(1))
         let key = ObjectIdentifier(process)

@@ -22,15 +22,12 @@ enum AppBootstrap {
         model.processes = processes
         model.surge = surge
         model.database = database
-        model.insights = HostInsightService(database: database)
 
         let engine = CaptureEngine(model: model, surge: surge, database: database, processes: processes, classifier: classifier)
         engine.adoptDatabaseURL(databaseURL)
         // Rebuilt when the endpoint or a password changes (`reconnect()`), and for testing new settings.
         engine.makeSurgeClient = { endpoint in SurgeCLIClient(endpoint: endpoint) }
         engine.makeDatabase = { url in PostgresDatabase(url: url, siteClassifier: classifier) }
-        // On-device host explanations are cached in the database the engine records into.
-        engine.databaseChanged = { [weak model] database in model?.insights = HostInsightService(database: database) }
         engine.retireDatabase = { database in await (database as? PostgresDatabase)?.shutdown() }
         let egress = EgressMonitor(model: model)
         engine.egress = egress

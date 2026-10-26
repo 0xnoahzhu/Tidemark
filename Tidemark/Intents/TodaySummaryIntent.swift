@@ -2,8 +2,8 @@ import AppIntents
 import Foundation
 import SwiftUI
 
-/// "12,345 requests today · 7 new destinations" for what this Mac records (the remote Surge's device when one
-/// is configured, the same device as the menu bar's Today counter).
+/// "12,345 requests today · 7 new destinations" for what this Mac records (the same device as the menu bar's
+/// Today counter).
 struct TodaySummaryIntent: AppIntent {
     static let title = LocalizedStringResource("Today's Summary", table: "Intents")
     static let description: IntentDescription? = IntentDescription(
@@ -40,8 +40,8 @@ struct IntentsTodayFigures: Equatable, Sendable {
     @MainActor
     static func load(_ model: AppModel, now: Date = .now) async -> IntentsTodayFigures {
         let startOfDay = Calendar.current.startOfDay(for: now)
-        // Rows and alerts are written under the recording device, which `live.todayCount` also counts.
-        let device = CaptureDeviceInfo.recordingDeviceID(model.preferences)
+        // Rows and alerts are written under this Mac's device, which `live.todayCount` also counts.
+        let device = model.preferences.thisDeviceID
         let scope = DeviceScope.device(device)
         let counted = (try? await model.database.countRequests(since: startOfDay, scope: scope)) ?? 0
         let stored = (try? await model.database.alerts(filter: .all, appID: nil, scope: scope, limit: 5000)) ?? []

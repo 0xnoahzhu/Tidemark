@@ -3,7 +3,7 @@ import Foundation
 /// Stable identifier of a monitored app (row in `apps`).
 typealias AppID = UUID
 
-/// Stable identifier of a Mac (or a remote Surge instance) writing to the database (row in `devices`).
+/// Stable identifier of a Mac writing to the database (row in `devices`).
 typealias DeviceID = UUID
 
 /// Whether a host or IP inventory entry is a domain name or an IP address.

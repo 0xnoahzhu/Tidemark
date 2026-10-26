@@ -749,8 +749,6 @@ private struct RequestsStubDatabase: TidemarkDatabase {
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws {}
     func saveProbeSession(_ session: ProbeSession) async throws {}
     func probeSessions(limit: Int) async throws -> [ProbeSession] { [] }
-    func hostInsight(_ host: String, language: String) async throws -> HostInsight? { nil }
-    func saveHostInsight(_ insight: HostInsight) async throws {}
     func saveEgressSamples(_ samples: [EgressSample], deviceID: DeviceID) async throws {}
     func latestEgress(deviceID: DeviceID) async throws -> [EgressSample] { [] }
     func insertEgressChange(_ change: EgressChange, deviceID: DeviceID) async throws {}
@@ -929,8 +927,8 @@ struct ShellTests {
         Localizer.shared.preference = .english
         let state = DeviceState(thisDeviceID: UIMainFixtures.thisMac)
         state.devices = [
-            Device(id: UIMainFixtures.otherMac, name: "Mac mini (Office)", model: nil, shortName: "mini", hue: 150, isRemoteSurge: false, rowCount: 0, lastWriteAt: .now, createdAt: .now),
-            Device(id: UIMainFixtures.thisMac, name: "MacBook Pro", model: nil, shortName: "MBP", hue: 240, isRemoteSurge: false, rowCount: 0, lastWriteAt: nil, createdAt: .now),
+            Device(id: UIMainFixtures.otherMac, name: "Mac mini (Office)", model: nil, shortName: "mini", hue: 150, rowCount: 0, lastWriteAt: .now, createdAt: .now),
+            Device(id: UIMainFixtures.thisMac, name: "MacBook Pro", model: nil, shortName: "MBP", hue: 240, rowCount: 0, lastWriteAt: nil, createdAt: .now),
         ]
         let options = SidebarMacOption.options(in: state, matching: "")
         #expect(options.map(\.scope) == [.all, .device(UIMainFixtures.thisMac), .device(UIMainFixtures.otherMac)])

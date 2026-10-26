@@ -191,8 +191,6 @@ struct CaptureEngineTests {
         #expect(CaptureDeviceInfo.shortName(name: "Noah’s MacBook Pro", product: "MacBook Pro (14-inch, 2023)") == "MBP")
         #expect(CaptureDeviceInfo.shortName(name: "Studio Desk", product: "Mac Studio (2023)") == "Std")
         let me = UUID()
-        #expect(CaptureDeviceInfo.remoteDeviceID(thisDevice: me, remote: "10.0.0.2:6171") == CaptureDeviceInfo.remoteDeviceID(thisDevice: me, remote: "10.0.0.2:6171"))
-        #expect(CaptureDeviceInfo.remoteDeviceID(thisDevice: me, remote: "10.0.0.2:6171") != CaptureDeviceInfo.remoteDeviceID(thisDevice: me, remote: "10.0.0.3:6171"))
         #expect(CaptureDeviceInfo.hue(for: me) == CaptureDeviceInfo.hue(for: me))
     }
 
@@ -337,7 +335,7 @@ struct CaptureEngineTests {
         await database.setApps([cursor, docker])
         #expect(await engine.connectDatabase())
         let me = model.preferences.thisDeviceID
-        let mini = Device(id: UUID(), name: "Mac mini (Office)", model: "Mac mini · M4", shortName: "mini", hue: 150, isRemoteSurge: false,
+        let mini = Device(id: UUID(), name: "Mac mini (Office)", model: "Mac mini · M4", shortName: "mini", hue: 150,
                           rowCount: 0, lastWriteAt: nil, createdAt: .now)
         model.devices.devices = [mini]
         func alert(_ id: Int64, _ device: DeviceID, _ app: MonitoredApp, _ kind: HostKind, _ value: String) -> AlertItem {
@@ -501,7 +499,7 @@ struct CaptureEngineTests {
         let (engine, model) = makeEngine()
         let me = model.preferences.thisDeviceID
         let then = Date(timeIntervalSince1970: 1_792_000_000)
-        model.devices.devices = [Device(id: me, name: "Mac", model: nil, shortName: "Mac", hue: 240, isRemoteSurge: false, rowCount: 10,
+        model.devices.devices = [Device(id: me, name: "Mac", model: nil, shortName: "Mac", hue: 240, rowCount: 10,
                                         lastWriteAt: then, createdAt: then)]
         var update = CaptureUIUpdate()
         update.rowsWritten = 3

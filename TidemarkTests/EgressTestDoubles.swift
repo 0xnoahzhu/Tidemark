@@ -37,8 +37,8 @@ final class EgressFakeSurge: SurgeClientDetails {
     let endpoint: SurgeEndpoint
     let state = Mutex(State())
 
-    init(remote: String? = nil) {
-        endpoint = SurgeEndpoint(cliPath: "/usr/bin/false", remote: remote, password: nil)
+    init() {
+        endpoint = SurgeEndpoint(cliPath: "/usr/bin/false")
     }
 
     func update(_ body: (inout State) -> Void) { state.withLock { body(&$0) } }

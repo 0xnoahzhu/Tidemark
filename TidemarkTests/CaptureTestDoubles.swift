@@ -142,7 +142,7 @@ final class CaptureFakeSurge: SurgeClient {
     let state = Mutex(State())
 
     init(cliPath: String = "/usr/bin/false") {
-        endpoint = SurgeEndpoint(cliPath: cliPath, remote: nil, password: nil)
+        endpoint = SurgeEndpoint(cliPath: cliPath)
     }
 
     func update(_ body: (inout State) -> Void) { state.withLock { body(&$0) } }
@@ -559,9 +559,6 @@ actor CaptureFakeDatabase: TidemarkDatabase {
         probeSessionsSaved.append(session)
     }
     func probeSessions(limit: Int) async throws -> [ProbeSession] { probeSessionsSaved }
-
-    func hostInsight(_ host: String, language: String) async throws -> HostInsight? { nil }
-    func saveHostInsight(_ insight: HostInsight) async throws {}
 
     func saveEgressSamples(_ samples: [EgressSample], deviceID: DeviceID) async throws { try check(); egressSamples = samples }
     func latestEgress(deviceID: DeviceID) async throws -> [EgressSample] { try check(); return egressSamples }

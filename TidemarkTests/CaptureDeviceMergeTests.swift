@@ -23,7 +23,7 @@ struct CaptureDeviceMergeTests {
 
     func makePipeline(_ database: CaptureFakeDatabase, device: DeviceID, directory: URL) -> CapturePipeline {
         CapturePipeline(
-            settings: CaptureSettings(deviceID: device, isRemote: false, batchRows: 200, batchInterval: 1, ownExecutablePath: nil),
+            settings: CaptureSettings(deviceID: device, batchRows: 200, batchInterval: 1, ownExecutablePath: nil),
             database: database, surge: CaptureFakeSurge(), processes: processes, classifier: CaptureFakeClassifier(), probes: ProbeRegistry(),
             spool: CaptureSpool(directory: directory, limit: 10_000), contactGrace: 0
         )
@@ -297,7 +297,7 @@ struct CaptureDeviceMergeTests {
 
         let database = CaptureFakeDatabase()
         let created = Date(timeIntervalSince1970: 1_750_000_000)
-        await database.setDevices([Device(id: earlier, name: "Office Mac", model: nil, shortName: "Office", hue: 65, isRemoteSurge: false,
+        await database.setDevices([Device(id: earlier, name: "Office Mac", model: nil, shortName: "Office", hue: 65,
                                           rowCount: 7, lastWriteAt: nil, createdAt: created)])
         let model = AppModel(preferences: preferences)
         model.database = database

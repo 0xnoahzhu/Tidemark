@@ -58,7 +58,7 @@ extension CapturePipeline {
     private func deviceMergesDue(now: Date) -> Bool {
         guard !deviceMergesStopped, let writingSince, now >= writingSince.addingTimeInterval(deviceMergeDelay),
               now >= deviceMergeRetryAt else { return false }
-        return !deviceMerges.isEmpty || (!settings.isRemote && now >= nextDeviceLookAt)
+        return !deviceMerges.isEmpty || now >= nextDeviceLookAt
     }
 
     /// The request is one of the current session's and this pipeline still holds it as active.
@@ -125,10 +125,10 @@ extension CapturePipeline {
 
     /// Looks for earlier IDs of this Mac when it is time (`devicesSharingHistory`: the Macs that recorded its Surge
     /// sessions or its processes), then merges every scheduled one, provided nothing wrote under it since this launch
-    /// first reached PostgreSQL. An ID something still writes under, or a remote Surge, is left alone until the next
-    /// launch. Requests a merge moved that earlier Surge sessions left active are closed like this Mac's own, by a
-    /// close scheduled for the next round; and since their sessions and processes may lead to further IDs, the next
-    /// round looks again.
+    /// first reached PostgreSQL. An ID something still writes under, or a remote Surge's row an earlier version stored,
+    /// is left alone until the next launch. Requests a merge moved that earlier Surge sessions left active are closed
+    /// like this Mac's own, by a close scheduled for the next round; and since their sessions and processes may lead
+    /// to further IDs, the next round looks again.
     ///
     /// A failure is retried later with a growing pause (`deviceMergeRetryAt`), and given up until the next launch once
     /// the server refused it `deviceMergeRefusalLimit` times in a row: a merge resumes where it stopped, and nothing
@@ -138,7 +138,7 @@ extension CapturePipeline {
         let device = settings.deviceID
         let idle = Duration.seconds(max(deviceMergeDelay, now.timeIntervalSince(writingSince ?? now)))
         do {
-            if !settings.isRemote, now >= nextDeviceLookAt {
+            if now >= nextDeviceLookAt {
                 let sessions = session > 0 ? [session] : []
                 let found = try await CaptureTimeout.unstructured(maintenanceBudget) {
                     try await database.devicesSharingHistory(with: device, sessions: sessions)

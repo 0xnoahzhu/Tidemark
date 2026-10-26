@@ -1,6 +1,7 @@
 import Foundation
 
-/// A Mac (or a remote Surge instance tagged by a Mac) writing to the shared database (row in `devices`).
+/// A Mac writing to the shared database (row in `devices`; rows earlier versions stored for a remote Surge are
+/// listed like Macs).
 struct Device: Identifiable, Hashable, Codable, Sendable {
     var id: DeviceID
     var name: String
@@ -10,7 +11,6 @@ struct Device: Identifiable, Hashable, Codable, Sendable {
     var shortName: String
     /// OKLCH hue used for the device dot and badge.
     var hue: Double
-    var isRemoteSurge: Bool
     var rowCount: Int64
     var lastWriteAt: Date?
     var createdAt: Date

@@ -72,9 +72,9 @@ enum ShellDemoData {
         let mini = UUID(uuidString: "00000000-0000-0000-0000-00000000000A")!
         let studio = UUID(uuidString: "00000000-0000-0000-0000-00000000000B")!
         model.devices.devices = [
-            Device(id: this, name: "MacBook Pro", model: "MacBook Pro · M3 Pro", shortName: "MBP", hue: 240, isRemoteSurge: false, rowCount: 1_284_093, lastWriteAt: now, createdAt: now.addingTimeInterval(-86400 * 40)),
-            Device(id: mini, name: "Mac mini (Office)", model: "Mac mini · M4", shortName: "mini", hue: 150, isRemoteSurge: false, rowCount: 3_918_442, lastWriteAt: now.addingTimeInterval(-2), createdAt: now.addingTimeInterval(-86400 * 90)),
-            Device(id: studio, name: "Mac Studio (Home)", model: "Mac Studio · M2 Max", shortName: "Std", hue: 65, isRemoteSurge: false, rowCount: 612_300, lastWriteAt: now.addingTimeInterval(-3 * 3600), createdAt: now.addingTimeInterval(-86400 * 120)),
+            Device(id: this, name: "MacBook Pro", model: "MacBook Pro · M3 Pro", shortName: "MBP", hue: 240, rowCount: 1_284_093, lastWriteAt: now, createdAt: now.addingTimeInterval(-86400 * 40)),
+            Device(id: mini, name: "Mac mini (Office)", model: "Mac mini · M4", shortName: "mini", hue: 150, rowCount: 3_918_442, lastWriteAt: now.addingTimeInterval(-2), createdAt: now.addingTimeInterval(-86400 * 90)),
+            Device(id: studio, name: "Mac Studio (Home)", model: "Mac Studio · M2 Max", shortName: "Std", hue: 65, rowCount: 612_300, lastWriteAt: now.addingTimeInterval(-3 * 3600), createdAt: now.addingTimeInterval(-86400 * 120)),
         ]
 
         let apps = [

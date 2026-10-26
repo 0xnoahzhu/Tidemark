@@ -10,8 +10,8 @@ extension CaptureEngine: CaptureActions {
         Task { await pipeline.setRecording(on) }
     }
 
-    /// Reconnects Surge and PostgreSQL with the current settings. A changed surge-cli path, remote controller
-    /// or remote password rebuilds the Surge client; a changed database URL rebuilds the PostgreSQL client.
+    /// Reconnects Surge and PostgreSQL with the current settings. A changed surge-cli path rebuilds the Surge
+    /// client; a changed database URL rebuilds the PostgreSQL client.
     func reconnect() {
         scheduleSurgeSettings(restartStream: true)
         applyDatabaseSettings(force: true)

@@ -20,7 +20,7 @@ struct CaptureAttributionTests {
 
     @Test func rollsUpThroughParentProcesses() {
         let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
-        var attributor = CaptureAttributor(isRemote: false)
+        var attributor = CaptureAttributor()
         attributor.setApps([cursor])
         let chain = attributor.chain(pid: 1288, processPath: "/usr/bin/git", startedAt: boot.addingTimeInterval(60), inspector: table)
         #expect(chain.map(\.name) == ["Cursor", "Cursor Helper (Plugin)", "node", "git"])
@@ -33,7 +33,7 @@ struct CaptureAttributionTests {
 
     @Test func appsWithoutChildrenOnlyMatchTheLeaf() {
         let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app", includeChildren: false)
-        var attributor = CaptureAttributor(isRemote: false)
+        var attributor = CaptureAttributor()
         attributor.setApps([cursor])
         let viaNode = attributor.chain(pid: 1201, processPath: "/usr/local/bin/node", startedAt: boot.addingTimeInterval(60), inspector: table)
         #expect(attributor.attribute(chain: viaNode, pathForStatistics: nil).appID == nil)
@@ -45,7 +45,7 @@ struct CaptureAttributionTests {
     @Test func prefersTheMostSpecificNestedBundle() {
         let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
         let helper = CaptureFixtures.app("Plugin Host", path: "/Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app")
-        var attributor = CaptureAttributor(isRemote: false)
+        var attributor = CaptureAttributor()
         attributor.setApps([cursor, helper])
         let chain = attributor.chain(pid: 851, processPath: nil, startedAt: boot.addingTimeInterval(60), inspector: table)
         #expect(attributor.attribute(chain: chain, pathForStatistics: nil).appID == helper.id)
@@ -54,21 +54,21 @@ struct CaptureAttributionTests {
     @Test func ignoresArchivedApps() {
         var cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
         cursor.archivedAt = .now
-        var attributor = CaptureAttributor(isRemote: false)
+        var attributor = CaptureAttributor()
         attributor.setApps([cursor])
         let chain = attributor.chain(pid: 851, processPath: nil, startedAt: boot.addingTimeInterval(60), inspector: table)
         #expect(attributor.attribute(chain: chain, pathForStatistics: "/Applications/Cursor.app/").appID == nil)
     }
 
     @Test func fallsBackWhenThePIDWasReused() {
-        var attributor = CaptureAttributor(isRemote: false)
+        var attributor = CaptureAttributor()
         // The request started before the live process with that PID did.
         let chain = attributor.chain(pid: 1288, processPath: "/usr/bin/curl", startedAt: boot, inspector: table)
         #expect(chain == [ProcessLink(name: "curl", pid: 1288, path: "/usr/bin/curl", startTime: nil)])
     }
 
     @Test func keepsTheChainOfAnExitedProcess() {
-        var attributor = CaptureAttributor(isRemote: false)
+        var attributor = CaptureAttributor()
         let first = attributor.chain(pid: 1201, processPath: "/usr/local/bin/node", startedAt: boot.addingTimeInterval(60), inspector: table)
         #expect(first.count == 3)
         // node exits; a later update of the same request still gets its cached ancestry.
@@ -77,24 +77,25 @@ struct CaptureAttributionTests {
         #expect(again == first)
     }
 
-    @Test func attributesRemoteSurgeByPathsOnly() {
+    @Test func attributesAProcessThatIsGoneBySurgesPaths() {
         let grok = CaptureFixtures.app("Grok Bot", path: "/Applications/Grok Bot.app")
-        var attributor = CaptureAttributor(isRemote: true)
+        var attributor = CaptureAttributor()
         attributor.setApps([grok])
-        // The local table must not be consulted for a remote Surge.
-        let chain = attributor.chain(pid: 851, processPath: "/usr/local/bin/node", startedAt: boot.addingTimeInterval(60), inspector: table)
+        // The process exited before Tidemark saw it: only Surge's paths are left.
+        let gone = CaptureFakeProcesses()
+        let chain = attributor.chain(pid: 851, processPath: "/usr/local/bin/node", startedAt: boot.addingTimeInterval(60), inspector: gone)
         #expect(chain.map(\.name) == ["node"])
         let byStats = attributor.attribute(chain: chain, pathForStatistics: "/Applications/Grok Bot.app/")
         #expect(byStats.appID == grok.id)
         #expect(byStats.bundlePath == "/Applications/Grok Bot.app")
 
-        let leaf = attributor.chain(pid: 9, processPath: "/Applications/Grok Bot.app/Contents/MacOS/Grok Bot", startedAt: .now, inspector: table)
+        let leaf = attributor.chain(pid: 9, processPath: "/Applications/Grok Bot.app/Contents/MacOS/Grok Bot", startedAt: .now, inspector: gone)
         #expect(attributor.attribute(chain: leaf, pathForStatistics: nil).appID == grok.id)
     }
 
     @Test func followsAProcessThatExecsAnotherBinary() {
         let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app", includeChildren: false)
-        var attributor = CaptureAttributor(isRemote: false)
+        var attributor = CaptureAttributor()
         attributor.setApps([cursor])
         let start = boot.addingTimeInterval(2)
         let wrapper = CaptureFakeProcesses([LiveProcess(pid: 1201, parentPID: 1, name: "sh", path: "/bin/sh", startTime: start)])
@@ -134,7 +135,7 @@ struct CaptureAttributionTests {
 
     @Test func bumpsTheVersionOnlyWhenAppsChange() {
         let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
-        var attributor = CaptureAttributor(isRemote: false)
+        var attributor = CaptureAttributor()
         attributor.setApps([cursor])
         let version = attributor.appsVersion
         attributor.setApps([cursor])
