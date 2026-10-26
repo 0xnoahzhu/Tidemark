@@ -671,10 +671,59 @@ struct RequestsHistoryModelTests {
         #expect(history.histogramError == nil)
     }
 
+    /// History shown again with the same filters keeps the results it has instead of querying PostgreSQL again;
+    /// other filters, a failed histogram and `load` itself query.
+    @Test func showsKeptResultsWithoutQueryingAgain() async {
+        let rows = (0..<50).map { F.record(id: Int64($0)) }
+        let queries = RequestsQueryCounter()
+        let database = RequestsStubDatabase(
+            query: { query in
+                await queries.add()
+                return try await ShellDemoDatabase(rows: rows).queryRequests(query)
+            },
+            buckets: { query, buckets in try await ShellDemoDatabase(rows: rows).histogram(query, buckets: buckets) }
+        )
+        let history = RequestsHistoryModel()
+        var query = RequestQuery()
+        query.range = .all
+
+        await history.show(query, database: database)
+        await history.show(query, database: database)
+        #expect(await queries.count == 1)
+        #expect(history.rows.count == 50)
+        #expect(history.histogram != nil)
+
+        query.status = .failed
+        await history.show(query, database: database)
+        #expect(await queries.count == 2)
+        await history.load(query, database: database)
+        #expect(await queries.count == 3)
+
+        // Results whose histogram failed are not kept.
+        let chartless = RequestsStubDatabase(
+            query: { query in
+                await queries.add()
+                return try await ShellDemoDatabase(rows: rows).queryRequests(query)
+            },
+            buckets: { _, _ in throw DatabaseError.unreachable("Query timed out") }
+        )
+        await history.load(query, database: chartless)
+        #expect(history.histogramError != nil)
+        await history.show(query, database: chartless)
+        #expect(await queries.count == 5)
+    }
+
     @Test func labelsQueryTime() {
         #expect(RequestsHistoryLabels.milliseconds(.milliseconds(38)) == "38 ms")
         #expect(RequestsHistoryLabels.milliseconds(.seconds(1.5)) == "1500 ms")
     }
+}
+
+/// Counts the stub database's page queries.
+private actor RequestsQueryCounter {
+    private(set) var count = 0
+
+    func add() { count += 1 }
 }
 
 /// Holds the stub database's queries until the test opens it, and counts queries that were cancelled.

@@ -15,6 +15,8 @@ final class AppModel {
     let nav: Navigation
     /// The Domains & IPs page's lists, kept between visits.
     let inventory: InventoryCache
+    /// The Requests page's History results, kept while the page is not shown.
+    let requestsHistory = RequestsHistoryModel()
 
     // Services. Replaced by the real implementations in `AppBootstrap`.
     @ObservationIgnored var database: any TidemarkDatabase

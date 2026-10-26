@@ -8,6 +8,18 @@ struct RequestsHistoryView: View {
 
     /// Search text of the last query that ran; a change of only the search is debounced.
     @State private var lastSearch: String?
+    /// False while the table is built empty, until its first layout.
+    @State private var showsRows: Bool
+
+    /// `buildsTableEmpty` builds the table without rows and gives it the rows already loaded right after its first
+    /// layout, as when they arrive from PostgreSQL. A table built with its rows keeps every column at its ideal width
+    /// even where they add up to more than the table's width, while one laid out empty first shares that width out.
+    /// `RequestsView` builds the first History after the page opens empty and the ones the Live / History switch
+    /// brings back with their rows, so each keeps the columns it has always had.
+    init(history: RequestsHistoryModel, buildsTableEmpty: Bool) {
+        self.history = history
+        _showsRows = State(initialValue: !buildsTableEmpty)
+    }
 
     var body: some View {
         let nav = model.nav
@@ -44,11 +56,17 @@ struct RequestsHistoryView: View {
             Divider()
 
             // As in the design, History rows are not selectable: the inspector belongs to the live table.
-            RequestsTable(model: model, rows: history.rows, timeStyle: .dayClock, now: nil, showsHostBadges: false) {
+            RequestsTable(model: model, rows: showsRows ? history.rows : [], timeStyle: .dayClock, now: nil, showsHostBadges: false) {
                 Task { await history.loadMore(database: model.database) }
             }
             .scrollEdgeEffectStyle(.hard, for: .top)
             .overlay { RequestsHistoryOverlay(history: history, search: key.search) }
+        }
+        .task {
+            guard !showsRows else { return }
+            // The update that built the table lays it out before this resumes.
+            await Task.yield()
+            showsRows = true
         }
         .task(id: key) {
             if let lastSearch, lastSearch != key.search {
@@ -56,10 +74,10 @@ struct RequestsHistoryView: View {
                 guard !Task.isCancelled else { return }
             }
             lastSearch = key.search
-            await history.load(key.query, database: model.database)
+            await history.show(key.query, database: model.database)
         }
         .task(id: nav.history.range) {
-            await history.loadPolicies(since: nav.history.range.lowerBound(), database: model.database)
+            await history.loadPolicies(for: nav.history.range, database: model.database)
         }
         .task(id: history.nextPageFailures) {
             // A next page that failed is asked for again after a pause that grows with each failure, even

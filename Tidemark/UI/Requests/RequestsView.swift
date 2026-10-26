@@ -3,7 +3,8 @@ import SwiftUI
 /// Requests page: the live table with its inspector, and the stored history (which has no inspector).
 struct RequestsView: View {
     @Environment(AppModel.self) private var model
-    @State private var history = RequestsHistoryModel()
+    /// History has been shown since the page opened (see `RequestsHistoryView.init`).
+    @State private var historyShown = false
 
     var body: some View {
         @Bindable var nav = model.nav
@@ -11,7 +12,8 @@ struct RequestsView: View {
             if nav.requestsLive {
                 RequestsLiveView()
             } else {
-                RequestsHistoryView(history: history)
+                RequestsHistoryView(history: model.requestsHistory, buildsTableEmpty: !historyShown)
+                    .onAppear { historyShown = true }
             }
         }
         .inspector(isPresented: Binding(

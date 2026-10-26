@@ -6,12 +6,17 @@ import Observation
 /// The page and the histogram load side by side and land on their own: over a long history the histogram
 /// can take far longer than the page, so the rows never wait for it, and a histogram that fails leaves the
 /// rows in place. A page that fails takes the chart with it.
+///
+/// `AppModel` owns it rather than the page, so when the sidebar or the Live / History switch brings History back
+/// within `reuseInterval`, it shows its last results at once (`show`) instead of querying PostgreSQL again.
 @MainActor
 @Observable
 final class RequestsHistoryModel {
     /// Rows fetched per page (scrolling to the end of the table appends the next page).
     static let pageSize = 500
     static let histogramBuckets = 48
+    /// How long results that loaded in full are shown again for the same filters before they are queried again.
+    static let reuseInterval: Duration = .seconds(60)
 
     private(set) var rows: [RequestRecord] = []
     private(set) var totalCount: Int64 = 0
@@ -39,6 +44,11 @@ final class RequestsHistoryModel {
     @ObservationIgnored private var generation = 0
     /// The latest load's queries; a newer load cancels them.
     @ObservationIgnored private var loading: Task<Void, Never>?
+    /// When the current query's page and histogram both arrived; nil while it loads, and when either failed or
+    /// was cancelled.
+    @ObservationIgnored private var completedAt: ContinuousClock.Instant?
+    /// The range `policies` belong to, and when they arrived.
+    @ObservationIgnored private var policiesLoaded: (range: HistoryRange, at: ContinuousClock.Instant)?
 
     var canLoadMore: Bool { Int64(rows.count) < totalCount && !isLoadingMore && failure == nil }
 
@@ -46,6 +56,13 @@ final class RequestsHistoryModel {
     var errorMessage: String? { failure.map { CaptureEngine.message(for: $0) } }
     /// `histogramFailure` in the UI language.
     var histogramError: String? { histogramFailure.map { CaptureEngine.message(for: $0) } }
+
+    /// Shows the results of `query`: the ones already here when they are for the same filters, loaded in full
+    /// and younger than `reuseInterval`, otherwise the ones `load` queries.
+    func show(_ query: RequestQuery, database: any TidemarkDatabase) async {
+        if let completedAt, sameFilter(query, self.query), ContinuousClock.now - completedAt < Self.reuseInterval { return }
+        await load(query, database: database)
+    }
 
     /// Runs `query` from the first page and refreshes the histogram. The rows and total appear as soon as
     /// the page arrives and the histogram follows when it is ready. A newer load cancels this one, so a
@@ -56,6 +73,7 @@ final class RequestsHistoryModel {
         first.offset = 0
         self.query = first
         nextPageFailures = 0
+        completedAt = nil
         generation &+= 1
         let generation = generation
         isLoading = true
@@ -93,10 +111,13 @@ final class RequestsHistoryModel {
         }
     }
 
-    /// Final policies seen in the selected range, for the policy filter menu.
-    func loadPolicies(since: Date?, database: any TidemarkDatabase) async {
-        if let list = try? await database.distinctPolicies(since: since), !Task.isCancelled {
+    /// Final policies seen in `range`, for the policy filter menu. The list already here is kept when it is for
+    /// the same range and younger than `reuseInterval`.
+    func loadPolicies(for range: HistoryRange, database: any TidemarkDatabase) async {
+        if let loaded = policiesLoaded, loaded.range == range, ContinuousClock.now - loaded.at < Self.reuseInterval { return }
+        if let list = try? await database.distinctPolicies(since: range.lowerBound()), !Task.isCancelled {
             policies = list.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            policiesLoaded = (range, .now)
         }
     }
 
@@ -112,15 +133,20 @@ final class RequestsHistoryModel {
     /// this is still the latest load.
     private func fetch(_ query: RequestQuery, generation: Int, database: any TidemarkDatabase) async {
         let buckets = Self.histogramBuckets
+        var arrived = (page: false, histogram: false)
         await withTaskGroup(of: Part.self) { group in
             group.addTask { .page(await Self.result { try await database.queryRequests(query) }) }
             group.addTask { .histogram(await Self.result { try await database.histogram(query, buckets: buckets) }) }
             for await part in group where generation == self.generation && !Task.isCancelled {
                 apply(part)
-                // A failed page stands for the whole query: its histogram is no longer wanted.
-                if case .page(.failure) = part {
+                switch part {
+                case .page(.success): arrived.page = true
+                case .histogram(.success): arrived.histogram = true
+                case .histogram(.failure): break
+                case .page(.failure):
+                    // A failed page stands for the whole query: its histogram is no longer wanted.
                     group.cancelAll()
-                    break
+                    return
                 }
             }
         }
@@ -128,6 +154,7 @@ final class RequestsHistoryModel {
         if generation == self.generation {
             isLoading = false
             isLoadingHistogram = false
+            if arrived.page, arrived.histogram, !Task.isCancelled { completedAt = .now }
         }
     }
 
