@@ -417,6 +417,51 @@ struct RequestsTableRowHeightTests {
     }
 }
 
+/// The live table follows the stream at most twice a second, but opens with the stream's rows in its first pass
+/// (never empty first) and applies the filter to the rows it shows.
+@MainActor
+struct RequestsLiveViewTests {
+    typealias F = UIMainFixtures
+
+    @Test func opensWithTheStreamAndFollowsIt() async throws {
+        let defaults = TestDefaults()
+        let model = AppModel(preferences: Preferences(defaults: defaults.make()))
+        let start = Date.now.addingTimeInterval(-60)
+        model.live.rows = (1...40).reversed().map { F.record(id: Int64($0), host: "host\($0).example.com", startedAt: start.addingTimeInterval(Double($0))) }
+        let host = NSHostingView(rootView: RequestsLiveView().environment(model).environment(Localizer.shared))
+        // Never ordered in: the table updates and lays out off screen.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 500), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+
+        try await Self.waitUntil { host.layoutSubtreeIfNeeded(); return Self.table(in: host) != nil }
+        let table = try #require(Self.table(in: host))
+        #expect(table.numberOfRows == 40, "the first pass shows the stream")
+
+        model.live.upsert([F.record(id: 41, host: "host41.example.com", startedAt: .now)])
+        try await Self.waitUntil { host.layoutSubtreeIfNeeded(); return table.numberOfRows == 41 }
+        #expect(table.numberOfRows == 41)
+
+        // host1, host10…host19
+        model.nav.requestSearch = "host1"
+        try await Self.waitUntil { host.layoutSubtreeIfNeeded(); return table.numberOfRows == 11 }
+        #expect(table.numberOfRows == 11)
+    }
+
+    private static func table(in view: NSView) -> NSTableView? {
+        if let table = view as? NSTableView { return table }
+        return view.subviews.lazy.compactMap { table(in: $0) }.first
+    }
+
+    private static func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+        for _ in 0..<250 where !condition() {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+}
+
 @MainActor
 struct RequestsHistoryModelTests {
     typealias F = UIMainFixtures
