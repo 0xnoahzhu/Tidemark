@@ -25,6 +25,7 @@ struct SettingsGeneralPane: View {
                     Toggle(tr("Open at login", "Settings"), isOn: loginBinding)
                         .toggleStyle(.switch)
                         .labelsHidden()
+                        .controlSize(SettingsLayout.controlSize)
                 }
             }
         }
@@ -36,25 +37,26 @@ struct SettingsGeneralPane: View {
 
     // MARK: Header
 
+    /// The icon takes the design's 56 px box, its tile about 45 px inside the margin the asset keeps, as the design's
+    /// icon does; the name and version stack at the window's line height.
     private var brandHeader: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 12.px) {
             Image("BrandIcon")
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 56, height: 56)
-                .padding(-4)
+                .frame(width: 56.px, height: 56.px)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: "Tidemark")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.design(15, .bold))
                     .foregroundStyle(Theme.ink)
                 Text(trf("Version %@ · keeps every Surge request in PostgreSQL", "Settings", Self.version))
-                    .font(.system(size: 11.5))
+                    .font(.design(11.5))
                     .foregroundStyle(Theme.ink2)
             }
         }
-        .padding(.top, 2)
-        .padding(.bottom, 4)
+        .padding(.top, 2.px)
+        .padding(.bottom, 4.px)
     }
 
     static var version: String {
@@ -77,19 +79,20 @@ struct SettingsGeneralPane: View {
         ])
     }
 
-    /// A plain 150 pt track between the two end labels, as in the design (no tick marks).
+    /// A plain 150 px track between the two end labels, as in the design (no tick marks).
     private var glassSlider: some View {
         @Bindable var preferences = model.preferences
-        return HStack(spacing: 8) {
+        return HStack(spacing: 8.px) {
             Text(tr("Clear", "Settings"))
             Slider(value: $preferences.glass, in: 0...100) {
                 Text(tr("Liquid Glass", "Settings"))
             }
             .labelsHidden()
-            .frame(width: 150)
+            .controlSize(SettingsLayout.controlSize)
+            .frame(width: 150.px)
             Text(tr("Tinted", "Settings"))
         }
-        .font(.system(size: 11))
+        .font(.design(11))
         .foregroundStyle(Theme.ink2)
         .fixedSize()
     }

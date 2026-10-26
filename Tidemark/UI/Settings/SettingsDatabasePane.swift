@@ -40,10 +40,12 @@ struct SettingsDatabasePane: View {
             .autocorrectionDisabled()
             .onSubmit(testConnection)
             .settingsField()
-            HStack(spacing: 8) {
+            HStack(spacing: 8.px) {
                 connectionStatus
-                Spacer(minLength: 8)
+                Spacer(minLength: 8.px)
                 Button(tr("Test Connection", "Settings"), action: testConnection)
+                    .buttonStyle(DesignButtonStyle(height: 26, cornerRadius: 7, horizontalPadding: 10))
+                    .fixedSize()
                     .disabled(testing)
             }
         }
@@ -95,15 +97,15 @@ struct SettingsDatabasePane: View {
                     }
                     if sortedDevices.isEmpty {
                         Text(tr("No Mac has written to this database yet.", "Settings"))
-                            .font(.system(size: 12))
+                            .font(.design(12))
                             .foregroundStyle(Theme.ink2)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 9)
+                            .padding(.horizontal, 14.px)
+                            .padding(.vertical, 9.px)
                     }
                 }
             }
-            HStack(spacing: 8) {
+            HStack(spacing: 8.px) {
                 Text(tr("Name this Mac", "Settings"))
                     .foregroundStyle(Theme.ink2)
                     .fixedSize()
@@ -115,7 +117,7 @@ struct SettingsDatabasePane: View {
                 .onSubmit(renameThisMac)
                 .settingsField(height: 26, cornerRadius: 7, padding: 9)
             }
-            .font(.system(size: 12))
+            .font(.design(12))
             SettingsNote(text: tr("Every row is tagged with the Mac it came from, so several Macs can share one database. Each Mac records and alerts on its own apps. Use the Mac menu at the top of the sidebar to look at one Mac's data.", "Settings"))
         }
     }
@@ -137,14 +139,7 @@ struct SettingsDatabasePane: View {
     private var writingCard: some View {
         SettingsCard {
             SettingsRow(title: tr("Write in batches", "Settings"), note: SettingsDatabaseFormat.batchNote(model.preferences.batchPreset)) {
-                Picker(tr("Write in batches", "Settings"), selection: batchBinding) {
-                    ForEach(batchOptions, id: \.self) { preset in
-                        Text(SettingsDatabaseFormat.batchLabel(preset)).tag(preset)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .fixedSize()
+                SettingsBatchMenu(selection: batchBinding, options: batchOptions)
             }
             SettingsRow(title: tr("If the database is unreachable", "Settings"),
                         note: trf("Buffer up to %@ rows on disk and replay them on reconnect", "Settings", Fmt.count(model.preferences.spoolLimit))) {
@@ -155,9 +150,9 @@ struct SettingsDatabasePane: View {
             }
             SettingsRow(title: tr("Tables", "Settings"),
                         note: tables.isEmpty ? tr("Not connected", "Settings") : tables.joined(separator: " · "),
-                        noteFont: tables.isEmpty ? .system(size: 11) : Theme.mono(11)) {
+                        noteFont: tables.isEmpty ? .design(11) : Theme.mono(11)) {
                 Text(schemaVersion.map { trf("schema v%lld", "Settings", $0) } ?? "—")
-                    .font(.system(size: 11))
+                    .font(.design(11))
                     .foregroundStyle(Theme.ink2)
             }
         }
@@ -237,32 +232,33 @@ private struct SettingsDeviceRow: View {
     var now: Date
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 10.px) {
             Circle()
                 .fill(Theme.deviceColor(hue: device.hue))
-                .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
+                .frame(width: 8.px, height: 8.px)
+            // The name and the subtitle stack at the window's line height, as in the design.
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6.px) {
                     Text(device.name)
-                        .font(.system(size: 12.5))
+                        .font(.design(12.5))
                         .lineLimit(1)
                     if isThisMac {
                         TagBadge(text: tr("This Mac", "Settings"), style: .accent)
                     }
                 }
                 Text(subtitle)
-                    .font(.system(size: 11))
+                    .font(.design(11))
                     .foregroundStyle(Theme.ink2)
                     .lineLimit(1)
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 8.px)
             Text(activity.text)
-                .font(.system(size: 11))
+                .font(.design(11))
                 .foregroundStyle(activity.online ? Color(oklch: 0.55, 0.13, 150) : Theme.ink3)
                 .monospacedDigit()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 14.px)
+        .padding(.vertical, 9.px)
     }
 
     private var subtitle: String {
@@ -278,6 +274,47 @@ private struct SettingsDeviceRow: View {
         case .offline(let hours): (trf("Offline · last write %lld h ago", "Settings", hours), false)
         case .never: (tr("No writes yet", "Settings"), false)
         }
+    }
+}
+
+/// "Write in batches" as the design's chip, `200 · 1 s ▾` on the fill, 24 px tall and hugging its choice, with the
+/// presets in its menu.
+private struct SettingsBatchMenu: View {
+    @Binding var selection: Preferences.BatchPreset
+    var options: [Preferences.BatchPreset]
+
+    var body: some View {
+        let title = tr("Write in batches", "Settings")
+        let label = SettingsDatabaseFormat.batchLabel(selection)
+        let shape = RoundedRectangle(cornerRadius: 6.px, style: .continuous)
+        Menu {
+            Picker(title, selection: $selection) {
+                ForEach(options, id: \.self) { preset in
+                    Text(SettingsDatabaseFormat.batchLabel(preset)).tag(preset)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            HStack(spacing: 4.px) {
+                Text(label)
+                Text(verbatim: "▾")
+                    .foregroundStyle(Theme.ink2)
+            }
+            .font(.design(12))
+            .foregroundStyle(Theme.ink)
+            .lineLimit(1)
+            .padding(.horizontal, 9.px)
+            .frame(height: 24.px)
+            .background(Theme.fill, in: shape)
+            .contentShape(shape)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel(title)
+        .accessibilityValue(label)
     }
 }
 

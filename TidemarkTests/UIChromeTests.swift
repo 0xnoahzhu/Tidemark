@@ -170,11 +170,12 @@ struct UIChromeTests {
 
     // MARK: Settings chrome
 
-    /// 660 × 590 with the toolbar, as in the design: the panes leave room for the toolbar a preference-style
-    /// window with labelled 32 pt tab icons has (measured on a window that is never shown).
+    /// 660 × 590 px with the toolbar, as in the design: the panes, at the UI scale, leave the design's 88 px for the
+    /// toolbar a preference-style window with labelled 32 pt tab icons has, which is that tall at every factor
+    /// (measured on a window that is never shown).
     @Test func settingsWindowMatchesTheDesignSize() {
-        #expect(SettingsLayout.width == 660)
-        #expect(SettingsLayout.paneHeight + SettingsLayout.toolbarHeight == 590)
+        #expect(SettingsLayout.width == 660.px)
+        #expect(SettingsLayout.paneHeight == 502.px)
 
         @MainActor final class Tabs: NSObject, NSToolbarDelegate {
             let ids = SettingsTab.allCases.map { NSToolbarItem.Identifier(String(describing: $0)) }

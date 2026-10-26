@@ -14,7 +14,7 @@ struct SettingsSurgePane: View {
     var body: some View {
         SettingsPage {
             SettingsGroup(title: tr("surge-cli location", "Settings")) {
-                HStack(spacing: 8) {
+                HStack(spacing: 8.px) {
                     Text(model.preferences.surgeCLIPath)
                         .font(Theme.mono(11.5))
                         .lineLimit(1)
@@ -22,8 +22,10 @@ struct SettingsSurgePane: View {
                         .textSelection(.enabled)
                         .help(model.preferences.surgeCLIPath)
                         .settingsField()
+                    // As tall as the field beside it.
                     Button(tr("Choose…", "Settings"), action: chooseCLI)
-                        .controlSize(.large)
+                        .buttonStyle(DesignButtonStyle(height: 30))
+                        .fixedSize()
                 }
                 status
             }
@@ -33,10 +35,10 @@ struct SettingsSurgePane: View {
                     .font(Theme.mono(12))
                     .foregroundStyle(Color(oklch: 0.88, 0.08, 165))
                     .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12.px)
+                    .padding(.vertical, 10.px)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(oklch: 0.2, 0.01, 250), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .background(Color(oklch: 0.2, 0.01, 250), in: RoundedRectangle(cornerRadius: 9.px, style: .continuous))
                 SettingsNote(text: tr("Each event arrives as one line of JSON. Tidemark reads the process, its parent, host, remote IP, policy and rule, then writes the row. If the stream drops, it reconnects and carries on.", "Settings"))
             }
         }

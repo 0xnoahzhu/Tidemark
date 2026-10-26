@@ -42,14 +42,18 @@ struct SettingsView: View {
 
 // MARK: - Shared pieces
 
-/// The design's 660 × 590 window, toolbar included, whatever the tab; a pane's content scrolls past it.
+/// The design's 660 × 590 px window, toolbar included, whatever the tab; a pane's content scrolls past it. The panes
+/// grow with the UI scale under the system's toolbar, which keeps its height.
 enum SettingsLayout {
-    static let width: CGFloat = 660
-    static let height: CGFloat = 590
-    /// Title bar and tab toolbar of a preference-style window (32 pt icons with labels) on macOS 27.
+    static let width = 660.px
+    /// Title bar and tab toolbar of a preference-style window (32 pt icons with labels) on macOS 27, in points at
+    /// every factor.
     static let toolbarHeight: CGFloat = 88
-    /// What the window leaves a pane.
-    static var paneHeight: CGFloat { height - toolbarHeight }
+    /// What the window leaves a pane: the design's 590 px less the toolbar's 88.
+    static let paneHeight = 502.px
+    /// The size of the panes' native controls (the switch and the slider): the system's regular size, a step larger
+    /// from a factor of 1.2, where the scaled text beside them would outgrow it.
+    static let controlSize: ControlSize = UIScale.factor >= 1.2 ? .large : .regular
 }
 
 /// The Settings window's glass, as in the design: the glass color at `max(.72, .16 + .76·g)` over a blur of
@@ -171,15 +175,15 @@ enum SettingsTabIcon {
     }
 }
 
-/// A pane laid out as in the design: 18 pt above, 26 pt at the sides, 24 pt below, groups 16 pt apart. Every
+/// A pane laid out as in the design: 18 px above, 26 px at the sides, 24 px below, groups 16 px apart. Every
 /// pane is `SettingsLayout.paneHeight` tall, so the window keeps its size between tabs, and scrolls beyond.
 struct SettingsPage<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) { content }
-                .padding(EdgeInsets(top: 18, leading: 26, bottom: 24, trailing: 26))
+            VStack(alignment: .leading, spacing: 16.px) { content }
+                .padding(EdgeInsets(top: 18.px, leading: 26.px, bottom: 24.px, trailing: 26.px))
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollBounceBehavior(.basedOnSize)
@@ -187,15 +191,15 @@ struct SettingsPage<Content: View>: View {
     }
 }
 
-/// A heading (`surge-cli location`, 12 pt semibold) over its content, 7 pt apart.
+/// A heading (`surge-cli location`, 12 px semibold) over its content, 7 px apart.
 struct SettingsGroup<Content: View>: View {
     var title: String
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 7.px) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.design(12, .semibold))
                 .foregroundStyle(Theme.ink)
             content
         }
@@ -203,7 +207,7 @@ struct SettingsGroup<Content: View>: View {
     }
 }
 
-/// White card with 10 pt corners and a hairline border; its rows are separated by hairlines.
+/// White card with 10 px corners and a hairline border; its rows are separated by hairlines.
 struct SettingsCard<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -222,25 +226,26 @@ struct SettingsCard<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 10.px, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10.px, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
     }
 }
 
-/// A card row: the title (12.5 pt) and an optional note (11 pt, secondary) on the left, the control on the right.
+/// A card row: the title (12.5 px) and an optional note (11 px, secondary) on the left, the control on the right.
+/// The two lines stack at the window's line height with nothing between them, as in the design.
 struct SettingsRow<Control: View>: View {
     var title: String
     var note: String?
-    var noteFont: Font = .system(size: 11)
-    /// 9 pt in General's cards, 10 pt in the others.
+    var noteFont: Font = .design(11)
+    /// In design px: 9 in General's cards, 10 in the others.
     var verticalPadding: CGFloat = 10
     @ViewBuilder var control: Control
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 1) {
+        HStack(spacing: 12.px) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(title)
-                    .font(.system(size: 12.5))
+                    .font(.design(12.5))
                     .foregroundStyle(Theme.ink)
                 if let note {
                     Text(note)
@@ -252,19 +257,19 @@ struct SettingsRow<Control: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             control
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, verticalPadding)
+        .padding(.horizontal, 14.px)
+        .padding(.vertical, verticalPadding.px)
     }
 }
 
 extension View {
-    /// The design's text field box: card background, hairline inner border, rounded corners.
+    /// The design's text field box: card background, hairline inner border, rounded corners. Sizes are in design px.
     func settingsField(height: CGFloat = 30, cornerRadius: CGFloat = 8, padding: CGFloat = 10) -> some View {
         self
-            .padding(.horizontal, padding)
-            .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
+            .padding(.horizontal, padding.px)
+            .frame(maxWidth: .infinity, minHeight: height.px, maxHeight: height.px, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: cornerRadius.px, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius.px, style: .continuous).strokeBorder(Theme.line, lineWidth: 0.5))
     }
 }
 
@@ -276,15 +281,15 @@ struct SettingsStatusLine: View {
     var text: String
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .firstTextBaseline, spacing: 8.px) {
             StatusDot(color: color, size: 7.px, pulsing: tone == .pending)
-                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1.px }
             Text(text)
                 .foregroundStyle(tone == .failed ? Theme.failed : Theme.ink2)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: 12))
+        .font(.design(12))
     }
 
     private var color: Color {
@@ -297,15 +302,16 @@ struct SettingsStatusLine: View {
     }
 }
 
-/// Secondary explanation under a group (`Every row is tagged with the Mac it came from…`).
+/// Secondary explanation under a group (`Every row is tagged with the Mac it came from…`), at the notes' line
+/// height.
 struct SettingsNote: View {
     var text: String
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11.5))
+            .font(.design(11.5))
             .foregroundStyle(Theme.ink2)
-            .lineSpacing(2)
+            .lineHeight(Theme.noteLineHeight)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
