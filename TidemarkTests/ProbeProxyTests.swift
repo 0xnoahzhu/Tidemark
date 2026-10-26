@@ -107,9 +107,9 @@ final class ProbeTestClient: Sendable {
     /// connection between them: Network picks the source port without regard to it, and retries every few seconds.
     var waitedOnAPortClash: Bool { clashed.withLock { $0 } }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, endOfStream: Bool = false) async throws {
         let connection = self.connection
-        try await noting { try await connection.send(Data(text.utf8)) }
+        try await noting { try await connection.send(Data(text.utf8), endOfStream: endOfStream) }
     }
 
     /// Reads until `marker` arrived or the stream ended.
@@ -457,6 +457,51 @@ struct ProbeProxyTests {
             pump.cancel()
             await pump.value
         }
+    }
+
+    /// A browser that resets its tunnel ends it: Surge's side closes at once, not when Surge or the probe ends it.
+    @Test func closesSurgesSideWhenTheBrowserResets() async throws {
+        let upstream = ProbeFakeUpstream()
+        let upstreamPort = try await upstream.start()
+        defer { upstream.stop() }
+        let registry = ProbeRegistry()
+        registry.begin(sessionID: UUID(), startedAt: .now)
+        let proxy = ProbeProxyServer(upstreamPort: upstreamPort, registry: registry)
+        let port = try await proxy.start()
+        defer { proxy.stop() }
+
+        // `NWConnection.forceCancel()` resets a TCP connection.
+        let browser = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        browser.start(queue: .global())
+        browser.send(content: Data("CONNECT reset.test:443 HTTP/1.1\r\n\r\n".utf8), completion: .idempotent)
+        let established = await withCheckedContinuation { continuation in
+            browser.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, _, _ in
+                continuation.resume(returning: String(decoding: data ?? Data(), as: UTF8.self))
+            }
+        }
+        #expect(established.hasPrefix("HTTP/1.1 200"))
+        #expect(upstream.openConnections == 1)
+        browser.forceCancel()
+        #expect(await Self.eventually(.seconds(2)) { upstream.openConnections == 0 })
+    }
+
+    /// A browser that half-closes its tunnel still gets the rest of Surge's answer.
+    @Test func passesOnAHalfCloseAndKeepsTheOtherDirection() async throws {
+        let upstream = ProbeFakeUpstream()
+        let upstreamPort = try await upstream.start()
+        defer { upstream.stop() }
+        let registry = ProbeRegistry()
+        registry.begin(sessionID: UUID(), startedAt: .now)
+        let proxy = ProbeProxyServer(upstreamPort: upstreamPort, registry: registry)
+        let port = try await proxy.start()
+        defer { proxy.stop() }
+
+        let client = ProbeTestClient(port: port)
+        try await client.send("CONNECT half.test:443 HTTP/1.1\r\n\r\n")
+        #expect(try await client.read(until: "\r\n\r\n").hasPrefix("HTTP/1.1 200"))
+        try await client.send("last words", endOfStream: true)
+        // The fake echoes until the end of stream, then ends its own side.
+        #expect(try await client.read(until: "never sent") == "last words")
     }
 
     /// Polls `condition` until it holds or the timeout passes.

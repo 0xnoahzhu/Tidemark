@@ -194,7 +194,10 @@ final class ProbeProxyServer: Sendable {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 group.addTask { try await Self.pipe(from: client, to: upstream, host: host, registry: registry) }
                 group.addTask { try await Self.pipe(from: upstream, to: client, host: host, registry: registry) }
-                try await group.waitForAll()
+                // A pipe that ended with an end of stream has passed it on, and the other direction goes on.
+                // One that failed (a reset browser, say) ends the tunnel: the throw cancels the other pipe,
+                // whose pending operation closes its connection.
+                while try await group.next() != nil {}
             }
         } catch {
             // The browser or Surge failed the connection, or the proxy stopped; a pipe may have been cancelled.
