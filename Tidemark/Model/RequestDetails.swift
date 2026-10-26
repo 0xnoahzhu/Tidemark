@@ -82,6 +82,13 @@ struct DNSAnswer: Hashable, Codable, Sendable {
     var expiresAt: Date?
     /// Tidemark's own `dns lookup` caused it.
     var byTidemark: Bool = false
+
+    /// How long an answer with no known expiry (no `dump dns` read completed it) is taken to hold: Tidemark's longest
+    /// TTL for its own lookups.
+    static let lifeWithoutExpiry: TimeInterval = 3_600
+    /// How long any answer is taken to hold at most (Surge's cache keeps some for hours); it bounds the search for a
+    /// request's answer.
+    static let longestLife: TimeInterval = 86_400
 }
 
 extension RequestRecord {
@@ -91,6 +98,15 @@ extension RequestRecord {
     var dnsAnswerMoment: Date {
         let resolved = remoteIPResolvedAt.map { min(max($0, startedAt), startedAt.addingTimeInterval(60)) } ?? startedAt
         return resolved.addingTimeInterval(1)
+    }
+
+    /// Whether `answer` (for its host, on its Mac) can be the one the request's address came from: resolved by
+    /// `dnsAnswerMoment` and still holding when the request started, so not expired by then, or, with no known expiry,
+    /// resolved within `DNSAnswer.lifeWithoutExpiry` before. The request's answer is the latest that can.
+    func mayHaveUsed(_ answer: DNSAnswer) -> Bool {
+        guard answer.resolvedAt <= dnsAnswerMoment, answer.resolvedAt >= startedAt.addingTimeInterval(-DNSAnswer.longestLife) else { return false }
+        guard let expires = answer.expiresAt else { return answer.resolvedAt >= startedAt.addingTimeInterval(-DNSAnswer.lifeWithoutExpiry) }
+        return expires >= startedAt
     }
 }
 
@@ -121,7 +137,7 @@ struct RequestRelatedRecords: Hashable, Sendable {
     var egressCheck: EgressSample?
     /// The latest change of the current egress at or before its start.
     var egressChange: EgressChange?
-    /// The latest DNS answer for its host at or before the moment it needed one.
+    /// The latest DNS answer for its host at or before the moment it needed one that still held at its start.
     var dnsAnswer: DNSAnswer?
     /// Errors its proxy reported for its host within a second of its end.
     var proxyErrors: [ProxyNodeError] = []

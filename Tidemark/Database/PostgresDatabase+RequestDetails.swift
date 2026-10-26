@@ -145,9 +145,14 @@ extension PostgresDatabase {
     func relatedRecords(of request: RequestRecord) async throws -> RequestRelatedRecords {
         let device = request.deviceID
         let start = request.startedAt
+        // `RequestRecord.mayHaveUsed(_:)`, newest first on the primary key, at most a day back.
         var answer = SQL(Self.dnsAnswerSelect + " WHERE a.device_id = ")
         answer.append(answer.bind(device))
-        answer.append(" AND a.domain = \(answer.bind(Self.answerDomain(request.host))) AND a.resolved_at <= \(answer.bind(request.dnsAnswerMoment))")
+        answer.append(" AND a.domain = \(answer.bind(Self.answerDomain(request.host)))")
+        answer.append(" AND a.resolved_at <= \(answer.bind(request.dnsAnswerMoment))")
+        answer.append(" AND a.resolved_at >= \(answer.bind(start.addingTimeInterval(-DNSAnswer.longestLife)))")
+        answer.append(" AND (a.expires_at >= \(answer.bind(start))")
+        answer.append(" OR a.expires_at IS NULL AND a.resolved_at >= \(answer.bind(start.addingTimeInterval(-DNSAnswer.lifeWithoutExpiry))))")
         answer.append(" ORDER BY a.resolved_at DESC LIMIT 1")
         let answerQuery = request.isIPLiteral ? nil : answer.query
         let errorsQuery = Self.proxyErrorsQuery(for: request)?.query

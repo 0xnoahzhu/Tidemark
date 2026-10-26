@@ -1499,7 +1499,7 @@ struct DatabaseLiveTests {
             completed.path = "api.github.com -> 140.82.112.6"
             completed.log = "160.59ms Receive an A answer from https://cloudflare-dns.com/dns-query"
             completed.timeCostMs = 160.6
-            completed.expiresAt = resolved.addingTimeInterval(60)
+            completed.expiresAt = resolved.addingTimeInterval(300)
             let earlier = DNSAnswer(deviceID: mac.id, domain: "api.github.com", resolvedAt: start.addingTimeInterval(-3_600), addresses: ["140.82.112.5"])
             let later = DNSAnswer(deviceID: mac.id, domain: "api.github.com", resolvedAt: start.addingTimeInterval(45), addresses: ["140.82.112.4"])
             let elsewhere = DNSAnswer(deviceID: mini.id, domain: "api.github.com", resolvedAt: start.addingTimeInterval(1), addresses: ["140.82.112.3"])
@@ -1512,7 +1512,7 @@ struct DatabaseLiveTests {
             #expect(answers.map(\.addresses) == [["140.82.112.4"], ["140.82.112.6"]])
             let merged = try #require(answers.last)
             #expect(merged.server == answer.server && merged.byTidemark && merged.path == answer.path && merged.log == answer.log)
-            #expect(merged.timeCostMs.map { abs($0 - 160.6) < 0.01 } == true && merged.expiresAt.map { Fixture.close($0, resolved.addingTimeInterval(60)) } == true)
+            #expect(merged.timeCostMs.map { abs($0 - 160.6) < 0.01 } == true && merged.expiresAt.map { Fixture.close($0, resolved.addingTimeInterval(300)) } == true)
             #expect(try await db.dnsAnswers(forHost: "api.github.com", from: nil, to: nil, scope: .all, limit: 10).count == 4)
 
             // Proxy errors: a node lists its last errors every time it is asked.
@@ -1564,6 +1564,31 @@ struct DatabaseLiveTests {
             #expect(related.egressChange?.ip == "198.51.100.2", "the change in effect at the start")
             #expect(related.dnsAnswer?.addresses == ["140.82.112.6"], "the latest answer before the start on its Mac")
             #expect(related.proxyErrors == found)
+
+            // Only an answer that still held at the start: a later one that expired before it never served the request.
+            var expired = DNSAnswer(deviceID: mac.id, domain: "api.github.com", resolvedAt: stored4.startedAt.addingTimeInterval(-10),
+                                    addresses: ["140.82.112.9"])
+            expired.expiresAt = stored4.startedAt.addingTimeInterval(-5)
+            try await db.saveDNSAnswers([expired])
+            #expect(try await db.relatedRecords(of: stored4).dnsAnswer?.addresses == ["140.82.112.6"])
+            // An answer with no known expiry counts for an hour; one Surge cached for hours counts until it expires.
+            let udpStart = udp.startedAt
+            var longLived = DNSAnswer(deviceID: mac.id, domain: "stun.l.google.com", resolvedAt: udpStart.addingTimeInterval(-3 * 3_600),
+                                      addresses: ["74.125.250.129"])
+            longLived.expiresAt = udpStart.addingTimeInterval(3_600)
+            let unknownExpiry = DNSAnswer(deviceID: mac.id, domain: "stun.l.google.com", resolvedAt: udpStart.addingTimeInterval(-2 * 3_600),
+                                          addresses: ["74.125.250.130"])
+            try await db.saveDNSAnswers([longLived, unknownExpiry])
+            #expect(try await db.relatedRecords(of: udp).dnsAnswer?.addresses == ["74.125.250.129"])
+            #expect(udp.mayHaveUsed(longLived) && !udp.mayHaveUsed(unknownExpiry) && !stored4.mayHaveUsed(expired))
+            let recent = DNSAnswer(deviceID: mac.id, domain: "stun.l.google.com", resolvedAt: udpStart.addingTimeInterval(-600), addresses: ["74.125.250.131"])
+            try await db.saveDNSAnswers([recent])
+            #expect(try await db.relatedRecords(of: udp).dnsAnswer?.addresses == ["74.125.250.131"])
+            // Nothing older than a day.
+            try await db.execute("DELETE FROM dns_answers WHERE domain = 'stun.l.google.com'")
+            longLived.resolvedAt = udpStart.addingTimeInterval(-25 * 3_600)
+            try await db.saveDNSAnswers([longLived])
+            #expect(try await db.relatedRecords(of: udp).dnsAnswer == nil)
             // An IP literal has no DNS answer, and a request nothing else refers to has nothing related.
             #expect(try await db.relatedRecords(of: Fixture.request(device: mini.id, id: 99, host: "203.0.113.1")) == RequestRelatedRecords())
         }

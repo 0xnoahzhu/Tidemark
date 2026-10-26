@@ -148,13 +148,18 @@ them by host and time, always on its own Mac (`device_id`; each Mac has its own 
   `dns lookup` caused. In global-proxy mode Surge resolves nothing locally for proxied requests (the proxy does), so
   the answers there are Tidemark's lookups and DIRECT traffic's.
 
-  A request's answer is the latest for its host on its Mac at or before the moment it needed one: when its
-  `remote_ip` was resolved (`remote_ip_resolved_at`, at most a minute after the start), or else its start, plus a
-  second for the event to arrive.
+  A request's answer is the latest for its host on its Mac at or before the moment it needed one (when its
+  `remote_ip` was resolved, `remote_ip_resolved_at`, at most a minute after the start, or else its start, plus a
+  second for the event to arrive) that still held when the request started: not expired by then or, with no
+  `expires_at` (no read completed it), resolved within the hour before. An answer that expired before the start never
+  served the request, however recent. Nothing older than a day is searched (Surge's cache holds some answers for
+  hours), so the primary key's backward scan stays short.
 
   ```sql
   SELECT * FROM dns_answers
-  WHERE device_id = :'device' AND domain = :'host' AND resolved_at <= :'moment'
+  WHERE device_id = :'device' AND domain = :'host'
+    AND resolved_at <= :'moment' AND resolved_at >= :'started_at'::timestamptz - interval '1 day'
+    AND (expires_at >= :'started_at' OR expires_at IS NULL AND resolved_at >= :'started_at'::timestamptz - interval '1 hour')
   ORDER BY resolved_at DESC LIMIT 1;
   ```
 

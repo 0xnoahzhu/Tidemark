@@ -307,8 +307,7 @@ extension ShellDemoDatabase {
 
     func relatedRecords(of request: RequestRecord) async throws -> RequestRelatedRecords {
         var related = RequestRelatedRecords()
-        let moment = request.dnsAnswerMoment
-        related.dnsAnswer = demoDNSAnswers.filter { $0.deviceID == request.deviceID && $0.domain == request.host && $0.resolvedAt <= moment }
+        related.dnsAnswer = demoDNSAnswers.filter { $0.deviceID == request.deviceID && $0.domain == request.host && request.mayHaveUsed($0) }
             .max { $0.resolvedAt < $1.resolvedAt }
         related.proxyErrors = try await proxyErrors(for: request)
         return related
