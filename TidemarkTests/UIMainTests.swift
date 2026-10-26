@@ -465,6 +465,45 @@ struct RequestsTableRowHeightTests {
         #expect(!output.contains("reentrant operation"))
     }
 
+    /// Rows and the header are the design's 28 px, at any UI scale: a cell asks for the row's height less what the
+    /// inset style adds, and the table keeps its automatic row heights.
+    @Test func rowsAndHeaderAreTheDesignsHeight() async throws {
+        let suite = "tidemark-tests-\(UUID().uuidString)"
+        defer { TestDefaults.remove(suite) }
+        let model = AppModel(preferences: Preferences(defaults: UserDefaults(suiteName: suite)!))
+        let rows = (1...20).map { F.record(id: $0, policy: ["Proxy", "HK-01"]) }
+        for timeStyle in [RequestsTable.TimeStyle.clock, .dayClock] {
+            let host = NSHostingView(rootView: RequestsTable(model: model, rows: rows, selection: .constant(nil), timeStyle: timeStyle,
+                                                             now: timeStyle == .clock ? .now : nil))
+            // Never ordered in: the table lays out off screen.
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 500), styleMask: [.titled],
+                                  backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = host
+            defer { window.close() }
+            try await Self.waitUntil { host.layoutSubtreeIfNeeded(); return (Self.table(in: host)?.numberOfRows ?? 0) == rows.count }
+            let table = try #require(Self.table(in: host))
+            #expect(table.rect(ofRow: 0).height == RequestsTable.rowHeight)
+            #expect(table.rect(ofRow: rows.count - 1).height == RequestsTable.rowHeight)
+            #expect(RequestsTable.rowHeight == 28.px)
+            #expect(table.headerView?.frame.height == RequestsTable.headerHeight)
+        }
+    }
+
+    /// The header gets the design's height from a cell of its table, which AppKit would leave at its own.
+    @Test func headerTakesTheDesignsHeight() throws {
+        let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        table.addTableColumn(NSTableColumn(identifier: .init("time")))
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        scroll.documentView = table
+        let header = try #require(table.headerView)
+        header.frame.size.height = RequestsTable.headerHeight - 6
+        #expect(RequestsTableHeaderAnchor.needsHeight(table))
+        RequestsTableHeaderAnchor.setHeight(of: table)
+        #expect(header.frame.height == RequestsTable.headerHeight)
+        #expect(!RequestsTableHeaderAnchor.needsHeight(table))
+    }
+
     private static func table(in view: NSView) -> NSTableView? {
         if let table = view as? NSTableView { return table }
         return view.subviews.lazy.compactMap { table(in: $0) }.first

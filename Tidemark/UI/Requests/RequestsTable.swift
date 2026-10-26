@@ -43,6 +43,15 @@ struct RequestsTable: View {
     static func appMinWidth(factor: CGFloat) -> CGFloat { UIScale.length(130, factor: factor) }
     static func policyMinWidth(factor: CGFloat) -> CGFloat { UIScale.length(140, factor: factor) }
 
+    /// The design's 28 px rows. The table sizes each row to its cells, plus `rowPadding` that the inset style adds
+    /// (and that does not follow the UI scale), so one cell asks for the rest as its minimum height. Setting the
+    /// table's `rowHeight` instead would lose the automatic heights `TableRowHeightDefaults` relies on.
+    static let rowHeight = 28.px
+    /// What NSTableView's inset style adds to a row's cells.
+    static let rowPadding: CGFloat = 8
+    /// The header's height, as tall as a row (`RequestsTableHeaderHeight`).
+    static let headerHeight = 28.px
+
     var body: some View {
         // How a table shares width out depends on how it was built. A table that grows with its window widens
         // every resizable column up to its maximum, but one built while its column is still changing size
@@ -70,11 +79,12 @@ struct RequestsTable: View {
     private var columns: some TableColumnContent<RequestRecord, Never> {
         TableColumn(Self.header(tr("Time", "Requests"))) { record in
             RequestsTimeCell(date: record.startedAt, style: timeStyle)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: Self.rowHeight - Self.rowPadding, maxHeight: .infinity, alignment: .leading)
                 .background {
                     if now != nil {
                         RequestsRowTint(key: record.key, isFresh: isFresh(record), isSelected: record.key == selectedKey)
                     }
+                    RequestsTableHeaderHeight()
                 }
                 .onAppear {
                     if let onReachEnd, record.key == rows.last?.key { onReachEnd() }
