@@ -1292,6 +1292,7 @@ private struct RequestsStubDatabase: TidemarkDatabase {
     func appHosts(_ appID: AppID, scope: DeviceScope) async throws -> [AppHost] { [] }
     func touchHostSources(_ sources: [HostSourceTouch]) async throws {}
     func inventory(kind: HostKind?, search: String, scope: DeviceScope) async throws -> [InventoryEntry] { [] }
+    func hostProcesses(kind: HostKind, value: String, appID: AppID, scope: DeviceScope) async throws -> [HostProcess] { [] }
     func ipInfo(_ ip: String) async throws -> GeoInfo? { nil }
     func saveIPInfo(_ ip: String, geo: GeoInfo) async throws {}
     func insertAlerts(_ alerts: [AlertItem]) async throws -> [AlertItem] { [] }

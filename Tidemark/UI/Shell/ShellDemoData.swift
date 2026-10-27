@@ -302,17 +302,26 @@ enum ShellDemoData {
         return formatter
     }()
 
+    /// How deep in an app's chain (the app, its plugin helper, a node the helper started) the process that opens each
+    /// of `hosts`' connections sits, in turn: some hosts hear from one of them, others from two or all three.
+    private static let callerDepths: [[Int]] = [[3, 2, 1], [3, 2], [3, 2, 1], [1], [1, 2], [1], [1, 3], [2, 3], [1]]
+
     private static func sampleRow(index: Int, startedAt: Date, model: AppModel, apps: [MonitoredApp], devices: [DeviceID]) -> RequestRecord {
         let pick = hosts[index % hosts.count]
         let (host, ip, policyPath, method) = pick
         let app = apps[index % apps.count]
-        let device = devices[index % max(1, devices.count)]
+        // An app and host pair comes round every 45 rows; each round moves the Mac on every other time, so a process
+        // reaches a host from one Mac or from several.
+        let round = index / (hosts.count * apps.count)
+        let device = devices[(index + round / 2) % max(1, devices.count)]
         let unmonitored = index % 5 == 3
+        let depths = callerDepths[index % hosts.count]
         let chain: [ProcessLink] = unmonitored
             ? [ProcessLink(name: "apsd", pid: 412, path: "/System/Library/PrivateFrameworks/ApplePushService.framework/apsd")]
-            : [ProcessLink(name: app.name, pid: 812, path: app.path + "/Contents/MacOS/\(app.name)"),
-               ProcessLink(name: "\(app.name) Helper (Plugin)", pid: 851, path: app.path + "/Contents/Frameworks/\(app.name) Helper (Plugin).app/Contents/MacOS/\(app.name) Helper (Plugin)"),
-               ProcessLink(name: "node", pid: Int32(1201 + index % 7), path: "/usr/local/bin/node")]
+            : Array([ProcessLink(name: app.name, pid: 812, path: app.path + "/Contents/MacOS/\(app.name)"),
+                     ProcessLink(name: "\(app.name) Helper (Plugin)", pid: 851, path: app.path + "/Contents/Frameworks/\(app.name) Helper (Plugin).app/Contents/MacOS/\(app.name) Helper (Plugin)"),
+                     ProcessLink(name: "node", pid: Int32(1201 + index % 7), path: "/usr/local/bin/node")]
+                .prefix(depths[round % depths.count]))
         let failed = index % 17 == 6
         let active = index % 6 == 0
         let size = Int64((index * 7919) % 900_000 + 400)

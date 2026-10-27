@@ -277,6 +277,42 @@ extension PostgresDatabase {
         }
     }
 
+    /// The rows `hostProcesses` reads at most: one per Mac and process that reached the address for the app.
+    static let hostProcessRowLimit = 1_000
+
+    /// The processes that reached one of an app's domains or IPs: the app's `host_sources` rows of that address, merged by
+    /// executable path in `HostProcess.merge`. A process whose executable reached the address for several apps has one
+    /// row per Mac (the table's key has no app), which goes with the app that used it last.
+    func hostProcesses(kind: HostKind, value: String, appID: AppID, scope: DeviceScope) async throws -> [HostProcess] {
+        let sightings = try await rows(Self.hostProcessSightings(kind: kind, value: value, appID: appID, scope: scope).query).map { row in
+            let read = PostgresRowReader(row)
+            return HostProcess.Sighting(
+                deviceID: try read("device_id"),
+                path: try read("source_path"),
+                title: try read("source_title"),
+                firstSeen: try read("first_seen"),
+                lastSeen: try read("last_seen"),
+                requestCount: try read("request_count")
+            )
+        }
+        return HostProcess.merge(sightings, scope: scope)
+    }
+
+    /// `hostProcesses`' statement: the primary key's `(kind, value)` prefix (`(kind, value, device_id)` with one Mac) reads
+    /// only the rows of that address, every app's, a few per process; the most recently seen first, at most
+    /// `hostProcessRowLimit`.
+    static func hostProcessSightings(kind: HostKind, value: String, appID: AppID, scope: DeviceScope) -> SQL {
+        var sql = SQL("""
+            SELECT s.device_id, s.source_path, s.source_title, s.first_seen, s.last_seen, s.request_count
+            FROM host_sources s WHERE s.kind =
+            """)
+        sql.append(" " + sql.bind(kind.rawValue) + " AND s.value = " + sql.bind(value))
+        if let device = scope.deviceID { sql.append(" AND s.device_id = " + sql.bind(device)) }
+        sql.append(" AND s.app_id = " + sql.bind(appID))
+        sql.append(" ORDER BY s.last_seen DESC, s.device_id, s.source_path LIMIT \(hostProcessRowLimit)")
+        return sql
+    }
+
     // MARK: - IP info
 
     /// Cached GeoIP data; nil when unknown or when `ip` is not an IP address.

@@ -93,7 +93,7 @@ loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`)
 | `requests` | Surge request | the main log; upserted as the request progresses |
 | `processes` | (Mac, PID, start time) | process tree with `parent_id`; PIDs are reused, so the start time is part of the key |
 | `app_hosts` | (app, domain or IP) | a monitored app's inventory; `first_seen` within 24 h means NEW |
-| `host_sources` | (domain or IP, Mac, source process or probe) | the global Domains & IPs page |
+| `host_sources` | (domain or IP, Mac, source process or probe) | the global Domains & IPs page, and the processes listed under a domain or IP of an app's Domains & IPs tab (`app_id`, the app the process's requests rolled up to when it last reached the address) |
 | `alerts` | first contact of a monitored app with a new site, host or IP | `read_at` is null while unread |
 | `mutes` | host pattern earlier versions muted (`host`, `IP` or `*.example.com`) | unused: Tidemark has no mutes and neither reads nor writes it, so every host alerts. Schema v1 creates it with `*.apple.com`, `*.icloud.com` and `*.mzstatic.com`; it stays, since migrations are never edited |
 | `ip_info` | IP address | GeoIP / ASN cache from Surge's databases |
@@ -359,6 +359,19 @@ SELECT started_at, process_name, remote_ip, policy_path FROM requests
 WHERE (host || E'\n' || COALESCE(process_name, '') || E'\n' || COALESCE(host(remote_ip), '') || E'\n' || COALESCE(bundle_path, ''))
       ILIKE '%api.github.com%'
 ORDER BY started_at DESC LIMIT 50;
+```
+
+The processes that reached one of an app's domains or IPs, as its Domains & IPs tab lists them under the address (the
+tab merges the rows by path in Swift; `kind` and `value` are the primary key's prefix, so only that address's rows are
+read):
+
+```sql
+SELECT s.source_path, (array_agg(s.source_title ORDER BY s.last_seen DESC))[1] AS name,
+       sum(s.request_count) AS requests, min(s.first_seen) AS first_seen, max(s.last_seen) AS last_seen,
+       array_agg(DISTINCT d.name) AS macs
+FROM host_sources s JOIN devices d ON d.id = s.device_id
+WHERE s.kind = 'domain' AND s.value = 'api.github.com' AND s.app_id = (SELECT id FROM apps WHERE name = 'Cursor')
+GROUP BY s.source_path ORDER BY requests DESC;
 ```
 
 Busiest destinations this week:

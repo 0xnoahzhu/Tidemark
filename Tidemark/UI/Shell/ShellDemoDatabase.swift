@@ -3,8 +3,9 @@ import Foundation
 
 /// In-memory request store behind the History view in demo mode, previews and tests.
 ///
-/// Request queries, histograms, policy lists and the domains and IPs of Domains & IPs and the app pages are answered
-/// from `rows`, site probes and egress history from `sources`; everything else behaves like `OfflineDatabase`.
+/// Request queries, histograms, policy lists, the domains and IPs of Domains & IPs and the app pages and the processes
+/// that reached them are answered from `rows`, site probes and egress history from `sources`; everything else behaves
+/// like `OfflineDatabase`.
 struct ShellDemoDatabase: TidemarkDatabase {
     /// The records besides requests that the demo's requests are joined to (`relatedRecords(of:)`).
     struct Sources {
@@ -146,6 +147,25 @@ struct ShellDemoDatabase: TidemarkDatabase {
         }
         .sorted { a, b in a.firstSeen != b.firstSeen ? a.firstSeen > b.firstSeen : a.value < b.value }
         .prefix(2000))
+    }
+
+    func hostProcesses(kind: HostKind, value: String, appID: AppID, scope: DeviceScope) async throws -> [HostProcess] {
+        // A `host_sources` row per Mac and process, as capture writes them for the app's requests.
+        struct Key: Hashable { var device: DeviceID; var path: String }
+        var sightings: [Key: HostProcess.Sighting] = [:]
+        for row in rows.reversed() where row.appID == appID && row.probeSessionID == nil {
+            guard Self.inventoryValues(of: row).contains(where: { $0.0 == kind && $0.1 == value }) else { continue }
+            let path = row.processPath ?? row.bundlePath ?? ""
+            let key = Key(device: row.deviceID, path: path)
+            var sighting = sightings[key] ?? HostProcess.Sighting(
+                deviceID: row.deviceID, path: path, title: "", firstSeen: row.startedAt, lastSeen: row.startedAt, requestCount: 0
+            )
+            sighting.title = path.isEmpty ? "" : (row.chain.last?.name ?? row.processName)
+            sighting.lastSeen = row.startedAt
+            sighting.requestCount += 1
+            sightings[key] = sighting
+        }
+        return HostProcess.merge(Array(sightings.values), scope: scope)
     }
 
     /// Who a request counts for: its process, or the site probe it belonged to, named as the real database names it.

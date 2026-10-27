@@ -960,6 +960,70 @@ struct DatabaseLiveTests {
         }
     }
 
+    /// An app's domain or IP lists each process that reached it once, every Mac's rows of its path merged, and only that
+    /// app's; one Mac lists its own. The rows come through the primary key, without reading the rest of the table.
+    @Test func hostProcessesMergeTheMacsSourcesOfOneApp() async throws {
+        try await withTestDatabase { db in
+            let mac = Fixture.device("MacBook Pro")
+            let mini = Fixture.device("Mac mini")
+            try await db.upsertDevice(mac)
+            try await db.upsertDevice(mini)
+            let cursor = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            let raycast = Fixture.app("Raycast", path: "/Applications/Raycast.app")
+            try await db.insertApp(cursor)
+            try await db.insertApp(raycast)
+
+            let node = "/usr/local/bin/node", helper = "/Applications/Cursor.app/Contents/Frameworks/Cursor Helper (Plugin).app/Contents/MacOS/Cursor Helper (Plugin)"
+            func source(_ kind: HostKind = .domain, value: String = "api.github.com", device: DeviceID, app: AppID?, path: String,
+                        title: String, at seconds: TimeInterval, requests: Int64 = 1) -> HostSourceTouch {
+                HostSourceTouch(kind: kind, value: value, deviceID: device, sourcePath: path, sourceTitle: title, appID: app, bundlePath: nil,
+                                seenAt: Fixture.now.addingTimeInterval(seconds), requestDelta: requests, geo: nil)
+            }
+            try await db.touchHostSources([
+                source(device: mac.id, app: cursor.id, path: node, title: "node", at: -7_200, requests: 2),
+                source(device: mac.id, app: cursor.id, path: node, title: "node", at: -60, requests: 3),
+                source(device: mini.id, app: cursor.id, path: node, title: "node", at: -600, requests: 4),
+                source(device: mac.id, app: cursor.id, path: helper, title: "Cursor Helper (Plugin)", at: -30),
+                // Requests Surge named no process for, stored with the Mac's name.
+                source(device: mini.id, app: cursor.id, path: "", title: "Mac mini", at: -10, requests: 20),
+                // Another app's process, another domain, the IP.
+                source(device: mac.id, app: raycast.id, path: "/usr/bin/curl", title: "curl", at: -5),
+                source(value: "github.com", device: mac.id, app: cursor.id, path: "/usr/bin/git", title: "git", at: -5),
+                source(.ip, value: "140.82.112.3", device: mini.id, app: cursor.id, path: node, title: "node", at: -5),
+            ])
+
+            let all = try await db.hostProcesses(kind: .domain, value: "api.github.com", appID: cursor.id, scope: .all)
+            #expect(all.map(\.path) == [node, helper, ""])
+            let merged = try #require(all.first)
+            #expect(merged.requestCount == 9 && merged.name == "node")
+            #expect(Fixture.close(merged.firstSeen, Fixture.now.addingTimeInterval(-7_200)))
+            #expect(Fixture.close(merged.lastSeen, Fixture.now.addingTimeInterval(-60)))
+            #expect(merged.deviceIDs == [mac.id, mini.id], "the Mac that saw it last first")
+            #expect(all[1].deviceIDs == [mac.id])
+
+            let onMini = try await db.hostProcesses(kind: .domain, value: "api.github.com", appID: cursor.id, scope: .device(mini.id))
+            #expect(onMini.map { "\($0.path) \($0.requestCount)" } == ["\(node) 4", " 20"])
+            #expect(try await db.hostProcesses(kind: .domain, value: "api.github.com", appID: raycast.id, scope: .all).map(\.name) == ["curl"])
+            #expect(try await db.hostProcesses(kind: .ip, value: "140.82.112.3", appID: cursor.id, scope: .all).map(\.path) == [node])
+            #expect(try await db.hostProcesses(kind: .ip, value: "api.github.com", appID: cursor.id, scope: .all).isEmpty)
+
+            // Among many other addresses, the statement reads the address's rows through the primary key.
+            try await db.touchHostSources((0..<2_000).map { index in
+                source(value: "svc\(index).example.com", device: mac.id, app: cursor.id, path: node, title: "node", at: -1)
+            })
+            try await db.execute("ANALYZE host_sources")
+            for scope in [DeviceScope.all, .device(mini.id)] {
+                var explain = PostgresDatabase.SQL("EXPLAIN ")
+                let statement = PostgresDatabase.hostProcessSightings(kind: .domain, value: "api.github.com", appID: cursor.id, scope: scope)
+                explain.append(statement.text)
+                let plan = try await db.rows(PostgresQuery(unsafeSQL: explain.text, binds: statement.binds))
+                    .map { try $0.makeRandomAccess()[0].decode(String.self) }.joined(separator: "\n")
+                #expect(plan.contains("host_sources_pkey") && !plan.contains("Seq Scan"), "\(plan)")
+                #expect(plan.contains("kind =") && plan.contains("value ="), "\(plan)")
+            }
+        }
+    }
+
     @Test func ipInfoRoundTrip() async throws {
         try await withTestDatabase { db in
             #expect(try await db.ipInfo("8.8.8.8") == nil)

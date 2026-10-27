@@ -547,6 +547,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
         self.sources.append(contentsOf: sources)
     }
     func inventory(kind: HostKind?, search: String, scope: DeviceScope) async throws -> [InventoryEntry] { [] }
+    func hostProcesses(kind: HostKind, value: String, appID: AppID, scope: DeviceScope) async throws -> [HostProcess] { [] }
 
     func ipInfo(_ ip: String) async throws -> GeoInfo? { ipInfoCache[ip] }
     func saveIPInfo(_ ip: String, geo: GeoInfo) async throws { ipInfoCache[ip] = geo }
