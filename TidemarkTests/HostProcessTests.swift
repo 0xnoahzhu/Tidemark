@@ -69,9 +69,38 @@ import Testing
         #expect(HostProcess.merge(sightings, scope: .device(UUID()), now: Self.now).isEmpty)
         #expect(HostProcess.merge([], now: Self.now).isEmpty)
     }
+
+    /// A Mac's process can have up to three rows for one app: its own count (`app_host_sources`), the row every app
+    /// shares when it names this app (`host_sources`, all that builds before schema v5 record), and the app's copy of that
+    /// row from the upgrade. Only one counts, so no request is counted twice: the app's own count, else the shared row,
+    /// which only grows from the copy while it names the app, else the copy.
+    @Test func countsOneRowOfEachMacsProcess() throws {
+        func sighting(_ path: String, device: DeviceID = Self.mac, requests: Int64, _ origin: HostProcess.Sighting.Origin) -> HostProcess.Sighting {
+            var sighting = Self.sighting(path, (path as NSString).lastPathComponent, device: device, requests: requests)
+            sighting.origin = origin
+            return sighting
+        }
+        let node = "/usr/local/bin/node", curl = "/usr/bin/curl", git = "/usr/bin/git", ssh = "/usr/bin/ssh"
+        let sightings = [
+            // This build counted node on the Mac for the app; the shared row counts every app's requests too.
+            sighting(node, requests: 8, .shared), sighting(node, requests: 3, .recorded), sighting(node, requests: 5, .copied),
+            // An older build on the mini still writes the shared row, which outgrew the copy.
+            sighting(node, device: Self.mini, requests: 2, .copied), sighting(node, device: Self.mini, requests: 6, .shared),
+            // Another app took the shared row of curl over: the copy keeps this app's earlier requests.
+            sighting(curl, requests: 4, .copied),
+            // Rows only an older build wrote, and only this build.
+            sighting(git, requests: 7, .shared), sighting(ssh, requests: 1, .recorded),
+        ]
+        let kept = HostProcess.kept(sightings)
+        #expect(kept.map { "\($0.title) \($0.requestCount)" } == ["node 3", "node 6", "curl 4", "git 7", "ssh 1"], "in the order they came")
+        #expect(kept.map(\.origin) == [.recorded, .shared, .copied, .shared, .recorded])
+        #expect(HostProcess.merge(sightings, now: Self.now).map { "\($0.name) \($0.requestCount)" } == ["node 9", "git 7", "curl 4", "ssh 1"])
+        #expect(HostProcess.kept(sightings.reversed()).map(\.requestCount) == [1, 7, 4, 6, 3], "whatever the order")
+        #expect(HostProcess.Sighting.Origin.recorded < .shared && HostProcess.Sighting.Origin.shared < .copied)
+    }
 }
 
-/// The demo database lists the processes the demo's requests came from, as capture records them in `host_sources`.
+/// The demo database lists the processes the demo's requests came from, as capture records them in `app_host_sources`.
 @Suite @MainActor struct HostProcessDemoTests {
     typealias F = UIMainFixtures
 

@@ -386,38 +386,55 @@ extension PostgresDatabase {
         }
     }
 
-    /// The rows `hostProcesses` reads at most: one per Mac and process that reached the address for the app.
+    /// The rows `hostProcesses` reads at most from each table: one per Mac and process that reached the address for the app.
     static let hostProcessRowLimit = 1_000
 
-    /// The processes that reached one of an app's domains or IPs: the app's `host_sources` rows of that address, every
-    /// Mac's, merged by executable path in `HostProcess.merge` (which keeps one Mac's processes for a scope of one Mac). A
-    /// process whose executable reached the address for several apps has one row per Mac (the table's key has no app),
-    /// which goes with the app that used it last.
+    /// The processes that reached one of an app's domains or IPs: the app's rows of that address in `app_host_sources`,
+    /// and the `host_sources` rows that name the app, which hold what builds before schema v5 recorded (they write
+    /// nothing else). `HostProcess.merge` keeps one of them per Mac and process (`HostProcess.Sighting.Origin`), then
+    /// merges every Mac's by executable path (and keeps one Mac's processes for a scope of one Mac).
     func hostProcesses(kind: HostKind, value: String, appID: AppID, scope: DeviceScope) async throws -> [HostProcess] {
-        let sightings = try await rows(Self.hostProcessSightings(kind: kind, value: value, appID: appID).query).map { row in
+        HostProcess.merge(try await hostProcessSightings(kind: kind, value: value, appID: appID), scope: scope)
+    }
+
+    /// Every row `hostProcesses` merges, each with its origin.
+    func hostProcessSightings(kind: HostKind, value: String, appID: AppID) async throws -> [HostProcess.Sighting] {
+        try await rows(Self.hostProcessStatement(kind: kind, value: value, appID: appID).query).map { row in
             let read = PostgresRowReader(row)
+            let origin: HostProcess.Sighting.Origin = switch try read("origin", as: String.self) {
+            case "app": .recorded
+            case "copy": .copied
+            default: .shared
+            }
             return HostProcess.Sighting(
                 deviceID: try read("device_id"),
                 path: try read("source_path"),
                 title: try read("source_title"),
                 firstSeen: try read("first_seen"),
                 lastSeen: try read("last_seen"),
-                requestCount: try read("request_count")
+                requestCount: try read("request_count"),
+                origin: origin
             )
         }
-        return HostProcess.merge(sightings, scope: scope)
     }
 
-    /// `hostProcesses`' statement: the primary key's `(kind, value)` prefix reads only the rows of that address, every
-    /// Mac's and every app's, a few per process; the most recently seen first, at most `hostProcessRowLimit`.
-    static func hostProcessSightings(kind: HostKind, value: String, appID: AppID) -> SQL {
-        var sql = SQL("""
-            SELECT s.device_id, s.source_path, s.source_title, s.first_seen, s.last_seen, s.request_count
-            FROM host_sources s WHERE s.kind =
+    /// `hostProcesses`' statement: the app's rows of the address through `app_host_sources`' primary key prefix
+    /// `(app_id, kind, value)`, and the address's rows of every Mac and app through `host_sources`' `(kind, value)`, a
+    /// few per process, of which it keeps the app's; from each table the most recently seen first, at most
+    /// `hostProcessRowLimit`. `origin` says which row it is: `app`, `copy` (a backfilled one) or `shared`.
+    static func hostProcessStatement(kind: HostKind, value: String, appID: AppID) -> SQL {
+        var sql = SQL()
+        let (appParameter, kindParameter, valueParameter) = (sql.bind(appID), sql.bind(kind.rawValue), sql.bind(value))
+        sql.append("""
+            (SELECT CASE WHEN a.backfilled THEN 'copy' ELSE 'app' END AS origin, a.device_id, a.source_path, a.source_title,
+                    a.first_seen, a.last_seen, a.request_count
+             FROM app_host_sources a WHERE a.app_id = \(appParameter) AND a.kind = \(kindParameter) AND a.value = \(valueParameter)
+             ORDER BY a.last_seen DESC, a.device_id, a.source_path LIMIT \(hostProcessRowLimit))
+            UNION ALL
+            (SELECT 'shared', s.device_id, s.source_path, s.source_title, s.first_seen, s.last_seen, s.request_count
+             FROM host_sources s WHERE s.kind = \(kindParameter) AND s.value = \(valueParameter) AND s.app_id = \(appParameter)
+             ORDER BY s.last_seen DESC, s.device_id, s.source_path LIMIT \(hostProcessRowLimit))
             """)
-        sql.append(" " + sql.bind(kind.rawValue) + " AND s.value = " + sql.bind(value))
-        sql.append(" AND s.app_id = " + sql.bind(appID))
-        sql.append(" ORDER BY s.last_seen DESC, s.device_id, s.source_path LIMIT \(hostProcessRowLimit)")
         return sql
     }
 

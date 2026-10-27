@@ -637,13 +637,13 @@
         }
       }
     },
-    "No process listed: those that reached it have since done so for another app, which lists them." : {
+    "No process on record for this app: earlier versions of Tidemark kept a process two apps ran under the one that ran it last." : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "没有列出进程：访问过它的进程后来又为另一个应用访问了它，列在那个应用下。"
+            "value" : "此应用没有进程记录：早期版本的 Tidemark 会把两个应用都运行过的进程记在最后运行它的那个应用下。"
           }
         }
       }

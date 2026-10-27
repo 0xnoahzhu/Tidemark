@@ -203,7 +203,7 @@ protocol TidemarkDatabase: Sendable {
     func touchHostSources(_ sources: [HostSourceTouch]) async throws
     func inventory(kind: HostKind?, search: String, scope: DeviceScope) async throws -> [InventoryEntry]
     /// The processes that reached one of an app's domains or IPs, by executable path across Macs (`HostProcess.merge`),
-    /// from the global inventory; with one Mac only the processes that Mac reported, with every Mac's counts.
+    /// from the app's own sources; with one Mac only the processes that Mac reported, with every Mac's counts.
     func hostProcesses(kind: HostKind, value: String, appID: AppID, scope: DeviceScope) async throws -> [HostProcess]
 
     // IP info

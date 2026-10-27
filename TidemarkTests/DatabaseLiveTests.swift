@@ -1009,18 +1009,53 @@ struct DatabaseLiveTests {
             #expect(try await db.hostProcesses(kind: .ip, value: "140.82.112.3", appID: cursor.id, scope: .all).map(\.path) == [node])
             #expect(try await db.hostProcesses(kind: .ip, value: "api.github.com", appID: cursor.id, scope: .all).isEmpty)
 
-            // Among many other addresses, the statement reads the address's rows through the primary key.
+            // Among many other addresses and apps, the statement reads the address's rows through the primary keys: the
+            // app's in `app_host_sources` by (app, kind, value), every app's in `host_sources` by (kind, value).
             try await db.touchHostSources((0..<2_000).map { index in
-                source(value: "svc\(index).example.com", device: mac.id, app: cursor.id, path: node, title: "node", at: -1)
+                source(value: "svc\(index).example.com", device: mac.id, app: index.isMultiple(of: 2) ? cursor.id : raycast.id, path: node,
+                       title: "node", at: -1)
             })
             try await db.execute("ANALYZE host_sources")
+            try await db.execute("ANALYZE app_host_sources")
             var explain = PostgresDatabase.SQL("EXPLAIN ")
-            let statement = PostgresDatabase.hostProcessSightings(kind: .domain, value: "api.github.com", appID: cursor.id)
+            let statement = PostgresDatabase.hostProcessStatement(kind: .domain, value: "api.github.com", appID: cursor.id)
             explain.append(statement.text)
             let plan = try await db.rows(PostgresQuery(unsafeSQL: explain.text, binds: statement.binds))
                 .map { try $0.makeRandomAccess()[0].decode(String.self) }.joined(separator: "\n")
-            #expect(plan.contains("host_sources_pkey") && !plan.contains("Seq Scan"), "\(plan)")
-            #expect(plan.contains("kind =") && plan.contains("value ="), "\(plan)")
+            #expect(plan.contains("app_host_sources_pkey") && plan.contains(" host_sources_pkey") && !plan.contains("Seq Scan"), "\(plan)")
+            #expect(plan.contains("app_id =") && plan.contains("kind =") && plan.contains("value ="), "\(plan)")
+        }
+    }
+
+    /// An executable two apps both ran to one address is listed under each, with that app's requests: `host_sources` has
+    /// one row per Mac and process (under the app that used it last, counting every app's requests and those of none),
+    /// `app_host_sources` one per app.
+    @Test func appsSharingAProcessEachListItWithTheirOwnRequests() async throws {
+        try await withTestDatabase { db in
+            let mac = Fixture.device("MacBook Pro")
+            try await db.upsertDevice(mac)
+            let cursor = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            let raycast = Fixture.app("Raycast", path: "/Applications/Raycast.app")
+            try await db.insertApp(cursor)
+            try await db.insertApp(raycast)
+            func curl(_ app: AppID?, at seconds: TimeInterval, requests: Int64) -> HostSourceTouch {
+                Fixture.source(.domain, "api.github.com", device: mac.id, app: app, at: seconds, requests: requests)
+            }
+            // One flush with both apps' requests, then one with Cursor's again and requests of no app.
+            try await db.touchHostSources([curl(cursor.id, at: -600, requests: 3), curl(raycast.id, at: -60, requests: 2)])
+            try await db.touchHostSources([curl(cursor.id, at: -10, requests: 1), curl(nil, at: -5, requests: 7)])
+
+            #expect(try await listed(db, "api.github.com", cursor.id) == ["curl 4 600-10"])
+            #expect(try await listed(db, "api.github.com", raycast.id) == ["curl 2 60-60"])
+            let shared = try #require(try await db.rows("SELECT app_id, request_count FROM host_sources").first)
+            #expect(try PostgresRowReader(shared)("app_id", as: UUID?.self) == cursor.id)
+            #expect(try PostgresRowReader(shared)("request_count", as: Int64.self) == 13)
+            #expect(try await appHostSources(db) == ["\(cursor.id) api.github.com curl 4", "\(raycast.id) api.github.com curl 2"].sorted())
+
+            // A deleted app's rows go with it; the shared row keeps its requests.
+            try await db.deleteApp(raycast.id)
+            #expect(try await appHostSources(db) == ["\(cursor.id) api.github.com curl 4"])
+            #expect(try await listed(db, "api.github.com", cursor.id) == ["curl 4 600-10"])
         }
     }
 
@@ -1067,6 +1102,8 @@ struct DatabaseLiveTests {
             #expect(try await count("SELECT count(*) AS n FROM host_sources WHERE app_id IS NOT NULL") == 16_003)
             #expect(try await count(copies) == 16_003)
             #expect(try await count(all) == 16_003)
+            #expect(try await listed(db, "api.github.com", cursor.id) == ["node 7 600-60"])
+            #expect(try await origins(db, "api.github.com", cursor.id) == ["node 2 copied", "node 2 shared", "node 5 copied", "node 5 shared"])
 
             // Run again, its record lost: nothing changes.
             try await db.execute("DELETE FROM schema_migrations WHERE version = 5")
@@ -1082,6 +1119,58 @@ struct DatabaseLiveTests {
             #expect(try await count(copies) == 16_003)
             #expect(try await count(all) == 16_003)
             #expect(try await db.migrate() == 5)
+        }
+    }
+
+    /// What a Mac still running a build before schema v5 records reaches `host_sources` only. An app lists it from there
+    /// whenever that row names the app and no row of the app's own counts that Mac's process (its copy from the upgrade
+    /// only while another app has taken the row over), and this build's first write of the app's row continues from
+    /// those figures: no request is counted twice, none is dropped.
+    @Test func whatOlderBuildsRecordIsListedUntilThisBuildCountsIt() async throws {
+        try await withTestDatabase(upTo: 4) { db in
+            let mini = Fixture.device("Mac mini")
+            try await db.upsertDevice(mini)
+            let cursor = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            let raycast = Fixture.app("Raycast", path: "/Applications/Raycast.app")
+            try await db.insertApp(cursor)
+            try await db.insertApp(raycast)
+            func node(_ value: String, _ app: AppID?, at seconds: TimeInterval, requests: Int64) -> HostSourceTouch {
+                Fixture.source(.domain, value, device: mini.id, app: app, path: "/usr/local/bin/node", title: "node", at: seconds, requests: requests)
+            }
+            // Before the upgrade the mini's older build recorded node for Cursor at two addresses.
+            try await Self.olderBuildTouchHostSource(db, node("api.github.com", cursor.id, at: -7_200, requests: 5))
+            try await Self.olderBuildTouchHostSource(db, node("registry.npmjs.org", cursor.id, at: -7_200, requests: 4))
+            #expect(try await db.migrate() == 5)
+
+            // The mini runs its older build on: node reaches one address for Cursor again, the other for Raycast, and a
+            // new one for Cursor.
+            try await Self.olderBuildTouchHostSource(db, node("api.github.com", cursor.id, at: -600, requests: 3))
+            try await Self.olderBuildTouchHostSource(db, node("registry.npmjs.org", raycast.id, at: -500, requests: 1))
+            try await Self.olderBuildTouchHostSource(db, node("api.openai.com", cursor.id, at: -400, requests: 2))
+            #expect(try await listed(db, "api.github.com", cursor.id) == ["node 8 7200-600"], "the shared row, not the copy it outgrew")
+            #expect(try await listed(db, "registry.npmjs.org", cursor.id) == ["node 4 7200-7200"], "the copy, once Raycast took the row over")
+            #expect(try await listed(db, "registry.npmjs.org", raycast.id) == ["node 5 7200-500"], "with Cursor's requests, as it counted them")
+            #expect(try await listed(db, "api.openai.com", cursor.id) == ["node 2 400-400"])
+
+            // The mini upgrades: this build's first writes continue from what was listed.
+            try await db.touchHostSources([
+                node("api.github.com", cursor.id, at: -60, requests: 1),
+                node("registry.npmjs.org", cursor.id, at: -50, requests: 1),
+                node("api.openai.com", cursor.id, at: -40, requests: 1),
+                node("registry.npmjs.org", raycast.id, at: -30, requests: 1),
+            ])
+            #expect(try await listed(db, "api.github.com", cursor.id) == ["node 9 7200-60"])
+            #expect(try await listed(db, "registry.npmjs.org", cursor.id) == ["node 5 7200-50"])
+            #expect(try await listed(db, "registry.npmjs.org", raycast.id) == ["node 6 7200-30"])
+            #expect(try await listed(db, "api.openai.com", cursor.id) == ["node 3 400-40"])
+            #expect(try await db.rows("SELECT 1 FROM app_host_sources WHERE backfilled").isEmpty)
+
+            // From then on only the app's own requests count.
+            try await db.touchHostSources([node("api.github.com", cursor.id, at: -5, requests: 2), node("api.github.com", nil, at: -4, requests: 10)])
+            try await db.touchHostSources([node("api.github.com", raycast.id, at: -3, requests: 1)])
+            #expect(try await listed(db, "api.github.com", cursor.id) == ["node 11 7200-5"])
+            #expect(try await listed(db, "api.github.com", raycast.id) == ["node 1 3-3"])
+            #expect(try await origins(db, "api.github.com", cursor.id) == ["node 11 recorded"])
         }
     }
 
@@ -1135,6 +1224,8 @@ struct DatabaseLiveTests {
                 "Raycast api.github.com new node 2 30-30 recorded",
                 "Raycast example.org new curl 2 100-20 recorded",
             ])
+            #expect(try await listed(db, "github.com", cursor.id) == ["git 5 7200-3600"])
+            #expect(try await origins(db, "github.com", cursor.id) == ["git 5 copied", "git 5 shared"])
 
             // Merging again does nothing.
             #expect(try await db.mergeDevice(old.id, into: new.id) == DeviceMergeResult())
@@ -2461,6 +2552,19 @@ struct DatabaseLiveTests {
     // MARK: - Harness
 
     /// The storage parameters of an index of the test schema (`pg_class.reloptions`).
+    /// The processes `hostProcesses` lists under a domain of the app: name, requests and the ages of their first and last
+    /// sighting in seconds (`node 7 600-60`).
+    private func listed(_ db: PostgresDatabase, _ domain: String, _ app: AppID) async throws -> [String] {
+        try await db.hostProcesses(kind: .domain, value: domain, appID: app, scope: .all).map { process in
+            "\(process.name) \(process.requestCount) \(Self.age(process.firstSeen))-\(Self.age(process.lastSeen))"
+        }
+    }
+
+    /// Every row `hostProcesses` reads for a domain of the app, with its origin (`node 5 shared`), sorted.
+    private func origins(_ db: PostgresDatabase, _ domain: String, _ app: AppID) async throws -> [String] {
+        try await db.hostProcessSightings(kind: .domain, value: domain, appID: app).map { "\($0.title) \($0.requestCount) \($0.origin)" }.sorted()
+    }
+
     /// Every `app_host_sources` row: app, value, title and requests, sorted.
     private func appHostSources(_ db: PostgresDatabase) async throws -> [String] {
         try await db.rows("SELECT app_id, value, source_title, request_count FROM app_host_sources").map { row in
@@ -2469,6 +2573,9 @@ struct DatabaseLiveTests {
                 + "\(try read("request_count", as: Int64.self))"
         }.sorted()
     }
+
+    /// Whole seconds before `Fixture.now`.
+    private static func age(_ date: Date) -> Int { Int(Fixture.now.timeIntervalSince(date).rounded()) }
 
     private func indexOptions(_ db: PostgresDatabase, _ name: String) async throws -> [String] {
         try await db.rows("""

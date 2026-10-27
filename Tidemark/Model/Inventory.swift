@@ -52,11 +52,24 @@ struct InventoryEntry: Identifiable, Hashable, Sendable {
     var id: String { "\(kind.rawValue):\(value)" }
 }
 
-/// A process that reached one of a monitored app's domains or IPs: the `host_sources` rows of its executable path for
-/// that address and app, one per Mac, merged (`merge`).
+/// A process that reached one of a monitored app's domains or IPs: the rows of its executable path for that address and
+/// app, one per Mac, merged (`merge`).
 struct HostProcess: Identifiable, Hashable, Sendable {
-    /// One Mac's `host_sources` row of a process for an address.
+    /// One Mac's row of a process for an address and app.
     struct Sighting: Hashable, Sendable {
+        /// Which row a sighting is, in the order `merge` prefers them among a Mac's rows of one process: the app's own
+        /// count; the row every app shares, when it names this app (builds before schema v5 record nothing else, and
+        /// name the app that used the process last); the app's copy of that row, which the shared row outgrows while it
+        /// names this app, and which keeps the app's earlier requests once another app took the shared row over.
+        enum Origin: Comparable, Sendable {
+            /// `app_host_sources`, written for the app's own requests.
+            case recorded
+            /// `host_sources`, every app's requests of the process (and those of none), whose app is this one.
+            case shared
+            /// `app_host_sources` as schema v5 copied it from `host_sources` (`backfilled`), not written for the app since.
+            case copied
+        }
+
         var deviceID: DeviceID
         /// Executable path; empty (or `unknown`, in rows of early versions) when Surge never named the process.
         var path: String
@@ -65,6 +78,7 @@ struct HostProcess: Identifiable, Hashable, Sendable {
         var firstSeen: Date
         var lastSeen: Date
         var requestCount: Int64
+        var origin: Origin = .recorded
     }
 
     /// Executable path; empty when Surge never named the process.
@@ -90,7 +104,8 @@ struct HostProcess: Identifiable, Hashable, Sendable {
     static let limit = 200
 
     /// One process per executable path, every Mac's sightings merged: their requests added up, the earliest first seen
-    /// and the latest last seen, the latest name, and the Macs. A `scope` of one Mac keeps the processes that Mac
+    /// and the latest last seen, the latest name, and the Macs. Of a Mac's sightings of one path only the first by
+    /// `Sighting.Origin` counts, so no request is counted twice. A `scope` of one Mac keeps the processes that Mac
     /// reported, still with every Mac's counts and dates, as the address's own row has. Ordered like the tab's domains:
     /// what first reached the address in the last 24 hours, then the busiest, so the process that does most of the
     /// talking leads; then the most recent, then by path. Requests whose process Surge never named come last, being no
@@ -98,7 +113,7 @@ struct HostProcess: Identifiable, Hashable, Sendable {
     static func merge(_ sightings: [Sighting], scope: DeviceScope = .all, now: Date = .now, limit: Int = limit) -> [HostProcess] {
         var byPath: [String: (process: HostProcess, seen: [DeviceID: Date])] = [:]
         // The latest first, so a path's first sighting names it.
-        for sighting in sightings.sorted(by: { $0.lastSeen > $1.lastSeen }) {
+        for sighting in kept(sightings).sorted(by: { $0.lastSeen > $1.lastSeen }) {
             let path = sighting.path == "unknown" ? "" : sighting.path
             guard var entry = byPath[path] else {
                 byPath[path] = (HostProcess(path: path, name: sighting.title, firstSeen: sighting.firstSeen, lastSeen: sighting.lastSeen,
@@ -126,6 +141,23 @@ struct HostProcess: Identifiable, Hashable, Sendable {
             return a.path < b.path
         }
         .prefix(max(0, limit)))
+    }
+
+    /// Of each Mac's sightings of one path, the one whose origin comes first, in the order they came.
+    static func kept(_ sightings: [Sighting]) -> [Sighting] {
+        struct Key: Hashable { var device: DeviceID; var path: String }
+        var positions: [Key: Int] = [:]
+        var kept: [Sighting] = []
+        for sighting in sightings {
+            let key = Key(device: sighting.deviceID, path: sighting.path)
+            if let position = positions[key] {
+                if sighting.origin < kept[position].origin { kept[position] = sighting }
+            } else {
+                positions[key] = kept.count
+                kept.append(sighting)
+            }
+        }
+        return kept
     }
 }
 

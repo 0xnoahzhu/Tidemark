@@ -73,6 +73,49 @@ struct CaptureLiveTests {
         }
     }
 
+    /// The same executable run by two monitored apps reaches one address for each: every app lists it with its own
+    /// requests, in the flush that writes the shared row.
+    @Test func aProcessTwoAppsRunCountsForEach() async throws {
+        try await withTestDatabase { db in
+            let temp = CaptureTempDirectory()
+            let mac = device()
+            try await db.upsertDevice(mac)
+            let raycast = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
+            let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
+            try await db.insertApp(raycast)
+            try await db.insertApp(cursor)
+            var processes = self.processes
+            processes.processes[600] = LiveProcess(pid: 600, parentPID: 1, name: "Cursor", path: "/Applications/Cursor.app/Contents/MacOS/Cursor",
+                                                   startTime: boot)
+            processes.processes[2000] = LiveProcess(pid: 2000, parentPID: 600, name: "node", path: nodePath, startTime: boot.addingTimeInterval(9))
+            let pipeline = CapturePipeline(
+                settings: CaptureSettings(deviceID: mac.id, batchRows: 200, batchInterval: 1, ownExecutablePath: nil),
+                database: db, surge: CaptureFakeSurge(), processes: processes, classifier: CaptureFakeClassifier(), probes: ProbeRegistry(),
+                spool: CaptureSpool(directory: temp.url, limit: 10_000), contactGrace: 0
+            )
+            await pipeline.setApps([raycast, cursor], paused: [])
+            try await pipeline.loadKnownHosts()
+            await pipeline.setDatabaseOnline(true)
+            await pipeline.beginSession(1_000)
+
+            for (id, pid) in [(1, 1388), (2, 2000), (3, 2000)] as [(Int64, Int32)] {
+                await pipeline.ingest(CaptureFixtures.request(id: id, host: "api.github.com", processPath: nodePath, pid: pid,
+                                                              remoteAddress: "140.82.112.6", policy: "DIRECT", completed: true), now: base)
+            }
+            await pipeline.tick(now: base.addingTimeInterval(2))
+
+            #expect(await pipeline.drainUpdate().databaseFailure == nil)
+            for (app, requests) in [(raycast, 1), (cursor, 2)] {
+                for (kind, value) in [(HostKind.domain, "api.github.com"), (.ip, "140.82.112.6")] {
+                    let listed = try await db.hostProcesses(kind: kind, value: value, appID: app.id, scope: .all)
+                    #expect(listed.map { "\($0.path) \($0.requestCount)" } == ["\(nodePath) \(requests)"], "\(app.name) \(value)")
+                }
+            }
+            let shared = try await db.rows("SELECT request_count FROM host_sources").map { try PostgresRowReader($0)("request_count", as: Int64.self) }
+            #expect(shared == [3, 3])
+        }
+    }
+
     @Test func aRowTheServerRefusesIsSetAside() async throws {
         try await withTestDatabase { db in
             let temp = CaptureTempDirectory()

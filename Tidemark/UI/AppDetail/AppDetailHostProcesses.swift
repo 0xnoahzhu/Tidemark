@@ -84,9 +84,9 @@ struct AppDetailHostProcessList: View {
             caption(shown)
             if let list = shown.processes {
                 if list.isEmpty {
-                    // The address is the app's, so its processes have reached it for another app since: `host_sources`
-                    // keeps a row per Mac and executable, under the app that used it last.
-                    let reason = tr("No process listed: those that reached it have since done so for another app, which lists them.", "AppDetail")
+                    // The address is the app's, yet no row names a process for it: before schema v5 (`app_host_sources`) a
+                    // Mac's process went under the app that ran it last, and so it still does on a Mac with an earlier build.
+                    let reason = tr("No process on record for this app: earlier versions of Tidemark kept a process two apps ran under the one that ran it last.", "AppDetail")
                     note(Text(reason).lineLimit(2).help(reason))
                 }
                 ForEach(list) { process in

@@ -36,7 +36,7 @@ engine start time in milliseconds.
 | 2 | `egress_checks.network_type` / `has_ipv6`; `requests` fillfactor 80; the btree on `requests.updated_at` replaced by a BRIN index (so rewriting a request row can stay a HOT update on PostgreSQL 16+); one trigram index over host, process name, remote IP and bundle path for searches, replacing the separate `host`, host-trigram and remote-IP indexes; `host_sources_last_seen_idx` dropped (no query used it); `schema_migrations.requires_version`. |
 | 3 | `requests_active_idx`, a partial index on `requests (device_id, surge_session) WHERE state = 'active'`, so closing the requests left active by an ended Surge session or by a crash reads only the rows still active; `autosummarize = on` for the BRIN index on `requests.updated_at`, so block ranges are summarized as they fill instead of at the next vacuum. Index changes only: every older Tidemark keeps writing. |
 | 4 | What happened to a request on its way ([Request details](#request-details)): `requests.timing`, `entry_mode`, `original_policy`, `modified`, `end_reason`, `remote_ip_source` and `remote_ip_resolved_at` (nullable, no default: a catalog-only change); the tables `dns_answers` and `proxy_errors`; `requests_host_started_idx` on `requests (host, started_at DESC)`, `requests_remote_ip_started_idx` on `requests (remote_ip, started_at DESC)` for the requests that reached one IP (History opened from an IP of Domains & IPs), `requests_ended_error_idx` on `requests (started_at DESC)` for the requests that ended with an error (a partial index whose predicate is History's "ended with an error" filter, so that filter over all time never reads the rows before v4) and an index by host on each new table, built concurrently. Additive only (`requires_version` 1): every older Tidemark keeps writing, and its writes never touch the new columns. |
-| 5 | `app_host_sources`, each app's processes of a domain or IP: `host_sources` has no app in its key, so an executable two monitored apps both ran to one address had one row per Mac, under the app that used it last, counting both apps' requests. Every `host_sources` row with an app is copied into it (`backfilled`), in batches after the table's transaction commits (about 20 s per million rows of `host_sources`). Additive only (`requires_version` 1): older builds keep writing `host_sources` alone. |
+| 5 | `app_host_sources`, each app's processes of a domain or IP ([Processes per app](#processes-per-app)): `host_sources` has no app in its key, so an executable two monitored apps both ran to one address had one row per Mac, under the app that used it last, counting both apps' requests. Every `host_sources` row with an app is copied into it (`backfilled`), in batches after the table's transaction commits (about 20 s per million rows of `host_sources`). Additive only (`requires_version` 1): older builds keep writing `host_sources` alone, which this build reads for what only they recorded. |
 
 Indexes are built and dropped `CONCURRENTLY`, so an upgrade does not block reads or writes (v3's BRIN
 setting locks that index for a moment and gives up after 3 s, to try again). Tidemark builds whose schema
@@ -101,8 +101,8 @@ loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`)
 | `requests` | Surge request | the main log; upserted as the request progresses |
 | `processes` | (Mac, PID, start time) | process tree with `parent_id`; PIDs are reused, so the start time is part of the key |
 | `app_hosts` | (app, domain or IP) | a monitored app's inventory; `first_seen` within 24 h means NEW |
-| `host_sources` | (domain or IP, Mac, source process or probe) | the global Domains & IPs page, and the processes listed under a domain or IP of an app's Domains & IPs tab (`app_id`, the app the process's requests rolled up to when it last reached the address) |
-| `app_host_sources` | (app, domain or IP, Mac, source process) | each app's processes of a domain or IP, with that app's own requests (schema v5); `backfilled` while a row holds what v5 copied from `host_sources` |
+| `host_sources` | (domain or IP, Mac, source process or probe) | the global Domains & IPs page; `app_id` is the app the process's requests rolled up to when it last reached the address, and `request_count` counts every app's requests of it and those of none |
+| `app_host_sources` | (app, domain or IP, Mac, source process) | the processes listed under a domain or IP of an app's Domains & IPs tab, with that app's own requests ([Processes per app](#processes-per-app)); `backfilled` while a row holds what v5 copied from `host_sources` |
 | `alerts` | first contact of a monitored app with a new site, host or IP | `read_at` is null while unread |
 | `mutes` | host pattern earlier versions muted (`host`, `IP` or `*.example.com`) | unused: Tidemark has no mutes and neither reads nor writes it, so every host alerts. Schema v1 creates it with `*.apple.com`, `*.icloud.com` and `*.mzstatic.com`; it stays, since migrations are never edited |
 | `ip_info` | IP address | GeoIP / ASN cache from Surge's databases |
@@ -195,6 +195,38 @@ them by host and time, always on its own Mac (`device_id`; each Mac has its own 
 `relatedRecords(of:)` also finds a request's first-contact alert (`alerts.request_id`), its site probe
 (`probe_session_id`), the current egress check of its Mac nearest its start and the latest change of the current
 egress at or before its start (`egress_checks` are kept for 30 days, `egress_changes` for good).
+
+### Processes per app
+
+An app's Domains & IPs tab lists, under a selected domain or IP, every process that reached it for that app. Capture
+writes `app_host_sources` beside `host_sources`, in the same statement of the same flush, for each source of a request
+attributed to an app: one row per (app, kind, value, Mac, process path), requests added up, the earliest first seen, the
+latest last seen and title. `host_sources` keeps one row per (kind, value, Mac, process path) whatever the app, under the
+app that used it last, counting every app's requests and those of none, so an executable two apps ran to one address
+(`node`, `curl`, `git`, a shared helper) has one row there and one per app here. Sources wait in the write buffer and in
+`auxiliary.json` per app.
+
+Builds before v5 write `host_sources` alone, and v5 copies its rows that have an app (`backfilled`), so a Mac's process
+can have three rows for an app. `hostProcesses` reads the app's rows of the address by `app_host_sources`' primary key
+`(app_id, kind, value, …)` and the address's `host_sources` rows that name the app by `(kind, value, …)`, and of each Mac
+and process path keeps exactly one, so no request is counted twice:
+
+1. the app's own row, once capture has written it for the app's requests;
+2. otherwise the `host_sources` row, when it names the app: all that an earlier build records, and never less than the
+   copy, since it only grew;
+3. otherwise the copy, which keeps the app's earlier requests once another app has taken the `host_sources` row over.
+
+A Mac that still runs an earlier build is listed from `host_sources` as up to date as before, its processes under the
+app that used them last, as earlier builds always listed them. When this build first writes an app's row that has no
+count of its own yet (none, or a copy), the row goes on from the `host_sources` row if that names the app (its count,
+first and last seen as they were before the write, plus the write's own), so the list goes on from what it showed, and
+from then on counts the app's requests only. Those starting figures are `host_sources`', with whatever requests of other
+apps (and of none) it counted until then. A Mac that goes back to an earlier build after this one wrote its rows records
+what follows in `host_sources` alone, which the app's own rows hide until it runs this build again.
+
+Merging devices merges these rows like `host_sources`, counts added; a merged row stays `backfilled` only when both rows
+were. Deleting an app deletes its rows (`ON DELETE CASCADE`). A merge an earlier build makes deletes the merged ID's rows
+with its `devices` row; the `host_sources` rows it merged list those processes from then on.
 
 ### Rows other Macs write
 
@@ -371,17 +403,28 @@ WHERE (host || E'\n' || COALESCE(process_name, '') || E'\n' || COALESCE(host(rem
 ORDER BY started_at DESC LIMIT 50;
 ```
 
-The processes that reached one of an app's domains or IPs, as its Domains & IPs tab lists them under the address (the
-tab merges the rows by path in Swift; `kind` and `value` are the primary key's prefix, so only that address's rows are
-read):
+The processes that reached one of an app's domains or IPs, as its Domains & IPs tab lists them under the address: one
+row of each Mac's process ([Processes per app](#processes-per-app)), merged by path (the tab does both in Swift). The
+primary keys' prefixes, `(app_id, kind, value)` and `(kind, value)`, read only that address's rows:
 
 ```sql
-SELECT s.source_path, (array_agg(s.source_title ORDER BY s.last_seen DESC))[1] AS name,
-       sum(s.request_count) AS requests, min(s.first_seen) AS first_seen, max(s.last_seen) AS last_seen,
+WITH app AS (SELECT id FROM apps WHERE name = 'Cursor'),
+own AS (
+    SELECT a.* FROM app_host_sources a JOIN app ON a.app_id = app.id WHERE a.kind = 'domain' AND a.value = 'api.github.com'
+), shared AS (
+    SELECT s.* FROM host_sources s JOIN app ON s.app_id = app.id WHERE s.kind = 'domain' AND s.value = 'api.github.com'
+), kept AS (
+    SELECT o.device_id, o.source_path, o.source_title, o.first_seen, o.last_seen, o.request_count FROM own o
+    WHERE NOT o.backfilled OR NOT EXISTS (SELECT 1 FROM shared s WHERE s.device_id = o.device_id AND s.source_path = o.source_path)
+    UNION ALL
+    SELECT s.device_id, s.source_path, s.source_title, s.first_seen, s.last_seen, s.request_count FROM shared s
+    WHERE NOT EXISTS (SELECT 1 FROM own o WHERE o.device_id = s.device_id AND o.source_path = s.source_path AND NOT o.backfilled)
+)
+SELECT k.source_path, (array_agg(k.source_title ORDER BY k.last_seen DESC))[1] AS name,
+       sum(k.request_count) AS requests, min(k.first_seen) AS first_seen, max(k.last_seen) AS last_seen,
        array_agg(DISTINCT d.name) AS macs
-FROM host_sources s JOIN devices d ON d.id = s.device_id
-WHERE s.kind = 'domain' AND s.value = 'api.github.com' AND s.app_id = (SELECT id FROM apps WHERE name = 'Cursor')
-GROUP BY s.source_path ORDER BY requests DESC;
+FROM kept k JOIN devices d ON d.id = k.device_id
+GROUP BY k.source_path ORDER BY requests DESC;
 ```
 
 Busiest destinations this week:

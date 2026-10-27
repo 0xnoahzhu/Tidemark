@@ -150,7 +150,7 @@ struct ShellDemoDatabase: TidemarkDatabase {
     }
 
     func hostProcesses(kind: HostKind, value: String, appID: AppID, scope: DeviceScope) async throws -> [HostProcess] {
-        // A `host_sources` row per Mac and process, as capture writes them for the app's requests.
+        // An `app_host_sources` row per Mac and process, as capture writes them for the app's requests.
         struct Key: Hashable { var device: DeviceID; var path: String }
         var sightings: [Key: HostProcess.Sighting] = [:]
         for row in rows.reversed() where row.appID == appID && row.probeSessionID == nil {

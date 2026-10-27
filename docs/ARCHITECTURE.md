@@ -414,8 +414,10 @@ lists only that Mac's requests.
 
 Selecting a domain or an IP in an app's Domains & IPs tab (a click on its row; a notification's View selects the new
 domain or IP) lists under it every process that reached it, like the children of the process tree (`hostProcesses`): the
-app's `host_sources` rows of that address, read through the table's primary key, merged by executable path across Macs
-(their requests added up, the earliest first seen and the latest last seen, the Macs named when there are several). What
+app's `app_host_sources` rows of that address, with the `host_sources` rows that name the app for what Macs with earlier
+builds record (one row of each Mac's process, [DATABASE.md › Processes per app](DATABASE.md#processes-per-app)), read
+through the tables' primary keys, merged by executable path across Macs (their requests added up, the earliest first
+seen and the latest last seen, the Macs named when there are several). What
 first reached the address in the last 24 hours comes first, marked NEW, then the busiest. With one Mac in the sidebar
 the list keeps the processes that Mac reported, with every Mac's counts and dates as the address's own row has them, and
 a process's count says so in its help. A domain and an IP can be open at once. Each list keeps its own state
@@ -425,9 +427,10 @@ list's first frame, and a read that answers with that list draws nothing again. 
 than sliding the rows below it, which would lay out every row of the pane in each frame of the animation; the rows
 animate their own highlight and dimming. Another app's page opens with nothing selected, so its tab can show its last
 list at once. History has no filter for a process, so a process row's count is no link and its context menu opens the
-app's requests to the address. `host_sources` keeps one row per Mac and executable whatever the app, so an executable
-two apps both ran to the same address (`/usr/bin/curl`) is listed under the app that used it last, with both apps'
-requests; an address whose every process went that way says so instead of listing none.
+app's requests to the address. Capture counts each app's processes apart, so an executable two apps both ran to the same
+address (`/usr/bin/curl`) is listed under each, with that app's requests; Tidemark before schema v5, and a Mac still
+running it, kept one row per Mac and executable under the app that used it last, and an address whose every process went
+that way says so instead of listing none.
 
 The Domains & IPs page draws its table itself, as the native inset table looks and behaves (header and separators,
 rounded alternate rows continued below the last one, each row one VoiceOver element naming its columns), in one
