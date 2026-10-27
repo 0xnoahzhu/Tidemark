@@ -961,7 +961,8 @@ struct DatabaseLiveTests {
     }
 
     /// An app's domain or IP lists each process that reached it once, every Mac's rows of its path merged, and only that
-    /// app's; one Mac lists its own. The rows come through the primary key, without reading the rest of the table.
+    /// app's; one Mac lists the processes it reported, with every Mac's counts. The rows come through the primary key,
+    /// without reading the rest of the table.
     @Test func hostProcessesMergeTheMacsSourcesOfOneApp() async throws {
         try await withTestDatabase { db in
             let mac = Fixture.device("MacBook Pro")
@@ -1002,7 +1003,8 @@ struct DatabaseLiveTests {
             #expect(all[1].deviceIDs == [mac.id])
 
             let onMini = try await db.hostProcesses(kind: .domain, value: "api.github.com", appID: cursor.id, scope: .device(mini.id))
-            #expect(onMini.map { "\($0.path) \($0.requestCount)" } == ["\(node) 4", " 20"])
+            #expect(onMini.map { "\($0.path) \($0.requestCount)" } == ["\(node) 9", " 20"])
+            #expect(onMini.first?.deviceIDs == [mac.id, mini.id])
             #expect(try await db.hostProcesses(kind: .domain, value: "api.github.com", appID: raycast.id, scope: .all).map(\.name) == ["curl"])
             #expect(try await db.hostProcesses(kind: .ip, value: "140.82.112.3", appID: cursor.id, scope: .all).map(\.path) == [node])
             #expect(try await db.hostProcesses(kind: .ip, value: "api.github.com", appID: cursor.id, scope: .all).isEmpty)
@@ -1012,15 +1014,13 @@ struct DatabaseLiveTests {
                 source(value: "svc\(index).example.com", device: mac.id, app: cursor.id, path: node, title: "node", at: -1)
             })
             try await db.execute("ANALYZE host_sources")
-            for scope in [DeviceScope.all, .device(mini.id)] {
-                var explain = PostgresDatabase.SQL("EXPLAIN ")
-                let statement = PostgresDatabase.hostProcessSightings(kind: .domain, value: "api.github.com", appID: cursor.id, scope: scope)
-                explain.append(statement.text)
-                let plan = try await db.rows(PostgresQuery(unsafeSQL: explain.text, binds: statement.binds))
-                    .map { try $0.makeRandomAccess()[0].decode(String.self) }.joined(separator: "\n")
-                #expect(plan.contains("host_sources_pkey") && !plan.contains("Seq Scan"), "\(plan)")
-                #expect(plan.contains("kind =") && plan.contains("value ="), "\(plan)")
-            }
+            var explain = PostgresDatabase.SQL("EXPLAIN ")
+            let statement = PostgresDatabase.hostProcessSightings(kind: .domain, value: "api.github.com", appID: cursor.id)
+            explain.append(statement.text)
+            let plan = try await db.rows(PostgresQuery(unsafeSQL: explain.text, binds: statement.binds))
+                .map { try $0.makeRandomAccess()[0].decode(String.self) }.joined(separator: "\n")
+            #expect(plan.contains("host_sources_pkey") && !plan.contains("Seq Scan"), "\(plan)")
+            #expect(plan.contains("kind =") && plan.contains("value ="), "\(plan)")
         }
     }
 

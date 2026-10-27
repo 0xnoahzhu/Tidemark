@@ -73,7 +73,7 @@ struct HostProcess: Identifiable, Hashable, Sendable {
     var name: String
     var firstSeen: Date
     var lastSeen: Date
-    /// Every Mac's requests.
+    /// Every Mac's requests, also in a list of one Mac's processes.
     var requestCount: Int64
     /// The Macs that reported it, the one that saw it last first.
     var deviceIDs: [DeviceID]
@@ -89,14 +89,16 @@ struct HostProcess: Identifiable, Hashable, Sendable {
     /// The most processes listed for one address.
     static let limit = 200
 
-    /// One process per executable path, every Mac's sightings in `scope` merged: their requests added up, the earliest
-    /// first seen and the latest last seen, the latest name, and the Macs. Ordered like the tab's domains: what first
-    /// reached the address in the last 24 hours, then the busiest, so the process that does most of the talking leads;
-    /// then the most recent, then by path. Requests whose process Surge never named come last, being no process at all.
+    /// One process per executable path, every Mac's sightings merged: their requests added up, the earliest first seen
+    /// and the latest last seen, the latest name, and the Macs. A `scope` of one Mac keeps the processes that Mac
+    /// reported, still with every Mac's counts and dates, as the address's own row has. Ordered like the tab's domains:
+    /// what first reached the address in the last 24 hours, then the busiest, so the process that does most of the
+    /// talking leads; then the most recent, then by path. Requests whose process Surge never named come last, being no
+    /// process at all.
     static func merge(_ sightings: [Sighting], scope: DeviceScope = .all, now: Date = .now, limit: Int = limit) -> [HostProcess] {
         var byPath: [String: (process: HostProcess, seen: [DeviceID: Date])] = [:]
         // The latest first, so a path's first sighting names it.
-        for sighting in sightings.sorted(by: { $0.lastSeen > $1.lastSeen }) where scope.includes(sighting.deviceID) {
+        for sighting in sightings.sorted(by: { $0.lastSeen > $1.lastSeen }) {
             let path = sighting.path == "unknown" ? "" : sighting.path
             guard var entry = byPath[path] else {
                 byPath[path] = (HostProcess(path: path, name: sighting.title, firstSeen: sighting.firstSeen, lastSeen: sighting.lastSeen,
@@ -109,7 +111,8 @@ struct HostProcess: Identifiable, Hashable, Sendable {
             entry.seen[sighting.deviceID] = max(entry.seen[sighting.deviceID] ?? .distantPast, sighting.lastSeen)
             byPath[path] = entry
         }
-        let processes = byPath.values.map { entry in
+        let processes = byPath.values.compactMap { entry -> HostProcess? in
+            if let device = scope.deviceID, entry.seen[device] == nil { return nil }
             var process = entry.process
             process.deviceIDs = entry.seen.sorted { a, b in a.value != b.value ? a.value > b.value : a.key.uuidString < b.key.uuidString }.map(\.key)
             return process

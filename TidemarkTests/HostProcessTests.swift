@@ -53,16 +53,20 @@ import Testing
         #expect(HostProcess.merge([Self.sighting("/usr/bin/a", "a"), Self.sighting("/usr/bin/b", "b")], now: Self.now, limit: 1).count == 1)
     }
 
-    /// One Mac lists the processes it reported, with its own counts.
-    @Test func oneMacKeepsItsOwnRows() {
+    /// One Mac lists the processes it reported, with every Mac's counts and dates, as the address's own row has them.
+    @Test func oneMacListsWhatItReportedWithEveryMacsCounts() {
         let sightings = [
-            Self.sighting("/usr/local/bin/node", "node", device: Self.mac, requests: 5),
-            Self.sighting("/usr/local/bin/node", "node", device: Self.mini, requests: 7),
+            Self.sighting("/usr/local/bin/node", "node", device: Self.mac, first: -50, last: -1, requests: 5),
+            Self.sighting("/usr/local/bin/node", "node", device: Self.mini, first: -30, last: -3, requests: 7),
             Self.sighting("/usr/bin/curl", "curl", device: Self.mac, requests: 9),
         ]
         let onMini = HostProcess.merge(sightings, scope: .device(Self.mini), now: Self.now)
-        #expect(onMini.map(\.requestCount) == [7] && onMini.first?.deviceIDs == [Self.mini])
+        #expect(onMini.map(\.requestCount) == [12] && onMini.first?.deviceIDs == [Self.mac, Self.mini])
+        #expect(onMini.first?.firstSeen == Self.now.addingTimeInterval(-50 * 3600))
+        #expect(onMini.first?.lastSeen == Self.now.addingTimeInterval(-3600))
+        #expect(HostProcess.merge(sightings, scope: .device(Self.mac), now: Self.now).map(\.requestCount) == [12, 9])
         #expect(HostProcess.merge(sightings, scope: .all, now: Self.now).map(\.requestCount) == [12, 9])
+        #expect(HostProcess.merge(sightings, scope: .device(UUID()), now: Self.now).isEmpty)
         #expect(HostProcess.merge([], now: Self.now).isEmpty)
     }
 }
@@ -92,8 +96,9 @@ import Testing
         // The IP counts the requests to every domain that resolved to it.
         let ip = try await database.hostProcesses(kind: .ip, value: "104.18.19.125", appID: cursor, scope: .all)
         #expect(ip.map { "\($0.name) \($0.requestCount)" } == ["node 3", "Cursor Helper (Plugin) 1"])
+        // The other Mac reported only node, which it lists with both Macs' requests.
         let otherMac = try await database.hostProcesses(kind: .domain, value: "api2.cursor.sh", appID: cursor, scope: .device(F.otherMac))
-        #expect(otherMac.map { "\($0.name) \($0.requestCount)" } == ["node 1"])
+        #expect(otherMac.map { "\($0.name) \($0.requestCount)" } == ["node 2"])
     }
 
     /// The demo's apps reach some addresses from several processes, some of them from more than one Mac, and others
