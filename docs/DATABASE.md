@@ -102,7 +102,7 @@ loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`)
 | `processes` | (Mac, PID, start time) | process tree with `parent_id`; PIDs are reused, so the start time is part of the key |
 | `app_hosts` | (app, domain or IP) | a monitored app's inventory; `first_seen` within 24 h means NEW |
 | `host_sources` | (domain or IP, Mac, source process or probe) | the global Domains & IPs page; `app_id` is the app the process's requests rolled up to when it last reached the address, and `request_count` counts every app's requests of it and those of none |
-| `app_host_sources` | (app, domain or IP, Mac, source process) | the processes listed under a domain or IP of an app's Domains & IPs tab, with that app's own requests ([Processes per app](#processes-per-app)); `backfilled` while a row holds what v5 copied from `host_sources` |
+| `app_host_sources` | (app, domain or IP, Mac, source process) | the processes listed under a domain or IP of an app's Domains & IPs tab, with that app's own requests ([Processes per app](#processes-per-app)); `backfilled` while a row holds what v5 (or a device merge) copied from `host_sources` |
 | `alerts` | first contact of a monitored app with a new site, host or IP | `read_at` is null while unread |
 | `mutes` | host pattern earlier versions muted (`host`, `IP` or `*.example.com`) | unused: Tidemark has no mutes and neither reads nor writes it, so every host alerts. Schema v1 creates it with `*.apple.com`, `*.icloud.com` and `*.mzstatic.com`; it stays, since migrations are never edited |
 | `ip_info` | IP address | GeoIP / ASN cache from Surge's databases |
@@ -225,8 +225,14 @@ apps (and of none) it counted until then. A Mac that goes back to an earlier bui
 what follows in `host_sources` alone, which the app's own rows hide until it runs this build again.
 
 Merging devices merges these rows like `host_sources`, counts added; a merged row stays `backfilled` only when both rows
-were. Deleting an app deletes its rows (`ON DELETE CASCADE`). A merge an earlier build makes deletes the merged ID's rows
-with its `devices` row; the `host_sources` rows it merged list those processes from then on.
+were. Before they merge, a row with no count of its own (none, or a copy) takes what was listed instead, the figures of
+its ID's `host_sources` row, when that row names the app: every such row of the ID merged away, and those of the other ID
+that a row with its own count joins. Otherwise a row with its own count would hide what the other ID listed from `host_sources` (an
+earlier build's writes after v5, or a copy `host_sources` outgrew), and so would the merged `host_sources` row, which
+names the app of the ID merged into. A row that stays a copy is listed from the merged `host_sources` row while that names
+its app, with both IDs' requests of every app. Deleting an app deletes its rows (`ON DELETE CASCADE`). A merge an earlier
+build makes deletes the merged ID's rows with its `devices` row; the `host_sources` rows it merged list those processes
+from then on.
 
 ### Rows other Macs write
 
@@ -329,8 +335,9 @@ transaction fails and is tried again (three times, 1 s apart) rather than captur
    * `processes`: one both have (same PID and start time) is merged into `into`'s (earlier first seen, later last
      seen, app, path, parent), its children and requests link to `into`'s, and it is deleted; the rest moves.
    * `app_installs` (the later check wins), `host_sources` and `app_host_sources` (earlier first seen, later last seen
-     and its title, counts added; a merged `app_host_sources` row stays `backfilled` only when both were) merge the
-     same way. A request both IDs recorded may count twice in a merged `request_count`:
+     and its title, counts added; a merged `app_host_sources` row stays `backfilled` only when both were, and an app's
+     row with no count of its own first takes its ID's `host_sources` figures, [Processes per app](#processes-per-app))
+     merge the same way. A request both IDs recorded may count twice in a merged `request_count`:
      only when the second ID saw it live, since a launch never counts a request it read back from Surge's recent
      list. (`processes.request_count` is not maintained.)
    * `alerts`, `probe_sessions`, `egress_checks`, `egress_changes`, `dns_answers` and `proxy_errors` move (a DNS answer

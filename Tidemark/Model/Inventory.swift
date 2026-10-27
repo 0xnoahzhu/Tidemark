@@ -66,7 +66,8 @@ struct HostProcess: Identifiable, Hashable, Sendable {
             case recorded
             /// `host_sources`, every app's requests of the process (and those of none), whose app is this one.
             case shared
-            /// `app_host_sources` as schema v5 copied it from `host_sources` (`backfilled`), not written for the app since.
+            /// `app_host_sources` as schema v5 (or a device merge) copied it from `host_sources` (`backfilled`), not
+            /// written for the app since.
             case copied
         }
 

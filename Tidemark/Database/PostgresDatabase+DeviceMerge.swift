@@ -430,6 +430,13 @@ enum DeviceMergeSQL {
     /// the earlier first seen and the later last seen (with that observation's title), and adds the counts; so does an
     /// app's host source both have (same app, kind, value and source path), which stays a copy of `host_sources`
     /// (`backfilled`) only when both were.
+    ///
+    /// Before the host sources merge, an app's row that has no count of its own (none, or a copy) takes the figures of
+    /// its ID's `host_sources` row when that row names the app, the figures `hostProcesses` lists for it: every such row
+    /// of `from`, and those of `into` that a row of `from` with its own count joins. Otherwise a merged row with its own
+    /// count, or the merged `host_sources` row naming `into`'s app, would hide what that ID listed (an older build's
+    /// writes after schema v5, or a copy `host_sources` outgrew). The rows stay copies, so this alone changes nothing
+    /// listed.
     static let installsAndSources = [
         """
         UPDATE app_installs i SET installed = f.installed, checked_at = f.checked_at
@@ -441,6 +448,26 @@ enum DeviceMergeSQL {
         WHERE f.device_id = $1 AND i.device_id = $2 AND i.app_id = f.app_id
         """,
         "UPDATE app_installs SET device_id = $2 WHERE device_id = $1",
+        """
+        INSERT INTO app_host_sources AS t (app_id, kind, value, device_id, source_path, source_title, bundle_path, first_seen, last_seen,
+                                           request_count, backfilled)
+        SELECT s.app_id, s.kind, s.value, s.device_id, s.source_path, s.source_title, s.bundle_path, s.first_seen, s.last_seen,
+               s.request_count, true
+        FROM host_sources s
+        WHERE s.app_id IS NOT NULL
+          AND (s.device_id = $1
+               OR s.device_id = $2 AND EXISTS (
+                   SELECT 1 FROM app_host_sources f
+                   WHERE f.app_id = s.app_id AND f.kind = s.kind AND f.value = s.value AND f.device_id = $1 AND f.source_path = s.source_path
+                     AND NOT f.backfilled))
+        ON CONFLICT (app_id, kind, value, device_id, source_path) DO UPDATE SET
+            first_seen = LEAST(t.first_seen, excluded.first_seen),
+            last_seen = GREATEST(t.last_seen, excluded.last_seen),
+            request_count = GREATEST(t.request_count, excluded.request_count),
+            source_title = CASE WHEN excluded.last_seen > t.last_seen THEN excluded.source_title ELSE t.source_title END,
+            bundle_path = COALESCE(t.bundle_path, excluded.bundle_path)
+        WHERE t.backfilled
+        """,
         """
         UPDATE host_sources i SET
             first_seen = LEAST(i.first_seen, f.first_seen),

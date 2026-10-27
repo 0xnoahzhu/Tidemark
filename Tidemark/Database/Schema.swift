@@ -100,9 +100,9 @@ enum Schema {
     /// `host_sources`, in the same statement, for every request attributed to an app; older builds keep writing
     /// `host_sources` only (`requiresVersion` 1), which `hostProcesses` reads for what only they recorded.
     ///
-    /// `backfilled` marks a row copied from `host_sources` (by the backfill below, or merged from such rows only): it
-    /// holds `host_sources`' figures, every app's requests of that Mac and process, until capture first writes the row
-    /// for the app's own requests, continuing from them.
+    /// `backfilled` marks a row copied from `host_sources` (by the backfill below or a device merge, or merged from such
+    /// rows only): it holds `host_sources`' figures, every app's requests of that Mac and process, until capture first
+    /// writes the row for the app's own requests, continuing from them.
     private static let v5 = """
     CREATE TABLE IF NOT EXISTS app_host_sources (
         app_id        uuid NOT NULL REFERENCES apps(id) ON DELETE CASCADE,

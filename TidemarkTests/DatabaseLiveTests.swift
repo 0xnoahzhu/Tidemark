@@ -1233,6 +1233,76 @@ struct DatabaseLiveTests {
         }
     }
 
+    /// An app lists after a merge what it listed of both IDs before: a process one ID lists from its `host_sources` row
+    /// (an older build's writes after the upgrade, which no app row counts, or a copy that row outgrew) keeps those
+    /// requests when the other ID's own row of the app joins it, or when the other ID's `host_sources` row names
+    /// another app.
+    @Test func mergingADeviceKeepsWhatEachIDListed() async throws {
+        try await withTestDatabase(upTo: 4) { db in
+            let old = Fixture.device("Noah’s Mac mini")
+            let new = Fixture.device("Mac mini")
+            for device in [old, new] { try await db.upsertDevice(device) }
+            let cursor = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            let raycast = Fixture.app("Raycast", path: "/Applications/Raycast.app")
+            try await db.insertApp(cursor)
+            try await db.insertApp(raycast)
+            func curl(_ value: String, _ device: DeviceID, _ app: AppID = cursor.id, at seconds: TimeInterval, requests: Int64) -> HostSourceTouch {
+                Fixture.source(.domain, value, device: device, app: app, at: seconds, requests: requests)
+            }
+            // Before the upgrade: what becomes a copy.
+            try await Self.olderBuildTouchHostSource(db, curl("stale.example", old.id, at: -7_200, requests: 7))
+            try await Self.olderBuildTouchHostSource(db, curl("inverse.example", new.id, at: -7_200, requests: 2))
+            #expect(try await db.migrate() == 5)
+            // After it, an older build writes under either ID: rows of no app's own, copies outgrown.
+            for touch in [
+                curl("lost.example", old.id, at: -600, requests: 3),
+                curl("stale.example", old.id, at: -500, requests: 2),
+                curl("inverse.example", new.id, at: -400, requests: 3),
+                curl("fresh.example", new.id, at: -400, requests: 4),
+                curl("taken.example", old.id, at: -300, requests: 3),
+            ] {
+                try await Self.olderBuildTouchHostSource(db, touch)
+            }
+            // This build counts the apps' own requests under the other ID.
+            try await db.touchHostSources([
+                curl("lost.example", new.id, at: -100, requests: 1),
+                curl("stale.example", new.id, at: -100, requests: 1),
+                curl("inverse.example", old.id, at: -100, requests: 3),
+                curl("fresh.example", old.id, at: -100, requests: 2),
+                curl("taken.example", new.id, raycast.id, at: -200, requests: 1),
+            ])
+            let domains = ["lost.example", "stale.example", "inverse.example", "fresh.example", "taken.example"]
+            func everything() async throws -> [String] {
+                var lists: [String] = []
+                for domain in domains {
+                    for app in [cursor.id, raycast.id] {
+                        lists += try await listed(db, domain, app).map { "\(domain) \(app == cursor.id ? "Cursor" : "Raycast") \($0)" }
+                    }
+                }
+                return lists
+            }
+            let before = try await everything()
+            #expect(before == [
+                "lost.example Cursor curl 4 600-100",
+                "stale.example Cursor curl 10 7200-100",
+                "inverse.example Cursor curl 8 7200-100",
+                "fresh.example Cursor curl 6 400-100",
+                "taken.example Cursor curl 3 300-300",
+                "taken.example Raycast curl 1 200-200",
+            ])
+
+            #expect(try await db.mergeDevice(old.id, into: new.id) == DeviceMergeResult(merged: true))
+            #expect(try await everything() == before)
+            #expect(try await origins(db, "lost.example", cursor.id) == ["curl 4 recorded", "curl 4 shared"])
+            #expect(try await origins(db, "taken.example", cursor.id) == ["curl 3 copied"])
+
+            // Capture goes on from there.
+            try await db.touchHostSources([curl("lost.example", new.id, at: -10, requests: 1)])
+            #expect(try await listed(db, "lost.example", cursor.id) == ["curl 5 600-10"])
+            #expect(try await db.mergeDevice(old.id, into: new.id) == DeviceMergeResult())
+        }
+    }
+
     @Test func ipInfoRoundTrip() async throws {
         try await withTestDatabase { db in
             #expect(try await db.ipInfo("8.8.8.8") == nil)
