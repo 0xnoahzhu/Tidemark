@@ -146,8 +146,10 @@ session):
    `*.mzstatic.com`) alert like any other. Entries stay marked NEW for 24 hours.
 4. Post a macOS notification (UserNotifications), always: there are no notification settings. It reads like
    the design's banner: "Tidemark", then "Raycast reached a new site" and "notion.com · first host
-   api.notion.com · via node", and its one action, "View", opens the app's Domains & IPs on the domain or IP of the
-   alert it names first (see the app's tab below). Bursts are grouped:
+   api.notion.com · via node". Its action "View" (also what a click on it does) opens the app's Domains & IPs on the
+   domain or IP of the alert it names first (see the app's tab below), and "Show Request" the request that raised the
+   alert (a burst's first) in History, as the Notifications page's cards do with their buttons and the menu bar panel's
+   LATEST rows with a History button shown on hover and their context menu (see [UI](#ui)). Bursts are grouped:
    one notification per app and Mac per 30 s. Alerts written by *other* Macs are polled and posted on this Mac
    too, led by that Mac's name, unless their app is archived (pausing an app's monitoring here only stops this
    Mac's alerts).

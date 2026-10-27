@@ -141,7 +141,7 @@ struct MenuBarPanel: View {
                 .padding(.horizontal, 2.px)
         } else {
             ForEach(items) { alert in
-                MenuBarAlertRow(alert: alert) { open(alert) }
+                MenuBarAlertRow(alert: alert, action: { open(alert) }, showRequest: { showRequest(alert) })
             }
         }
     }
@@ -188,14 +188,24 @@ struct MenuBarPanel: View {
     }
 
     private func open(_ alert: AlertItem) {
-        if alert.isUnread {
-            let id = alert.id
-            Task { await model.capture.markAlertsRead([id]) }
-        }
+        markRead(alert)
         // Select the new domain or IP in the app's Domains & IPs tab, which lists the processes that reached it, like a
         // notification card's View.
         model.nav.open(alert.appID, selecting: alert.kind, alert.value)
         showMainWindow()
+    }
+
+    /// The request that raised the alert, in History, like a notification card's Show Request.
+    private func showRequest(_ alert: AlertItem) {
+        markRead(alert)
+        model.nav.openRequest(RequestTarget(alert))
+        showMainWindow()
+    }
+
+    private func markRead(_ alert: AlertItem) {
+        guard alert.isUnread else { return }
+        let id = alert.id
+        Task { await model.capture.markAlertsRead([id]) }
     }
 }
 
@@ -281,11 +291,17 @@ private struct MenuBarPolicyChip: View {
 }
 
 /// One of the three newest alerts: app tile, the new host / site / IP, `Docker · com.docker.backend`, time.
+///
+/// A click opens the app's Domains & IPs. Over a hovered row the time gives way to a History button, which, like the
+/// row's context menu, shows the request that raised the alert.
 private struct MenuBarAlertRow: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
     var alert: AlertItem
     var action: () -> Void
+    var showRequest: () -> Void
+
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
@@ -306,6 +322,7 @@ private struct MenuBarAlertRow: View {
                     .font(.design(10.5))
                     .foregroundStyle(Theme.ink3)
                     .monospacedDigit()
+                    .opacity(hovering ? 0 : 1)
             }
             .padding(.horizontal, 2.px)
             .padding(.vertical, 3.px)
@@ -313,6 +330,28 @@ private struct MenuBarAlertRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint(tr("Shows this app's domains and IPs", "MenuBar"))
+        .accessibilityAction(named: tr("Show Request", "MenuBar"), showRequest)
+        .overlay(alignment: .trailing) {
+            // The row's action above stands for it with VoiceOver.
+            if hovering {
+                Button(action: showRequest) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.design(11, .medium))
+                        .foregroundStyle(Theme.ink2)
+                        .frame(width: 24.px, height: 22.px)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 6.px, style: .continuous))
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help(tr("Show Request", "MenuBar"))
+                .accessibilityHidden(true)
+            }
+        }
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button(tr("Show Request", "MenuBar"), action: showRequest)
+            Button(tr("Show Domains & IPs", "MenuBar"), action: action)
+        }
     }
 
     private var identity: AppIdentity {

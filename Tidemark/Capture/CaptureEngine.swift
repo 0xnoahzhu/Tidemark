@@ -161,6 +161,7 @@ final class CaptureEngine {
         started = true
         model.live.recording = true
         notifier.onView = { [weak self] appID, ids in self?.openAlerts(appID: appID, ids: ids) }
+        notifier.onShowRequest = { [weak self] request, ids in self?.openRequest(request, alertIDs: ids) }
         notifier.install()
         observedPreferences = PreferenceValues(model.preferences)
         observedScope = model.devices.scope
@@ -751,6 +752,14 @@ final class CaptureEngine {
             notifier.post(alert, appName: appName, deviceName: deviceName)
         }
         if model.alerts.items.count > 500 { model.alerts.items.removeLast(model.alerts.items.count - 500) }
+    }
+
+    /// "Show Request" on a notification: the request in History, alerts marked read.
+    private func openRequest(_ request: RequestTarget, alertIDs ids: [Int64]) {
+        model.nav.openRequest(request)
+        TidemarkIntents.showMainWindow()
+        guard !ids.isEmpty else { return }
+        Task { await markAlertsRead(ids) }
     }
 
     /// "View" on a notification: the app's Domains & IPs tab on the domain or IP of the alert it names first, as a

@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// One alert: app tile, NEW chip, headline, `Mac · details`, View, time and the unread dot.
-/// Clicking the card marks it read; View also opens the app on its Domains & IPs tab.
+/// One alert: app tile, NEW chip, headline, `Mac · details`, Show Request and View, time and the unread dot.
+/// Clicking the card marks it read; Show Request also opens the request that raised it in History, and View the app on
+/// its Domains & IPs tab.
 struct NotificationCard: View {
     @Environment(AppModel.self) private var model
     var alert: AlertItem
@@ -46,9 +47,14 @@ struct NotificationCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button(tr("View", "Notifications")) { view() }
-                .buttonStyle(DesignButtonStyle(height: 24, fontSize: 11.5, cornerRadius: 7, horizontalPadding: 9))
-                .disabled(app == nil)
+            HStack(spacing: 6.px) {
+                // A deleted app's requests stay, so its alerts still show theirs.
+                Button(tr("Show Request", "Notifications")) { showRequest() }
+                    .help(tr("Open the request that raised this alert in History", "Notifications"))
+                Button(tr("View", "Notifications")) { view() }
+                    .disabled(app == nil)
+            }
+            .buttonStyle(DesignButtonStyle(height: 24, fontSize: 11.5, cornerRadius: 7, horizontalPadding: 9))
 
             timeLabel
                 .font(.design(11))
@@ -73,6 +79,7 @@ struct NotificationCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityValue(alert.isUnread ? tr("Unread", "Notifications") : "")
+        .accessibilityAction(named: tr("Show Request", "Notifications")) { showRequest() }
         .accessibilityAction(named: tr("View", "Notifications")) { view() }
         .accessibilityAction(named: tr("Mark as Read", "Notifications")) { markRead() }
     }
@@ -128,5 +135,11 @@ struct NotificationCard: View {
     private func view() {
         markRead()
         model.nav.open(alert.appID, selecting: alert.kind, alert.value)
+    }
+
+    /// The request that raised the alert, selected in History and open in the inspector.
+    private func showRequest() {
+        markRead()
+        model.nav.openRequest(RequestTarget(alert))
     }
 }

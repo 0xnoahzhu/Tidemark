@@ -161,6 +161,11 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "与 %@ 的 SCRAM 认证失败。" } }
       }
     },
+    "Show Request" : {
+      "localizations" : {
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看请求" } }
+      }
+    },
     "Surge is shutting down" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surge 正在退出" } }

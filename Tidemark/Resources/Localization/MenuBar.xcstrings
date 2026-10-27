@@ -141,6 +141,26 @@
         }
       }
     },
+    "Show Domains & IPs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看域名与 IP"
+          }
+        }
+      }
+    },
+    "Show Request" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看请求"
+          }
+        }
+      }
+    },
     "Shows this app's domains and IPs" : {
       "localizations" : {
         "zh-Hans" : {

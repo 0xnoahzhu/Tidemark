@@ -76,14 +76,17 @@ struct CaptureBurstGrouper {
     }
 }
 
-/// Posts first-contact notifications and handles their one action, "View" (also what clicking one does).
+/// Posts first-contact notifications and handles their actions: "View" (also what clicking one does) and "Show Request".
 @MainActor
 final class CaptureNotifier: NSObject {
-    static let categoryIdentifier = "tidemark.alert"
-    static let viewAction = "tidemark.alert.view"
+    nonisolated static let categoryIdentifier = "tidemark.alert"
+    nonisolated static let viewAction = "tidemark.alert.view"
+    nonisolated static let showRequestAction = "tidemark.alert.request"
 
     /// Opens an app's inventory for these alerts (marking them read).
     var onView: ((AppID, [Int64]) -> Void)?
+    /// Opens the request that raised the notification's (first) alert in History, marking these alerts read.
+    var onShowRequest: ((RequestTarget, [Int64]) -> Void)?
     /// Hands a notification to Notification Center; tests replace it so nothing reaches the screen.
     var deliver: (UNNotificationRequest) -> Void = { UNUserNotificationCenter.current().add($0) }
 
@@ -97,12 +100,16 @@ final class CaptureNotifier: NSObject {
         guard !installed else { return }
         installed = true
         center.delegate = self
-        let view = UNNotificationAction(identifier: Self.viewAction, title: tr("View", "Capture"), options: [.foreground])
-        center.setNotificationCategories([
-            UNNotificationCategory(identifier: Self.categoryIdentifier, actions: [view], intentIdentifiers: [], options: [])
-        ])
+        center.setNotificationCategories([Self.category])
         let center = self.center
         Task { _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge]) }
+    }
+
+    /// The alert category: "View", then "Show Request".
+    static var category: UNNotificationCategory {
+        let view = UNNotificationAction(identifier: viewAction, title: tr("View", "Capture"), options: [.foreground])
+        let request = UNNotificationAction(identifier: showRequestAction, title: tr("Show Request", "Capture"), options: [.foreground])
+        return UNNotificationCategory(identifier: categoryIdentifier, actions: [view, request], intentIdentifiers: [], options: [])
     }
 
     /// Posts a notification for `alert`, or folds it into the notification of its app's current burst.
@@ -112,16 +119,16 @@ final class CaptureNotifier: NSObject {
             add(identifier: identifier, text: Text(
                 headline: CaptureAlertText.title(appName: appName, alert: alert),
                 details: CaptureAlertText.details(alert: alert, deviceName: deviceName),
-                silent: false, appID: alert.appID, alertIDs: [alert.id]
+                silent: false, appID: alert.appID, alertIDs: [alert.id], request: RequestTarget(alert)
             ))
         case .aggregate(let identifier, let first, let extra):
             let values = extra.map { $0.scope == .site ? ($0.site ?? $0.value) : $0.value }
             let more = trf("…and %lld more: %@", "Capture", extra.count, values.joined(separator: ", "))
-            // The burst already alerted once; the update is silent.
+            // The burst already alerted once; the update is silent. Its headline, and so its request, is the first alert's.
             add(identifier: identifier, text: Text(
                 headline: CaptureAlertText.title(appName: appName, alert: first),
                 details: CaptureAlertText.details(alert: first, deviceName: deviceName) + "\n" + more,
-                silent: true, appID: alert.appID, alertIDs: [first.id] + extra.map(\.id)
+                silent: true, appID: alert.appID, alertIDs: [first.id] + extra.map(\.id), request: RequestTarget(first)
             ))
         }
     }
@@ -133,6 +140,8 @@ final class CaptureNotifier: NSObject {
         var silent: Bool
         var appID: AppID
         var alertIDs: [Int64]
+        /// What Show Request opens: the request of the alert the headline names.
+        var request: RequestTarget
     }
 
     /// Lays the text out like the design's banner: "Tidemark" on top (with the time beside it), the headline, then
@@ -150,12 +159,44 @@ final class CaptureNotifier: NSObject {
         } else {
             content.sound = .default
         }
-        content.userInfo = Self.userInfo(appID: text.appID, alertIDs: text.alertIDs)
+        content.userInfo = Self.userInfo(appID: text.appID, alertIDs: text.alertIDs, request: text.request)
         deliver(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
     }
 
-    private static func userInfo(appID: AppID, alertIDs: [Int64]) -> [String: Any] {
-        ["appID": appID.uuidString, "alertIDs": alertIDs.map { NSNumber(value: $0) }]
+    static func userInfo(appID: AppID, alertIDs: [Int64], request: RequestTarget) -> [String: Any] {
+        var info: [String: Any] = [
+            "appID": appID.uuidString, "alertIDs": alertIDs.map { NSNumber(value: $0) },
+            "hostKind": request.kind.rawValue, "hostValue": request.value,
+        ]
+        if let rowID = request.rowID { info["requestRowID"] = NSNumber(value: rowID) }
+        return info
+    }
+
+    /// Where an action on a notification leads.
+    enum Route: Equatable, Sendable {
+        /// The app's Domains & IPs.
+        case view(AppID, alertIDs: [Int64])
+        /// The request in History.
+        case showRequest(RequestTarget, alertIDs: [Int64])
+    }
+
+    /// Where `action` on a notification with `userInfo` leads: nil for a dismissal, or a notification Tidemark did not
+    /// post. A notification posted before Show Request existed (the category, and so its actions, are this build's)
+    /// names no request: it opens the app's Domains & IPs, as View does.
+    nonisolated static func route(action: String, userInfo: [AnyHashable: Any]) -> Route? {
+        guard let appID = (userInfo["appID"] as? String).flatMap(UUID.init(uuidString:)) else { return nil }
+        let alertIDs = (userInfo["alertIDs"] as? [NSNumber])?.map(\.int64Value) ?? []
+        switch action {
+        case viewAction, UNNotificationDefaultActionIdentifier:
+            return .view(appID, alertIDs: alertIDs)
+        case showRequestAction:
+            guard let kind = (userInfo["hostKind"] as? String).flatMap(HostKind.init(rawValue:)),
+                  let value = userInfo["hostValue"] as? String else { return .view(appID, alertIDs: alertIDs) }
+            let rowID = (userInfo["requestRowID"] as? NSNumber)?.int64Value
+            return .showRequest(RequestTarget(rowID: rowID, kind: kind, value: value, appID: appID), alertIDs: alertIDs)
+        default:
+            return nil
+        }
     }
 
     /// Brings the main window forward. The engine cannot call `openWindow`, so it orders the existing
@@ -173,14 +214,14 @@ final class CaptureNotifier: NSObject {
         }
     }
 
-    fileprivate func handle(action: String, appID: AppID?, alertIDs: [Int64]) {
-        switch action {
-        case Self.viewAction, UNNotificationDefaultActionIdentifier:
-            if let appID { onView?(appID, alertIDs) }
-            Self.showMainWindow()
-        default:
-            break
+    func handle(_ route: Route) {
+        switch route {
+        case .view(let appID, let alertIDs):
+            onView?(appID, alertIDs)
+        case .showRequest(let request, let alertIDs):
+            onShowRequest?(request, alertIDs)
         }
+        Self.showMainWindow()
     }
 }
 
@@ -190,10 +231,7 @@ extension CaptureNotifier: UNUserNotificationCenterDelegate {
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        let info = response.notification.request.content.userInfo
-        let action = response.actionIdentifier
-        let appID = (info["appID"] as? String).flatMap(UUID.init(uuidString:))
-        let alertIDs = (info["alertIDs"] as? [NSNumber])?.map(\.int64Value) ?? []
-        await handle(action: action, appID: appID, alertIDs: alertIDs)
+        guard let route = Self.route(action: response.actionIdentifier, userInfo: response.notification.request.content.userInfo) else { return }
+        await handle(route)
     }
 }

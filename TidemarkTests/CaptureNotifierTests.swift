@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@preconcurrency import UserNotifications
 @testable import Tidemark
 
 @MainActor
@@ -91,6 +92,49 @@ struct CaptureNotifierTests {
         #expect(CaptureAlertText.title(appName: "WeChat", alert: direct) == "WeChat connected straight to a new IP")
         direct.processName = "Unknown"
         #expect(CaptureAlertText.details(alert: direct) == "157.148.69.80", "no process to name")
+    }
+
+    /// Each notification carries the request of the alert its headline names (a burst's first), for Show Request.
+    @Test func notificationsCarryTheirRequest() {
+        Localizer.shared.override = "en"
+        let notifier = CaptureNotifier()
+        var delivered: [UNNotificationRequest] = []
+        notifier.deliver = { delivered.append($0) }
+        let app = UUID()
+        var first = alert(1, app: app, scope: .ip, value: "18.97.36.52", host: "a.claude.ai", ip: "18.97.36.52")
+        first.requestRowID = 1_284_093
+        let t0 = Date(timeIntervalSince1970: 1_792_000_000)
+        notifier.post(first, appName: "Claude", deviceName: nil, now: t0)
+        notifier.post(alert(2, app: app, scope: .host, value: "b.claude.ai"), appName: "Claude", deviceName: nil, now: t0.addingTimeInterval(5))
+        #expect(delivered.count == 2)
+        for request in delivered {
+            let content = request.content
+            #expect(content.categoryIdentifier == CaptureNotifier.categoryIdentifier)
+            let route = CaptureNotifier.route(action: CaptureNotifier.showRequestAction, userInfo: content.userInfo)
+            #expect(route == .showRequest(RequestTarget(rowID: 1_284_093, kind: .ip, value: "18.97.36.52", appID: app),
+                                          alertIDs: request === delivered[0] ? [1] : [1, 2]))
+        }
+        let category = CaptureNotifier.category
+        #expect(category.identifier == CaptureNotifier.categoryIdentifier)
+        #expect(category.actions.map(\.identifier) == [CaptureNotifier.viewAction, CaptureNotifier.showRequestAction])
+        #expect(category.actions.map(\.title) == ["View", "Show Request"])
+        #expect(category.actions.allSatisfy { $0.options.contains(.foreground) })
+    }
+
+    /// View and a click open the app's Domains & IPs, Show Request the request; a dismissal and someone else's
+    /// notification go nowhere, and one posted before Show Request existed opens Domains & IPs.
+    @Test func routesEachActionOfANotification() {
+        let app = UUID()
+        let target = RequestTarget(rowID: nil, kind: .domain, value: "api.linear.app", appID: app)
+        let info = CaptureNotifier.userInfo(appID: app, alertIDs: [7, 9], request: target)
+        #expect(info["requestRowID"] == nil)
+        #expect(CaptureNotifier.route(action: CaptureNotifier.viewAction, userInfo: info) == .view(app, alertIDs: [7, 9]))
+        #expect(CaptureNotifier.route(action: UNNotificationDefaultActionIdentifier, userInfo: info) == .view(app, alertIDs: [7, 9]))
+        #expect(CaptureNotifier.route(action: CaptureNotifier.showRequestAction, userInfo: info) == .showRequest(target, alertIDs: [7, 9]))
+        #expect(CaptureNotifier.route(action: UNNotificationDismissActionIdentifier, userInfo: info) == nil)
+        #expect(CaptureNotifier.route(action: CaptureNotifier.showRequestAction, userInfo: [:]) == nil)
+        let older: [AnyHashable: Any] = ["appID": app.uuidString, "alertIDs": [NSNumber(value: 3)]]
+        #expect(CaptureNotifier.route(action: CaptureNotifier.showRequestAction, userInfo: older) == .view(app, alertIDs: [3]))
     }
 
     @Test func translatesAlertsToChinese() {
