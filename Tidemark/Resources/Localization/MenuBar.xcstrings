@@ -61,16 +61,6 @@
         }
       }
     },
-    "New requests per second on this Mac, averaged over the last 10 seconds. Shows 0 while recording is paused." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这台 Mac 每秒的新请求数，取最近 10 秒的平均值。暂停记录时显示 0。"
-          }
-        }
-      }
-    },
     "Nothing here. New domains and IPs show up the first time they're seen." : {
       "localizations" : {
         "zh-Hans" : {
@@ -131,32 +121,12 @@
         }
       }
     },
-    "Recording · %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "记录中 · %@"
-          }
-        }
-      }
-    },
     "Resume recording…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "恢复记录…"
-          }
-        }
-      }
-    },
-    "Right now" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前"
           }
         }
       }

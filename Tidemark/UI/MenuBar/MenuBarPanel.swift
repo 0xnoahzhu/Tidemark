@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Content of the menu bar panel: recording switch, today's counters, the current egress IP, the latest
+/// Content of the menu bar panel: recording switch, today's request count, the current egress IP, the latest
 /// first-contact alerts and the Open Window / Settings… / Quit footer.
 ///
 /// Hosted by `StatusItemController` in a Liquid Glass panel, over which it lays the design's panel glass color
@@ -25,13 +25,7 @@ struct MenuBarPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10.px) {
             header
-            HStack(spacing: 8.px) {
-                MenuBarStatTile(title: tr("Today", "MenuBar"), value: Fmt.count(model.live.todayCount))
-                // 0 while paused, like the sidebar's Requests row.
-                let rate = model.live.recording ? model.live.rate : 0
-                MenuBarStatTile(title: tr("Right now", "MenuBar"), value: Fmt.rate(rate), spokenValue: Fmt.spokenRate(rate))
-                    .help(Self.rateHelp)
-            }
+            MenuBarStatTile(title: tr("Today", "MenuBar"), value: Fmt.count(model.live.todayCount))
             egressRow
             latest
             footer
@@ -60,13 +54,10 @@ struct MenuBarPanel: View {
             VStack(alignment: .leading, spacing: 1.px) {
                 Text(verbatim: "Tidemark")
                     .font(.design(13, .bold))
-                Text(statusLine())
+                Text(statusLine)
                     .font(.design(11.5))
                     .foregroundStyle(Theme.ink2)
                     .lineLimit(1)
-                    .contentTransition(.numericText())
-                    .accessibilityLabel(statusLine(spoken: true))
-                    .help(statusShowsRate ? Self.rateHelp : "")
             }
             Spacer(minLength: 8.px)
             Toggle(isOn: recordingBinding) {
@@ -82,28 +73,17 @@ struct MenuBarPanel: View {
         }
     }
 
-    /// The header's state, ending with the request rate while recording (in words for VoiceOver when `spoken`).
-    private func statusLine(spoken: Bool = false) -> String {
+    /// The header's state: `Recording`, `Paused`, or why Surge is not connected yet.
+    private var statusLine: String {
         guard model.live.recording else { return tr("Paused", "MenuBar") }
         switch model.live.surge {
         case .connected, .paused:
-            let rate = spoken ? Fmt.spokenRate(model.live.rate) : Fmt.rate(model.live.rate)
-            return trf("Recording · %@", "MenuBar", rate)
+            return tr("Recording", "MenuBar")
         case .idle, .connecting:
             return tr("Connecting to Surge…", "MenuBar")
         case .failed:
             return tr("Surge is not connected", "MenuBar")
         }
-    }
-
-    /// The header's state shows the request rate (`Recording · 2.3 req/s`).
-    private var statusShowsRate: Bool {
-        model.live.recording && (model.live.surge.isHealthy || model.live.surge == .paused)
-    }
-
-    /// What the request rate measures, in the tooltips of the `Right now` tile and the header's state.
-    private static var rateHelp: String {
-        tr("New requests per second on this Mac, averaged over the last 10 seconds. Shows 0 while recording is paused.", "MenuBar")
     }
 
     /// The switch never flips by itself: it asks for confirmation in the main window.
@@ -219,12 +199,10 @@ struct MenuBarPanel: View {
     }
 }
 
-/// `Today 128,513` / `Right now 2.8 req/s` tile.
+/// The `Today 128,513` tile, across the panel.
 private struct MenuBarStatTile: View {
     var title: String
     var value: String
-    /// `value` as VoiceOver reads it, when it differs.
-    var spokenValue: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1.px) {
@@ -237,7 +215,6 @@ private struct MenuBarStatTile: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .contentTransition(.numericText())
-                .accessibilityLabel(spokenValue ?? value)
         }
         .padding(.horizontal, 10.px)
         .padding(.vertical, 9.px)

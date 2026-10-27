@@ -95,8 +95,6 @@ enum ShellDemoData {
         model.live.database = .connected(detail: "PostgreSQL 17.4 · 2 ms")
         model.live.totalRows = 1_284_093
         model.live.writtenThisSession = 44
-        model.live.rate = 2.2
-        model.live.appRates = [apps[0].id: 1.1, apps[1].id: 0.6, apps[2].id: 0.2, apps[3].id: 0.3]
 
         var rows: [RequestRecord] = []
         for i in 0..<60 {
@@ -256,7 +254,6 @@ enum ShellDemoData {
             model.live.upsert([row])
             model.live.writtenThisSession += 1
             model.live.totalRows += 1
-            model.live.rate = Double.random(in: 1.6...3.2)
         }
     }
 

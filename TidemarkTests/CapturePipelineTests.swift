@@ -719,20 +719,6 @@ struct CapturePipelineTests {
         #expect(update.fresh.count == 2)
     }
 
-    @Test func countsEachAppsNewRequests() async {
-        let temp = CaptureTempDirectory()
-        let raycast = CaptureFixtures.app("Raycast", path: "/Applications/Raycast.app")
-        let pipeline = makePipeline(database: CaptureFakeDatabase(), surge: CaptureFakeSurge(), spoolDirectory: temp.url)
-        await pipeline.setApps([raycast], paused: [])
-        await pipeline.ingestBackfill([nodeRequest(id: 1, host: "backend.raycast.com", remoteAddress: "76.76.21.21", completed: true)], now: base)
-        await pipeline.ingest(nodeRequest(id: 2, host: "api.notion.com", remoteAddress: "104.18.22.110"), now: base)
-        await pipeline.ingest(nodeRequest(id: 3, host: "api.linear.app", remoteAddress: "10.0.0.8"), now: base)
-        await pipeline.ingest(CaptureFixtures.request(id: 4, host: "a.com", processPath: "/usr/bin/curl"), now: base)
-        let update = await pipeline.drainUpdate()
-        #expect(update.newRequests == 3)
-        #expect(update.newRequestsByApp == [raycast.id: 2], "node counts for Raycast, which launched it; backfill and curl are left out")
-    }
-
     @Test func newlyMonitoredAppsAttributeLiveRequests() async throws {
         let temp = CaptureTempDirectory()
         let database = CaptureFakeDatabase()

@@ -47,10 +47,7 @@ struct ShellSidebar: View {
         SidebarRow(page: .requests) {
             SidebarGlyph(symbol: "line.3.horizontal", tint: Theme.tileRequests, scale: 0.5)
             SidebarRowTitle(tr("Requests", "Sidebar"))
-            SidebarRequestsRate(live: model.live)
         }
-        // The rate's tooltip, for VoiceOver on the row, which reads the rate as part of its label.
-        .accessibilityHint(SidebarRequestsRate.help)
         SidebarRow(page: .notifications) {
             SidebarGlyph(symbol: "circle.fill", tint: Theme.tileNotifications, scale: 0.36)
             SidebarRowTitle(tr("Notifications", "Sidebar"))
@@ -87,29 +84,6 @@ struct ShellSidebar: View {
                 }
             }
         }
-    }
-}
-
-/// The Requests row's rate. It changes up to once a second while requests come in, so it is read here, in a view of
-/// its own: a new rate then updates this text alone rather than the whole sidebar.
-private struct SidebarRequestsRate: View {
-    var live: LiveState
-
-    /// What the rate measures, in its tooltip.
-    static var help: String {
-        tr("New requests per second on this Mac, averaged over the last 10 seconds. Shows 0 while recording is paused.", "Sidebar")
-    }
-
-    var body: some View {
-        let rate = live.recording ? live.rate : 0
-        Text(Fmt.rate(rate))
-            .font(Theme.mono(11))
-            .foregroundStyle(Theme.inkGlass)
-            // On one line in a narrow sidebar (`0.7 个请求/秒` would wrap): the row's title shortens instead.
-            .fixedSize()
-            .contentTransition(.numericText())
-            .accessibilityLabel(Fmt.spokenRate(rate))
-            .help(Self.help)
     }
 }
 

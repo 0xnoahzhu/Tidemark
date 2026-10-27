@@ -118,8 +118,7 @@ struct AppDetailRequestsTab: View {
             if model.live.recording {
                 StatusDot(color: Theme.recording, size: 8.px, pulsing: !reduceMotion && !reducedResources)
             }
-            AppDetailRequestsRate(app: app)
-            Text(trf("from %@ and everything it launched", "AppDetail", app.name))
+            Text(trf("From %@ and everything it launched", "AppDetail", app.name))
                 .font(.design(12))
                 .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
@@ -246,26 +245,6 @@ struct AppDetailRequestsTab: View {
             historyFailure = error
         }
         historyLoaded = true
-    }
-}
-
-/// "0.7 req/s": the new requests per second from the app and the processes it launched on this Mac, like the sidebar's
-/// rate (0 while recording is paused), in a view of its own so its updates every second don't redraw the tab.
-private struct AppDetailRequestsRate: View {
-    @Environment(AppModel.self) private var model
-    var app: MonitoredApp
-
-    var body: some View {
-        let live = model.live
-        let rate = live.recording ? live.appRates[app.id] ?? 0 : 0
-        Text(Fmt.rate(rate))
-            .font(Theme.mono(12, weight: .semibold))
-            .foregroundStyle(Theme.ink)
-            // On one line in a narrow window (`0.7 个请求/秒` would wrap): the description after it shortens.
-            .fixedSize()
-            .accessibilityLabel(Fmt.spokenRate(rate))
-            .help(trf("New requests per second from %@ and the processes it launched on this Mac, averaged over the last 10 seconds. Shows 0 while recording is paused.",
-                      "AppDetail", app.name))
     }
 }
 

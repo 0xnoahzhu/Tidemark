@@ -62,22 +62,6 @@ struct FoundationTests {
         #expect(Fmt.bytes(15_770) == "15.4 KB")
         #expect(Fmt.bytes(1_258_291) == "1.2 MB")
     }
-
-    /// The request rate has one decimal and its unit in the UI language, and VoiceOver reads it in words.
-    @MainActor
-    @Test func formatsTheRequestRate() {
-        let saved = Localizer.shared.override
-        defer { Localizer.shared.override = saved }
-        Localizer.shared.override = "en"
-        #expect(Fmt.rate(0.7) == "0.7 req/s")
-        #expect(Fmt.rate(0) == "0.0 req/s")
-        #expect(Fmt.rate(12.34) == "12.3 req/s")
-        #expect(Fmt.spokenRate(0.7) == "0.7 requests per second")
-        Localizer.shared.override = "zh-Hans"
-        guard Localizer.shared.bundle != nil else { return }
-        #expect(Fmt.rate(0.7) == "0.7 个请求/秒")
-        #expect(Fmt.spokenRate(0.7) == "每秒 0.7 个请求")
-    }
 }
 
 @MainActor

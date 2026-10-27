@@ -36,7 +36,7 @@ Features that would only add decoration are left out, and section 7 explains why
 | 4.6 | Site Probe on WebPage with a per-session proxy | `WebPage`/`WebView`, `NetworkListener`/`NetworkConnection` (26), `proxyConfigurations` (14); GPC, `alternateRequest`, `overrideReferrer`, `cookies(for:)`, `os_lockdown_mode_enabled` (27) | `Probe/`, `UI/SiteProbe` | L |
 | 4.7 | Notifications that group and act | `threadIdentifier`, `interruptionLevel`, `relevanceScore`, action icons (12); `appEntityIdentifiers` (27) | `Capture/` notifier | S |
 | 4.8 | ~~On-device host insights (opt-in)~~ Removed: the design has no place for them | `SystemLanguageModel`, `@Generable` (26); `LanguageModelError`, `variant`, `Error.assetsUnavailable` (27) | none | — |
-| 4.9 | Fast waterfall and histograms | `RectanglePlot`/`BarPlot` (15), `chartXSelection(range:)` (14), conditional `ChartContent` (27) | `UI/SiteProbe`, Requests histogram, sparklines | M |
+| 4.9 | Fast waterfall and histograms | `RectanglePlot`/`BarPlot` (15), `chartXSelection(range:)` (14), conditional `ChartContent` (27) | `UI/SiteProbe`, Requests histogram | M |
 | 4.10 | macOS 27 controls | `.pickerStyle(.tabs)`, `.textFieldStyle(.bordered)` + `textInputBorderShape`, `alert(error:)` (27); `ButtonRole.confirm/.close` (26) | all pages, Settings, sheets | S |
 | 4.11 | App Intents core | `allowedExecutionTargets`, `CustomAppIntentErrorConvertible`, lazy `DisplayRepresentation` image, `SyncableEntity` (27); `supportedModes` (26) | new `Intents/` in the app target | M |
 | 4.12 | Export without blocking the UI | `fileExporter` + `WritableDocument` + `FileWrapperDocumentWriter` (27) | Domains & IPs, App detail | S |
@@ -261,7 +261,7 @@ final class ServiceWiring {
 **Notes**
 - `event.matches(\Preferences.surgeCLIPath)` tells you which property changed, so one observer can restart only `surge-cli` or only PostgreSQL. `matches` returns false for `.initial`.
 - Do not write `guard event.matches(...) else { return }` before reading the properties. The closure then reads nothing and is never called again.
-- When the consumer is an async loop, use `Observations({ ... })` (26) instead, for example a sampler that feeds `rateHistory`.
+- When the consumer is an async loop, use `Observations({ ... })` (26) instead.
 
 Status: Typechecked. Semantics are Runtime-checked by the toolchain survey: `.initial` arrives once, then one event per change transaction; only read properties are tracked; dropping the token stops delivery. The SDK has no doc comments for these APIs (section 8).
 
@@ -323,7 +323,7 @@ Status: Typechecked. The AppKit survey also compiled its own launch/terminate sn
 
 **Where**
 - The coalescing interval at which `CaptureEngine` publishes rows into `LiveState`.
-- The Requests `Table`, sparklines and histogram animations, and the `MenuBarExtra` popover.
+- The Requests `Table` and histogram animations, and the `MenuBarExtra` popover.
 - GeoIP/ASN/reverse-DNS prefetch for rows the user is not looking at.
 - Egress polling while the page is visible.
 
@@ -399,7 +399,7 @@ struct GlassAmountRow: View {
 }
 ```
 
-**Main toolbar.** Use three glass groups. Recording stays visible longest, the live-rate pill fills its capsule edge to edge, and export and the inspector toggle are the first to move into overflow.
+**Main toolbar.** Use three glass groups. Recording stays visible longest, the today-count pill fills its capsule edge to edge, and export and the inspector toggle are the first to move into overflow.
 
 ```swift
 .toolbar {
@@ -408,7 +408,7 @@ struct GlassAmountRow: View {
 
     ToolbarSpacer(.fixed)
 
-    ToolbarItem { LiveRatePill() }                 // sparkline + "12/s", drawn to the capsule edge
+    ToolbarItem { TodayCountPill() }               // today's request count, drawn to the capsule edge
         .contentMarginsRemoved()
         .visibilityPriority(ToolbarItemVisibilityPriority(lowerThan: .high))
 
@@ -428,11 +428,11 @@ struct GlassAmountRow: View {
 Table(live.rows, selection: $selection) { /* columns */ }
     .scrollEdgeEffectStyle(.hard, for: .top)
     .safeAreaBar(edge: .bottom) {
-        StatusStrip(today: live.todayCount, rate: live.rate, buffered: live.bufferedRows, scope: devices.scope)
+        StatusStrip(today: live.todayCount, buffered: live.bufferedRows, scope: devices.scope)
     }
 ```
 
-**Menu bar popover header.** When recording starts, the Record button morphs into a rate pill.
+**Menu bar popover header.** When recording starts, the Record button morphs into a pill with today's request count.
 
 ```swift
 @Namespace private var glassNS
@@ -443,11 +443,11 @@ GlassEffectContainer(spacing: 10) {
             .buttonStyle(.glass)
             .glassEffectID("record", in: glassNS)
         if live.recording {
-            Text("\(live.rate, format: .number.precision(.fractionLength(1))) req/s")
+            Text(live.todayCount, format: .number)
                 .monospacedDigit()
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .glassEffect(.regular.tint(.red.opacity(0.2)))
-                .glassEffectID("rate", in: glassNS)
+                .glassEffectID("today", in: glassNS)
         }
     }
 }
@@ -710,12 +710,11 @@ Status: Typechecked, including the `@Generable` enum. Model quality and capabili
 **Where**
 - The Site Probe waterfall.
 - The Requests histogram.
-- Sparklines in the toolbar, menu bar and app detail page.
 
 **Why**
 - **Vectorized plots.** One `RectanglePlot` draws hundreds of host bars from a single collection, which is much cheaper than `ForEach` with individual marks.
 - **No selection on the Requests histogram.** The design draws it as a plain row of bars with axis labels, so it has no range selection, hover callout or highlighted bar under the pointer.
-- **Shared mark helpers (27).** A plain `@ViewBuilder` function can return `some ChartContent` with `if`/`switch`/`EmptyView`. The histogram, sparkline and waterfall can share mark helpers. The survey confirmed this compiles for 27 and is rejected for 26.
+- **Shared mark helpers (27).** A plain `@ViewBuilder` function can return `some ChartContent` with `if`/`switch`/`EmptyView`. The histogram and waterfall can share mark helpers. The survey confirmed this compiles for 27 and is rejected for 26.
 
 ```swift
 Chart {
@@ -911,7 +910,7 @@ These are not features to adopt, but they change how existing code behaves or wh
 - **Menu item images are hidden.** The 27 doc for `NSMenuItem.image` says AppKit "will typically hide images". Check every menu: the app-filter menu with app icons, command menus and context menus. Accept the new default for decorative icons. On AppKit `NSMenuItem`s whose image carries information, set `preferredImageVisibility = .visible` (macOS 27). The SDK has no SwiftUI equivalent, so check SwiftUI `Menu`s visually.
 - **`NSOpenPanel` derives `canChooseFiles` and `canChooseDirectories` from `allowedContentTypes`.** In the "Add Monitored App" picker, set `[.applicationBundle]` and do not override the flags afterwards. `fileImporter` wraps this.
 - **Result builders are unified.** `ContentBuilder` is a typealias for `ViewBuilder`. `toolbar`, `commands` and `accessibilityRotor` take `@ContentBuilder`, and Charts accepts conditionals. Existing `@ViewBuilder` code is unaffected.
-- **`Shape`, `GeometryEffect` and `ShapeView` are now `nonisolated` protocols.** A sparkline or histogram `Shape`'s `path(in:)` must not touch main-actor state. `_RemoveGlobalActorIsolation` is deprecated: annotate with `nonisolated` instead.
+- **`Shape`, `GeometryEffect` and `ShapeView` are now `nonisolated` protocols.** A histogram or waterfall `Shape`'s `path(in:)` must not touch main-actor state. `_RemoveGlobalActorIsolation` is deprecated: annotate with `nonisolated` instead.
 - **`NSStatusItem.view`, `target` and `action` are no longer deprecated.** This matters for 5.1.
 - **`SystemLanguageModel.contextSize` returns the real value on 27.** It was hard-coded to 4096 on 26.0 through 26.3, so size prompts from it (Tidemark no longer uses Foundation Models, see 4.8).
 
@@ -927,9 +926,9 @@ Each entry lists the APIs, what it would give Tidemark, and what should trigger 
 - macOS 27: `NSStatusItemExpandedInterfaceDelegate`, `NSStatusItem.expandedInterfaceDelegate`, `NSStatusItem.expandedInterfaceSession`, `NSStatusItemExpandedInterfaceSession.cancel()` and `NSGlassEffectView.effectIsInteractive`.
 - `NSStatusItem.view`, no longer deprecated in 27.
 
-**What it gives.** The popover takes part in menu-bar keyboard navigation and menu tracking, like a system menu. Buttons such as "Open Tidemark" and "Settings…" can close it reliably with `session.cancel()`, which `MenuBarExtra` still cannot do in 27. An optional live rate view can sit in the menu bar through `item.view = NSHostingView(...)`. The panel can host the existing `MenuBarPanel` SwiftUI view on an `NSGlassEffectView` whose `style` and `tintColor` follow the glass slider.
+**What it gives.** The popover takes part in menu-bar keyboard navigation and menu tracking, like a system menu. Buttons such as "Open Tidemark" and "Settings…" can close it reliably with `session.cancel()`, which `MenuBarExtra` still cannot do in 27. A custom SwiftUI view can sit in the menu bar through `item.view = NSHostingView(...)`. The panel can host the existing `MenuBarPanel` SwiftUI view on an `NSGlassEffectView` whose `style` and `tintColor` follow the glass slider.
 
-**Trigger.** Adopt this when the dismissal or keyboard-navigation gaps in `MenuBarExtra(.window)` become user-visible, or when a live menu-bar sparkline is wanted.
+**Trigger.** Adopt this when the dismissal or keyboard-navigation gaps in `MenuBarExtra(.window)` become user-visible.
 
 **Gotchas**
 - The delegate protocol is not main-actor isolated. Conform with `@MainActor NSStatusItemExpandedInterfaceDelegate`, an isolated conformance.
@@ -966,7 +965,7 @@ final class StatusItemController: NSObject, @MainActor NSStatusItemExpandedInter
 
 **APIs.** `WidgetFamily.systemExtraLargePortrait` (macOS 27), which was unavailable on macOS in 26, and `IntentWidgetFamily.systemExtraLargePortrait`.
 
-**What it gives.** A tall "Today" column showing the latest new-site alerts per app, the request count and a rate sparkline.
+**What it gives.** A tall "Today" column showing the latest new-site alerts per app and the request count.
 
 **Cost.** Same extension and App Group as 5.2. The app writes a small snapshot to the group container and calls `WidgetCenter.reloadTimelines(ofKind:)`. Write widget previews with `#Preview(as:widget:timeline:)`, because `WidgetPreviewContext` / `previewContext` is deprecated in 27.
 

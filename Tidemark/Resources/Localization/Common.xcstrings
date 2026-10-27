@@ -11,16 +11,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 行" } }
       }
     },
-    "%@ req/s" : {
-      "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 个请求/秒" } }
-      }
-    },
-    "%@ requests per second" : {
-      "localizations" : {
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每秒 %@ 个请求" } }
-      }
-    },
     "Client hello" : {
       "localizations" : {
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Client Hello" } }

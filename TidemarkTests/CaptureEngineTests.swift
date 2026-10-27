@@ -52,8 +52,6 @@ struct CaptureEngineTests {
         first.records = [row(1, device: device, started: now), row(2, device: device, started: now.addingTimeInterval(1))]
         first.fresh = Set(first.records.map(\.key))
         first.newRequests = 2
-        let app = UUID()
-        first.newRequestsByApp = [app: 1]
         first.rowsWritten = 2
         first.bufferedRows = 7
         first.speed = SurgeSpeed(in: 2048, out: 512, downloadSpeedHistory: nil, uploadSpeedHistory: nil)
@@ -73,9 +71,6 @@ struct CaptureEngineTests {
         engine.apply(second, now: now.addingTimeInterval(1))
         #expect(model.live.rows.map(\.key.surgeID) == [2, 1])
         #expect(model.live.rows.last?.inBytes == 99)
-        #expect(model.live.rateHistory.last == 2, "the closed second holds both new requests")
-        #expect(model.live.rate == 0.2)
-        #expect(model.live.appRates == [app: 0.1], "one of them from the app, over the same 10 seconds")
     }
 
     @Test func listsNewAlertsFromEveryMac() {

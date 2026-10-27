@@ -33,8 +33,6 @@ struct CaptureUIUpdate: Sendable {
     var fresh: Set<RequestKey> = []
     /// Requests first seen from the live stream (backfill excluded).
     var newRequests = 0
-    /// Those of `newRequests` attributed to an app (made by the app or a process it launched), by app.
-    var newRequestsByApp: [AppID: Int] = [:]
     /// Rows PostgreSQL inserted (rewrites of rows it already had are not counted).
     var rowsWritten = 0
     var lastWriteAt: Date?
@@ -694,10 +692,7 @@ actor CapturePipeline {
             contactQueue[request.id] = now.addingTimeInterval(contactGrace)
         }
         markChanged(entry.record, fresh: true)
-        if !backfill {
-            pending.newRequests += 1
-            if let appID = entry.record.appID { pending.newRequestsByApp[appID, default: 0] += 1 }
-        }
+        if !backfill { pending.newRequests += 1 }
         processContacts(now: now, only: request.id)
     }
 
