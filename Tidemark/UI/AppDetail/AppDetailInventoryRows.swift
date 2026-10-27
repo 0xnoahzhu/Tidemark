@@ -252,11 +252,14 @@ enum AppDetailInventoryActivity {
         rows.first { $0.appID == appID && scope.includes($0.deviceID) }?.startedAt
     }
 
-    /// Returns true once the live stream shows a request of the app that started after `date`, or false when the task is
-    /// cancelled first. It looks at the stream as the engine updates it, a few times a second at most.
-    static func request(of key: AppDetailCache.Key, after date: Date, in live: LiveState) async -> Bool {
+    /// Returns true once the live stream shows a request of the app that a read of its hosts begun at `read` may not have
+    /// seen: one that started after the read, or less than `settle` before it, the time the batch that writes a request
+    /// takes, so it may have been written after the read began. False when the task is cancelled first. It looks at the
+    /// stream as the engine updates it, a few times a second at most.
+    static func request(of key: AppDetailCache.Key, missedBy read: Date, settle: TimeInterval, in live: LiveState) async -> Bool {
+        let since = read.addingTimeInterval(-settle)
         for await latest in Observations({ latestRequest(of: key.appID, scope: key.scope, in: live.rows) }) {
-            if let latest, latest > date { return true }
+            if let latest, latest > since { return true }
         }
         return false
     }

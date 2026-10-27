@@ -413,20 +413,30 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(AppDetailInventoryActivity.latestRequest(of: UUID(), scope: .all, in: rows) == nil)
     }
 
-    @Test func aLiveRequestOfTheAppEndsTheWait() async {
+    /// A request of the app that started after a read, or less than the write batch's time before it (it may have been
+    /// written after the read began), ends the wait for the next read; one the read had, or another app's, doesn't.
+    @Test func aLiveRequestTheReadMayHaveMissedEndsTheWait() async {
         let live = LiveState()
         let key = AppDetailCache.Key(appID: UIMainFixtures.cursor.id, scope: .all)
         let read = Date.now
+        func wait(missedBy read: Date) -> Task<Bool, Never> {
+            Task { await AppDetailInventoryActivity.request(of: key, missedBy: read, settle: 2, in: live) }
+        }
         live.rows = [UIMainFixtures.record(id: 1, appID: key.appID, startedAt: read.addingTimeInterval(-5))]
-        let waiting = Task { await AppDetailInventoryActivity.request(of: key, after: read, in: live) }
-        try? await Task.sleep(for: .milliseconds(50))
-        // Another app's request, then one of the app that started before the read, change nothing.
+        let had = wait(missedBy: read)
         live.upsert([UIMainFixtures.record(id: 2, startedAt: read.addingTimeInterval(1))])
+        try? await Task.sleep(for: .milliseconds(100))
+        had.cancel()
+        #expect(await had.value == false, "the read had the app's request, and another app's doesn't count")
+        // Started a second before the read: it may have been written after it.
+        let waiting = wait(missedBy: read)
         try? await Task.sleep(for: .milliseconds(50))
-        live.upsert([UIMainFixtures.record(id: 3, appID: key.appID, startedAt: read.addingTimeInterval(1))])
+        live.upsert([UIMainFixtures.record(id: 3, appID: key.appID, startedAt: read.addingTimeInterval(-1))])
         #expect(await waiting.value)
+        // As does one that started after it.
+        #expect(await wait(missedBy: read.addingTimeInterval(-10)).value)
         // A cancelled wait ends without one.
-        let cancelled = Task { await AppDetailInventoryActivity.request(of: key, after: .distantFuture, in: live) }
+        let cancelled = wait(missedBy: .distantFuture)
         cancelled.cancel()
         #expect(await cancelled.value == false)
     }

@@ -579,24 +579,25 @@ struct AppDetailInventoryTab: View {
         }
     }
 
-    /// Waits 10 s, or less once the app made a request since `read` (`AppDetailInventoryActivity`): then for as long as
-    /// the batch that also moves its domain's and IP's last seen takes to be written (Settings › Database's interval, and
-    /// a second for the IP to resolve), so the site of a domain that got a request moves to the top a few seconds later.
-    /// However many requests the app makes meanwhile, one read follows.
+    /// Waits 10 s, or less once the app made a request the read begun at `read` may have missed
+    /// (`AppDetailInventoryActivity`): then for as long as the batch that also moves its domain's and IP's last seen
+    /// takes to be written (Settings › Database's interval, and a second for the IP to resolve), so the site of a domain
+    /// that got a request moves to the top a few seconds later. However many requests the app makes meanwhile, one read
+    /// follows; a request that started just before a read and was written after it gets the next one.
     private func waitForNextRead(after read: Date, of key: AppDetailCache.Key) async {
         let live = model.live
-        let settle = Duration.seconds(model.preferences.batchInterval + 1)
+        let settle = model.preferences.batchInterval + 1
         let requested = await withTaskGroup(of: Bool.self) { group in
             group.addTask {
                 try? await Task.sleep(for: .seconds(10))
                 return false
             }
-            group.addTask { await AppDetailInventoryActivity.request(of: key, after: read, in: live) }
+            group.addTask { await AppDetailInventoryActivity.request(of: key, missedBy: read, settle: settle, in: live) }
             let first = await group.next() ?? false
             group.cancelAll()
             return first
         }
-        if requested { try? await Task.sleep(for: settle) }
+        if requested { try? await Task.sleep(for: .seconds(settle)) }
     }
 
     /// Shows hosts just read. Nothing changes when they are the ones shown and the summary is still current (its

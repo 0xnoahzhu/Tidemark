@@ -425,11 +425,12 @@ Both panes list the latest activity first: sites by the last seen of their lates
 IPs of each group (or of the selected domain) by their own last seen, then by name, so a domain that gets a request
 takes its site back to the top. NEW marks and NEW SITE badges don't order anything, and Export CSV writes every host,
 whatever the search, in this order (`AppDetailInventorySummary.ordered`). The tab reads `appHosts` (one app's rows,
-through the `(app_id, first_seen)` index, sorted in Swift) every 10 s, and sooner once the app's newest request in the
-live stream started after the last read (`AppDetailInventoryActivity`, which looks only at the stream's rows down to the
-app's newest as the engine updates it): then after the write batch interval and a second more, the time the batch that
-also advances its domain's and IP's `last_seen` takes to be written, so a site moves to the top a few seconds after its
-request, and one read follows however many requests. Every row is one element with a stable identity
+through the `(app_id, first_seen)` index, sorted in Swift) every 10 s, and sooner once the live stream shows a request
+of the app the last read may have missed (`AppDetailInventoryActivity`, which looks only at the stream's rows down to
+the app's newest as the engine updates it): one that started after the read began, or less than the write batch interval
+and a second before it, since the batch may have written it after the read. Then it waits that long, the time the batch
+that also advances its domain's and IP's `last_seen` takes to be written, so a site moves to the top a few seconds after
+its request, and one read follows however many requests. Every row is one element with a stable identity
 (`AppDetailInventoryRowID`: a site, a domain or IP, the processes under a selected one, a group header), so a reorder
 slides the rows that move for 0.2 s (at once with Reduce Motion; only the update marked `reordersAppInventory` keeps its
 animation, a process list still opens at once) and a selection and its process list move with their row. A row that
