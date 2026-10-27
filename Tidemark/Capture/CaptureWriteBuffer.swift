@@ -139,9 +139,10 @@ struct CaptureWriteBuffer {
         }
     }
 
-    /// Aggregates global-inventory observations per `(kind, value, device, source path)`.
+    /// Aggregates global-inventory observations per `(kind, value, device, source path, app)`: a process two apps ran to
+    /// one address counts for each of them (`app_host_sources`).
     mutating func add(source: HostSourceTouch) {
-        let key = "\(source.kind.rawValue):\(source.value)|\(source.deviceID.uuidString)|\(source.sourcePath)"
+        let key = "\(source.kind.rawValue):\(source.value)|\(source.deviceID.uuidString)|\(source.sourcePath)|\(source.appID?.uuidString ?? "")"
         if var existing = sources[key] {
             existing.requestDelta += source.requestDelta
             existing.seenAt = max(existing.seenAt, source.seenAt)

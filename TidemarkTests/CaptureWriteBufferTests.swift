@@ -73,6 +73,30 @@ struct CaptureWriteBufferTests {
         #expect(batch.sources.count == 1 && batch.sources[0].requestDelta == 2)
     }
 
+    /// A process two apps ran to one address is queued once per app, so each app's own row counts its own requests;
+    /// `touchHostSources` adds them up for the shared row.
+    @Test func keepsEachAppsSourcesOfAProcessApart() {
+        var buffer = CaptureWriteBuffer(batchRows: 10, batchInterval: 1, now: start)
+        let cursor = UUID(), raycast = UUID()
+        func curl(_ app: AppID?, at seconds: TimeInterval) -> HostSourceTouch {
+            HostSourceTouch(kind: .domain, value: "api.github.com", deviceID: device, sourcePath: "/usr/bin/curl", sourceTitle: "curl",
+                            appID: app, bundlePath: nil, seenAt: start.addingTimeInterval(seconds), requestDelta: 1, geo: nil)
+        }
+        for touch in [curl(cursor, at: 1), curl(raycast, at: 2), curl(cursor, at: 3), curl(nil, at: 4), curl(cursor, at: 5)] {
+            buffer.add(source: touch)
+        }
+        let sources = buffer.takeAll(now: start).sources
+        #expect(sources.map(\.appID) == [cursor, raycast, nil])
+        #expect(sources.map(\.requestDelta) == [3, 1, 1])
+        #expect(sources[0].seenAt == start.addingTimeInterval(5))
+
+        // Written: one shared row, under the app that used the process last, and one row per app.
+        let writes = PostgresDatabase.hostSourceWrites(sources)
+        #expect(writes.count == 1)
+        #expect(writes.first?.source.touch.appID == cursor && writes.first?.source.touch.requestDelta == 5)
+        #expect(Set(writes.first?.apps.map { "\($0.touch.appID!) \($0.touch.requestDelta)" } ?? []) == ["\(cursor) 3", "\(raycast) 1"])
+    }
+
     @Test func restoresAFailedBatchAheadOfNewWork() {
         var buffer = CaptureWriteBuffer(batchRows: 10, batchInterval: 1, now: start)
         buffer.add(chain: [ProcessLink(name: "a", pid: 1, path: nil, startTime: start)], appID: nil)

@@ -128,13 +128,18 @@ struct CaptureSpoolTests {
         var batch = CaptureWriteBuffer.Batch()
         batch.newHosts = [AppHost(appID: app.id, kind: .domain, value: "a.com", site: "a.com", firstSeen: .distantPast, lastSeen: .distantPast,
                                   requestCount: 1, processName: "node", policy: nil, geo: nil, isDirect: false, hosts: [], firstDeviceID: device)]
-        batch.sources = [HostSourceTouch(kind: .domain, value: "a.com", deviceID: device, sourcePath: "/usr/bin/curl", sourceTitle: "curl",
-                                         appID: app.id, bundlePath: nil, seenAt: .distantPast, requestDelta: 1, geo: nil)]
+        // Two apps' sources of one process stay apart, each app's row counting its own requests.
+        let other = UUID()
+        batch.sources = [other, app.id].map { appID in
+            HostSourceTouch(kind: .domain, value: "a.com", deviceID: device, sourcePath: "/usr/bin/curl", sourceTitle: "curl",
+                            appID: appID, bundlePath: nil, seenAt: .distantPast, requestDelta: 1, geo: nil)
+        }
         sidecar.saveAuxiliary(batch)
         sidecar.saveAuxiliary(batch)
         let restored = try #require(sidecar.takeAuxiliary())
         #expect(restored.newHosts.count == 2 && restored.newHosts.first?.firstDeviceID == device)
         #expect(restored.sources.first?.sourcePath == "/usr/bin/curl")
+        #expect(restored.sources.map(\.appID) == [other, app.id, other, app.id])
         #expect(sidecar.takeAuxiliary() == nil, "taken once")
     }
 

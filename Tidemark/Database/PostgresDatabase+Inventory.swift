@@ -159,62 +159,171 @@ extension PostgresDatabase {
     /// Upserts `(kind, value, device, source path)` observations: `request_count += requestDelta`,
     /// first/last seen widened, title / app / bundle / geo refreshed when given. The app of a source whose
     /// app was deleted is stored as NULL.
+    ///
+    /// The observations of an app's requests also go to that app's own row (`app_host_sources`), in the same
+    /// statement, merged the same way. A row the app has no count of its own in yet (none, or one schema v5 copied
+    /// from `host_sources`) continues from `host_sources`' figures when that row is the app's: the requests an
+    /// earlier build counted there, which `hostProcesses` listed until now. Sources of deleted apps get no such row.
     func touchHostSources(_ sources: [HostSourceTouch]) async throws {
         guard !sources.isEmpty else { return }
-        struct Key: Hashable { var kind: HostKind; var value: String; var device: DeviceID; var path: String }
-        var merged: [Key: (touch: HostSourceTouch, first: Date)] = [:]
-        for source in sources {
-            let key = Key(kind: source.kind, value: source.value, device: source.deviceID, path: source.sourcePath)
-            guard var existing = merged[key] else { merged[key] = (source, source.seenAt); continue }
-            existing.first = min(existing.first, source.seenAt)
-            existing.touch.requestDelta += source.requestDelta
-            existing.touch.seenAt = max(existing.touch.seenAt, source.seenAt)
-            existing.touch.sourceTitle = source.sourceTitle
-            existing.touch.appID = source.appID ?? existing.touch.appID
-            existing.touch.bundlePath = source.bundlePath ?? existing.touch.bundlePath
-            existing.touch.geo = source.geo ?? existing.touch.geo
-            merged[key] = existing
-        }
-        let batch = merged.values.sorted { a, b in
-            (a.touch.kind.rawValue, a.touch.value, a.touch.deviceID.uuidString, a.touch.sourcePath)
-                < (b.touch.kind.rawValue, b.touch.value, b.touch.deviceID.uuidString, b.touch.sourcePath)
-        }
-
-        var statements: [PostgresQuery] = []
-        for chunk in Self.chunks(batch, bindsPerItem: 11) {
-            var sql = SQL("""
-                INSERT INTO host_sources AS s (kind, value, device_id, source_path, source_title, app_id, bundle_path, first_seen, last_seen, request_count, geo)
-                SELECT v.kind, v.value, v.device_id, v.source_path, v.source_title, a.id, v.bundle_path, v.first_seen, v.last_seen, v.request_count, v.geo
-                FROM (VALUES
-                """)
-            for (index, entry) in chunk.enumerated() {
-                if index > 0 { sql.append(",") }
-                let touch = entry.touch
-                let values = [
-                    sql.bind(touch.kind.rawValue) + "::text", sql.bind(touch.value) + "::text", sql.bind(touch.deviceID) + "::uuid",
-                    sql.bind(touch.sourcePath) + "::text", sql.bind(touch.sourceTitle) + "::text", sql.bind(touch.appID) + "::uuid",
-                    sql.bind(touch.bundlePath) + "::text", sql.bind(entry.first) + "::timestamptz", sql.bind(touch.seenAt) + "::timestamptz",
-                    sql.bind(touch.requestDelta) + "::int8", try sql.bindJSON(touch.geo),
-                ]
-                sql.append(" (" + values.joined(separator: ", ") + ")")
-            }
-            sql.append("""
-                ) AS v(kind, value, device_id, source_path, source_title, app_id, bundle_path, first_seen, last_seen, request_count, geo)
-                LEFT JOIN apps a ON a.id = v.app_id
-                ON CONFLICT (kind, value, device_id, source_path) DO UPDATE SET
-                    source_title = excluded.source_title,
-                    app_id = COALESCE(excluded.app_id, s.app_id),
-                    bundle_path = COALESCE(excluded.bundle_path, s.bundle_path),
-                    first_seen = LEAST(s.first_seen, excluded.first_seen),
-                    last_seen = GREATEST(s.last_seen, excluded.last_seen),
-                    request_count = s.request_count + excluded.request_count,
-                    geo = COALESCE(excluded.geo, s.geo)
-                """)
-            statements.append(sql.query)
-        }
+        let statements = try Self.hostSourceChunks(Self.hostSourceWrites(sources)).map { try Self.hostSourceUpsert($0).query }
         try await withTransaction(on: .writer) { [statements] connection in
             for statement in statements { try await connection.query(statement, logger: Self.logger) }
         }
+    }
+
+    /// Observations of one source merged: requests added up, the earliest first seen, the latest last seen (`seenAt`),
+    /// and the title, app, bundle and GeoIP data of the latest observation that names them.
+    struct MergedHostSource: Hashable, Sendable {
+        var touch: HostSourceTouch
+        var firstSeen: Date
+
+        init(_ touch: HostSourceTouch) {
+            self.touch = touch
+            firstSeen = touch.seenAt
+        }
+
+        /// Adds an observation no older than the ones merged so far.
+        mutating func add(_ later: HostSourceTouch) {
+            firstSeen = min(firstSeen, later.seenAt)
+            touch.requestDelta += later.requestDelta
+            touch.seenAt = max(touch.seenAt, later.seenAt)
+            touch.sourceTitle = later.sourceTitle
+            touch.appID = later.appID ?? touch.appID
+            touch.bundlePath = later.bundlePath ?? touch.bundlePath
+            touch.geo = later.geo ?? touch.geo
+        }
+    }
+
+    /// What one `host_sources` row gets from a write, and its apps' `app_host_sources` rows.
+    struct HostSourceWrite: Hashable, Sendable {
+        var source: MergedHostSource
+        /// One per app whose requests the observations count, by app ID.
+        var apps: [MergedHostSource]
+    }
+
+    /// `touchHostSources`' observations merged per `host_sources` row and, within it, per app; sorted by key, so
+    /// concurrent writes lock rows in the same order. The latest observation (by `seenAt`) names the row's app, as the
+    /// app that used the process last.
+    static func hostSourceWrites(_ sources: [HostSourceTouch]) -> [HostSourceWrite] {
+        struct Key: Hashable { var kind: HostKind; var value: String; var device: DeviceID; var path: String }
+        var writes: [Key: (source: MergedHostSource, apps: [AppID: MergedHostSource])] = [:]
+        let oldestFirst = sources.enumerated().sorted { ($0.element.seenAt, $0.offset) < ($1.element.seenAt, $1.offset) }.map(\.element)
+        for touch in oldestFirst {
+            let key = Key(kind: touch.kind, value: touch.value, device: touch.deviceID, path: touch.sourcePath)
+            var write = writes[key] ?? (MergedHostSource(touch), [:])
+            if writes[key] != nil { write.source.add(touch) }
+            if let app = touch.appID {
+                if write.apps[app] == nil { write.apps[app] = MergedHostSource(touch) } else { write.apps[app]?.add(touch) }
+            }
+            writes[key] = write
+        }
+        return writes.values
+            .map { HostSourceWrite(source: $0.source, apps: $0.apps.sorted { $0.key.uuidString < $1.key.uuidString }.map(\.value)) }
+            .sorted { a, b in
+                (a.source.touch.kind.rawValue, a.source.touch.value, a.source.touch.deviceID.uuidString, a.source.touch.sourcePath)
+                    < (b.source.touch.kind.rawValue, b.source.touch.value, b.source.touch.deviceID.uuidString, b.source.touch.sourcePath)
+            }
+    }
+
+    /// Binds of a `host_sources` row and of an `app_host_sources` row in `hostSourceUpsert`.
+    private static let hostSourceBinds = 11, appHostSourceBinds = 10
+
+    /// Splits writes into statements under the bind limit, at most 1,000 rows each; a `host_sources` row and its apps'
+    /// rows always share one statement.
+    static func hostSourceChunks(_ writes: [HostSourceWrite]) -> [ArraySlice<HostSourceWrite>] {
+        var chunks: [ArraySlice<HostSourceWrite>] = []
+        var start = 0, binds = 0, rows = 0
+        for (index, write) in writes.enumerated() {
+            let cost = hostSourceBinds + appHostSourceBinds * write.apps.count
+            if index > start, binds + cost > maxBinds || rows + 1 + write.apps.count > 1_000 {
+                chunks.append(writes[start..<index])
+                (start, binds, rows) = (index, 0, 0)
+            }
+            binds += cost
+            rows += 1 + write.apps.count
+        }
+        if start < writes.count { chunks.append(writes[start...]) }
+        return chunks
+    }
+
+    /// One statement of `touchHostSources`: the `host_sources` upsert, and with apps' rows, the `app_host_sources`
+    /// upsert after it as the main statement. Both read the tables as they were before the statement, so `l`, the
+    /// `host_sources` row an app's row continues from, holds none of this write's requests.
+    ///
+    /// The `app_host_sources` row proposed is what it gains: this write's requests, plus, when it has no count of its
+    /// own yet (`e` missing or `backfilled`), what `l` has beyond it. Adding that to the stored row also keeps requests
+    /// another transaction added meanwhile.
+    static func hostSourceUpsert(_ writes: ArraySlice<HostSourceWrite>) throws -> SQL {
+        let apps = writes.flatMap(\.apps)
+        var sql = SQL(apps.isEmpty ? "" : "WITH sources AS (\n")
+        sql.append("""
+            INSERT INTO host_sources AS s (kind, value, device_id, source_path, source_title, app_id, bundle_path, first_seen, last_seen, request_count, geo)
+            SELECT v.kind, v.value, v.device_id, v.source_path, v.source_title, a.id, v.bundle_path, v.first_seen, v.last_seen, v.request_count, v.geo
+            FROM (VALUES
+            """)
+        for (index, write) in writes.enumerated() {
+            if index > 0 { sql.append(",") }
+            let touch = write.source.touch
+            let values = [
+                sql.bind(touch.kind.rawValue) + "::text", sql.bind(touch.value) + "::text", sql.bind(touch.deviceID) + "::uuid",
+                sql.bind(touch.sourcePath) + "::text", sql.bind(touch.sourceTitle) + "::text", sql.bind(touch.appID) + "::uuid",
+                sql.bind(touch.bundlePath) + "::text", sql.bind(write.source.firstSeen) + "::timestamptz", sql.bind(touch.seenAt) + "::timestamptz",
+                sql.bind(touch.requestDelta) + "::int8", try sql.bindJSON(touch.geo),
+            ]
+            sql.append(" (" + values.joined(separator: ", ") + ")")
+        }
+        sql.append("""
+            ) AS v(kind, value, device_id, source_path, source_title, app_id, bundle_path, first_seen, last_seen, request_count, geo)
+            LEFT JOIN apps a ON a.id = v.app_id
+            ON CONFLICT (kind, value, device_id, source_path) DO UPDATE SET
+                source_title = excluded.source_title,
+                app_id = COALESCE(excluded.app_id, s.app_id),
+                bundle_path = COALESCE(excluded.bundle_path, s.bundle_path),
+                first_seen = LEAST(s.first_seen, excluded.first_seen),
+                last_seen = GREATEST(s.last_seen, excluded.last_seen),
+                request_count = s.request_count + excluded.request_count,
+                geo = COALESCE(excluded.geo, s.geo)
+            """)
+        guard !apps.isEmpty else { return sql }
+
+        sql.append("\n)\n")
+        sql.append("""
+            INSERT INTO app_host_sources AS t (app_id, kind, value, device_id, source_path, source_title, bundle_path, first_seen, last_seen,
+                                               request_count, backfilled)
+            SELECT v.app_id, v.kind, v.value, v.device_id, v.source_path, v.source_title, COALESCE(v.bundle_path, l.bundle_path),
+                   LEAST(v.first_seen, l.first_seen), GREATEST(v.last_seen, l.last_seen),
+                   v.request_count + GREATEST(COALESCE(e.request_count, 0), COALESCE(l.request_count, 0)) - COALESCE(e.request_count, 0), false
+            FROM (VALUES
+            """)
+        for (index, app) in apps.enumerated() {
+            if index > 0 { sql.append(",") }
+            let touch = app.touch
+            let values = [
+                sql.bind(touch.appID) + "::uuid", sql.bind(touch.kind.rawValue) + "::text", sql.bind(touch.value) + "::text",
+                sql.bind(touch.deviceID) + "::uuid", sql.bind(touch.sourcePath) + "::text", sql.bind(touch.sourceTitle) + "::text",
+                sql.bind(touch.bundlePath) + "::text", sql.bind(app.firstSeen) + "::timestamptz", sql.bind(touch.seenAt) + "::timestamptz",
+                sql.bind(touch.requestDelta) + "::int8",
+            ]
+            sql.append(" (" + values.joined(separator: ", ") + ")")
+        }
+        sql.append("""
+            ) AS v(app_id, kind, value, device_id, source_path, source_title, bundle_path, first_seen, last_seen, request_count)
+            JOIN apps a ON a.id = v.app_id
+            LEFT JOIN app_host_sources e
+                ON e.app_id = v.app_id AND e.kind = v.kind AND e.value = v.value AND e.device_id = v.device_id AND e.source_path = v.source_path
+            LEFT JOIN host_sources l
+                ON l.kind = v.kind AND l.value = v.value AND l.device_id = v.device_id AND l.source_path = v.source_path
+               AND l.app_id = v.app_id AND (e.app_id IS NULL OR e.backfilled)
+            ON CONFLICT (app_id, kind, value, device_id, source_path) DO UPDATE SET
+                source_title = excluded.source_title,
+                bundle_path = COALESCE(excluded.bundle_path, t.bundle_path),
+                first_seen = LEAST(t.first_seen, excluded.first_seen),
+                last_seen = GREATEST(t.last_seen, excluded.last_seen),
+                request_count = t.request_count + excluded.request_count,
+                backfilled = false
+            """)
+        return sql
     }
 
     /// The "Domains & IPs" page: `host_sources` grouped by `(kind, value)`, newest first (by first

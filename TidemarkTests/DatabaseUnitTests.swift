@@ -420,6 +420,54 @@ struct DatabaseUnitTests {
         #expect(PostgresDatabase.chunks(items, bindsPerItem: 40_000).allSatisfy { $0.count == 1 })
     }
 
+    /// `touchHostSources` merges observations per `host_sources` row and, within it, per app; the latest names the
+    /// shared row's app and title. A shared row and its apps' rows always go into one statement, under the bind limit.
+    @Test func mergesHostSourcesPerRowAndApp() throws {
+        let device = UUID(), cursor = UUID(), raycast = UUID()
+        let now = Date(timeIntervalSince1970: 1_761_400_000)
+        func touch(_ value: String, _ app: AppID?, at seconds: TimeInterval, title: String = "node", requests: Int64 = 1) -> HostSourceTouch {
+            HostSourceTouch(kind: .domain, value: value, deviceID: device, sourcePath: "/usr/local/bin/node", sourceTitle: title, appID: app,
+                            bundlePath: app == cursor ? "/Applications/Cursor.app" : nil, seenAt: now.addingTimeInterval(seconds),
+                            requestDelta: requests, geo: nil)
+        }
+        let writes = PostgresDatabase.hostSourceWrites([
+            touch("b.com", cursor, at: -10, requests: 2), touch("a.com", nil, at: -50),
+            touch("b.com", raycast, at: -5, title: "node (raycast)"), touch("b.com", cursor, at: -30, title: "node (old)", requests: 4),
+            touch("b.com", nil, at: -1, title: "node (none)"),
+        ])
+        #expect(writes.map(\.source.touch.value) == ["a.com", "b.com"], "sorted by key")
+        #expect(writes[0].apps.isEmpty)
+        let shared = writes[1].source
+        #expect(shared.touch.requestDelta == 8 && shared.firstSeen == now.addingTimeInterval(-30) && shared.touch.seenAt == now.addingTimeInterval(-1))
+        #expect(shared.touch.appID == raycast && shared.touch.sourceTitle == "node (none)" && shared.touch.bundlePath == "/Applications/Cursor.app")
+        let apps = Dictionary(uniqueKeysWithValues: writes[1].apps.map { ($0.touch.appID ?? UUID(), $0) })
+        #expect(apps.count == 2)
+        #expect(apps[cursor]?.touch.requestDelta == 6 && apps[cursor]?.firstSeen == now.addingTimeInterval(-30))
+        #expect(apps[cursor]?.touch.seenAt == now.addingTimeInterval(-10) && apps[cursor]?.touch.sourceTitle == "node")
+        #expect(apps[raycast]?.touch.requestDelta == 1 && apps[raycast]?.touch.sourceTitle == "node (raycast)")
+
+        // A statement per chunk: the shared upsert alone, or with its apps' rows after it.
+        let plain = try PostgresDatabase.hostSourceUpsert(writes[0...0])
+        #expect(plain.text.hasPrefix("INSERT INTO host_sources") && !plain.text.contains("app_host_sources"))
+        let both = try PostgresDatabase.hostSourceUpsert(writes[0...1])
+        #expect(both.text.hasPrefix("WITH sources AS (") && both.text.contains("INSERT INTO app_host_sources"))
+        #expect(both.bindCount == 2 * 11 + 2 * 10)
+
+        // However many apps' rows a shared row has, they never go into another statement than it.
+        let many = (0..<4_000).map { index in
+            HostSourceTouch(kind: .ip, value: "10.0.\(index / 250).\(index % 250)", deviceID: device, sourcePath: "/usr/bin/curl",
+                            sourceTitle: "curl", appID: UUID(), bundlePath: nil, seenAt: now, requestDelta: 1, geo: nil)
+        } + (0..<2_700).map { _ in touch("c.com", UUID(), at: 0) }
+        let merged = PostgresDatabase.hostSourceWrites(many)
+        let chunks = PostgresDatabase.hostSourceChunks(merged)
+        #expect(chunks.reduce(0) { $0 + $1.count } == merged.count)
+        for chunk in chunks {
+            #expect(chunk.reduce(0) { $0 + 1 + $1.apps.count } <= 1_000 || chunk.count == 1)
+            #expect(try PostgresDatabase.hostSourceUpsert(chunk).bindCount <= PostgresDatabase.maxBinds)
+        }
+        #expect(chunks.contains { $0.count == 1 && $0.first?.apps.count == 2_700 }, "a shared row with more apps than a chunk holds goes alone")
+    }
+
     @Test func readsPlannerEstimates() {
         let json = #"[{"Plan": {"Node Type": "Seq Scan", "Plan Rows": 123456, "Plan Width": 0}}]"#
         #expect(PostgresDatabase.plannedRows(fromExplainJSON: json) == 123_456)

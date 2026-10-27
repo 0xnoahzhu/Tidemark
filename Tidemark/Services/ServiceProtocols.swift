@@ -198,7 +198,8 @@ protocol TidemarkDatabase: Sendable {
     /// Bumps `last_seen` / `request_count` / `policy` / `hosts` for known entries.
     func touchAppHosts(_ hosts: [AppHost]) async throws
     func appHosts(_ appID: AppID, scope: DeviceScope) async throws -> [AppHost]
-    /// Records `(kind, value, device, source path)` for the global inventory.
+    /// Records `(kind, value, device, source path)` for the global inventory and, for the sources of an app's
+    /// requests, for that app (`app_host_sources`).
     func touchHostSources(_ sources: [HostSourceTouch]) async throws
     func inventory(kind: HostKind?, search: String, scope: DeviceScope) async throws -> [InventoryEntry]
     /// The processes that reached one of an app's domains or IPs, by executable path across Macs (`HostProcess.merge`),
@@ -339,7 +340,8 @@ extension TidemarkDatabase {
     func relatedRecords(of request: RequestRecord) async throws -> RequestRelatedRecords { RequestRelatedRecords() }
 }
 
-/// One `(host or IP, source)` observation for the global inventory (`host_sources`).
+/// One `(host or IP, source)` observation for the global inventory (`host_sources`) and, with an app, for that app's
+/// (`app_host_sources`).
 struct HostSourceTouch: Hashable, Sendable {
     var kind: HostKind
     var value: String

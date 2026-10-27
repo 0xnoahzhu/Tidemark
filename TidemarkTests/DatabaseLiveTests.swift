@@ -1375,7 +1375,7 @@ struct DatabaseLiveTests {
             for row in rows { ids[row.key] = try await Self.olderBuildUpsert(db, row) }
             _ = try await db.insertAppHosts([Fixture.host(app: app.id, "svc0.cursor.sh")])
             let alert = try #require(try await db.insertAlerts([Fixture.alert(device: mac.id, app: app.id, value: "svc0.cursor.sh")]).first)
-            try await db.touchHostSources([Fixture.source(.domain, "svc0.cursor.sh", device: mac.id, app: app.id)])
+            try await Self.olderBuildTouchHostSource(db, Fixture.source(.domain, "svc0.cursor.sh", device: mac.id, app: app.id))
             try await db.execute("""
                 INSERT INTO egress_checks (device_id, checked_at, policy_path, ip, is_current)
                 VALUES (\(mac.id), \(Fixture.now), \(["DIRECT"]), '203.0.113.7', true)

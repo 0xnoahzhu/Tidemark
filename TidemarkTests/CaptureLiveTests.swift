@@ -60,6 +60,7 @@ struct CaptureLiveTests {
             #expect(processes == 2)
             let sources = try await db.rows("SELECT count(*) AS n FROM host_sources").first.map { try PostgresRowReader($0)("n", as: Int.self) }
             #expect(sources == 2)
+            #expect(try await db.rows("SELECT 1 FROM app_host_sources").isEmpty, "no row of the app's own")
             #expect(try await db.knownHosts().isEmpty)
 
             // Later writes go through normally.
