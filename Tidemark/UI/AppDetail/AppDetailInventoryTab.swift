@@ -20,7 +20,6 @@ struct AppDetailInventoryTab: View {
     var cache: AppDetailCache
 
     @State private var content = Content()
-    @State private var processes = AppDetailHostProcesses()
     @State private var exportDocument: AnalyzeCSVDocument?
     @State private var isExporting = false
     @State private var exportError: (any Error)?
@@ -106,21 +105,8 @@ struct AppDetailInventoryTab: View {
         return Content(key: key, hosts: cached.hosts, summary: cached.summary)
     }
 
-    /// What a selection's processes are read for: the address, and each Try Again.
-    private struct ProcessesTask: Equatable {
-        var key: AppDetailCache.HostKey?
-        var attempt: Int
-    }
-
-    private func processesTask(_ kind: HostKind, _ value: String?) -> ProcessesTask {
-        ProcessesTask(key: value.map { AppDetailCache.HostKey(appID: app.id, scope: scope, kind: kind, value: $0) },
-                      attempt: processes.attempt(kind))
-    }
-
     var body: some View {
         let key = AppDetailCache.Key(appID: app.id, scope: scope)
-        let domainProcesses = processesTask(.domain, summary.selectedHost(model.nav.appSelectedHost))
-        let ipProcesses = processesTask(.ip, summary.selectedIP(model.nav.appSelectedIP))
         Group {
             if content.key == key && content.hosts.isEmpty {
                 waitingState
@@ -160,12 +146,6 @@ struct AppDetailInventoryTab: View {
         }
         .task(id: search) {
             await follow(search)
-        }
-        .task(id: domainProcesses) {
-            await processes.follow(domainProcesses.key, in: .domain, model: model, cache: cache)
-        }
-        .task(id: ipProcesses) {
-            await processes.follow(ipProcesses.key, in: .ip, model: model, cache: cache)
         }
     }
 
@@ -259,6 +239,10 @@ struct AppDetailInventoryTab: View {
                     }
                 }
                 .padding(.bottom, 10.px)
+                // A process list opens and closes at once rather than sliding the rows below it: that animation lays out
+                // every row of the pane in each of its frames, at twice the work of a frame on a page without the lists.
+                // The rows animate their own highlight.
+                .transaction { $0.animation = nil }
             }
         }
     }
@@ -305,8 +289,8 @@ struct AppDetailInventoryTab: View {
 
     /// The processes under the selected domain or IP; the IP pane's header has no date columns, so their caption names them.
     private func processList(_ kind: HostKind, host: String, showsFirstSeen: Bool, indent: CGFloat) -> some View {
-        AppDetailHostProcessList(processes: processes, kind: kind, app: app, host: host, requests: requestsLink,
-                                 showsFirstSeen: showsFirstSeen, indent: indent, labelsDates: kind == .ip)
+        AppDetailHostProcessList(key: AppDetailCache.HostKey(appID: app.id, scope: scope, kind: kind, value: host), app: app, cache: cache,
+                                 requests: requestsLink, showsFirstSeen: showsFirstSeen, indent: indent, labelsDates: kind == .ip)
     }
 
     /// What the rows open in History. History keeps the sidebar's Mac, not the tab's.
@@ -386,6 +370,8 @@ struct AppDetailInventoryTab: View {
                         .background(Theme.bg)
                     }
                 }
+                // Like the Domains pane's, without sliding rows; the rows animate their own highlight and dimming.
+                .transaction { $0.animation = nil }
             }
         }
     }
@@ -525,6 +511,7 @@ private struct AppDetailDomainRow: View {
         .padding(.horizontal, 16.px)
         .frame(height: 28.px)
         .background(selected ? Theme.accentTint : .clear)
+        .animation(.easeOut(duration: 0.2), value: selected)
         .contentShape(Rectangle())
         .onTapGesture {
             withAnimation(.easeOut(duration: 0.2)) {
@@ -586,6 +573,7 @@ private struct AppDetailIPRow: View {
         .padding(.horizontal, 16.px)
         .padding(.vertical, 6.px)
         .background(highlighted ? Theme.accentTint : .clear)
+        .animation(.easeOut(duration: 0.2), value: highlighted)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
         .opacity(dimmed ? 0.35 : 1)
         .animation(.easeOut(duration: 0.2), value: dimmed)

@@ -1,14 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// The processes listed under the selected domain and the selected IP of an app's Domains & IPs tab (`HostProcess`),
-/// read as a selection opens and every 10 s while it stays open. An address opened before shows the list it had
-/// (`AppDetailCache`) at once while it is read again, and a failed read keeps the list shown. Each selection is a property
-/// of its own, so a list that arrives redraws only the rows under its address, not the tab.
+/// The processes listed under a selected domain or IP of an app's Domains & IPs tab (`HostProcess`), read as the list
+/// opens and every 10 s while it stays open. Each list has its own, so a list that arrives redraws only the rows under its
+/// address, and no list ever shows another address's rows, not even the one closing as another opens. An address opened
+/// before shows the list it had (`AppDetailCache`) in its first frame while it is read again, and a failed read keeps the
+/// list shown.
 @MainActor
 @Observable
 final class AppDetailHostProcesses {
-    /// What the rows under a selection show.
+    /// What the rows under an address show.
     struct Shown: Equatable {
         var key: AppDetailCache.HostKey
         /// Nil until the first read answers.
@@ -17,53 +18,37 @@ final class AppDetailHostProcesses {
         var failure: String?
     }
 
-    private(set) var domain: Shown?
-    private(set) var ip: Shown?
-    /// Bumped by Try Again, which starts a selection's reads over.
-    private(set) var domainAttempt = 0
-    private(set) var ipAttempt = 0
+    /// What the reads gave when it was not what the cache had; nil before.
+    private var read: Shown?
+    /// Bumped by Try Again, which starts the reads over.
+    private(set) var attempt = 0
 
-    /// What the rows under the selected domain or IP show.
-    func shown(_ kind: HostKind) -> Shown? { kind == .domain ? domain : ip }
-
-    func attempt(_ kind: HostKind) -> Int { kind == .domain ? domainAttempt : ipAttempt }
-
-    func retry(_ kind: HostKind) {
-        switch kind {
-        case .domain: domainAttempt &+= 1
-        case .ip: ipAttempt &+= 1
-        }
+    /// What the rows under `key` show: what the reads gave for it, or else what the cache has (nothing when it has no
+    /// list), so a list opens with it rather than with another address's.
+    func shown(_ key: AppDetailCache.HostKey, cache: AppDetailCache) -> Shown {
+        if let read, read.key == key { return read }
+        return Shown(key: key, processes: cache.processes(key))
     }
 
-    /// Shows the processes of `key` under the selection and reads them again every 10 s until the task is cancelled (the
-    /// selection changed); clears the selection's list for no key.
-    func follow(_ key: AppDetailCache.HostKey?, in kind: HostKind, model: AppModel, cache: AppDetailCache) async {
-        guard let key else {
-            set(nil, in: kind)
-            return
-        }
-        // The address shown already keeps its list while it is read again; another starts from the cache, or from nothing.
-        if shown(kind)?.key != key || shown(kind)?.processes == nil {
-            set(Shown(key: key, processes: cache.processes(key)), in: kind)
-        }
+    func retry() { attempt &+= 1 }
+
+    /// Reads the processes of `key` now and every 10 s until the task is cancelled (the list closed). The rows change only
+    /// when what they show does: a read that answers with the cached list leaves them alone.
+    func follow(_ key: AppDetailCache.HostKey, model: AppModel, cache: AppDetailCache) async {
+        // Try Again: loading again rather than the failure.
+        if read?.key == key, read?.failure != nil { read = nil }
         while !Task.isCancelled {
             do {
                 let fresh = try await model.database.hostProcesses(kind: key.kind, value: key.value, appID: key.appID, scope: key.scope)
                 if Task.isCancelled { return }
+                let next = Shown(key: key, processes: fresh)
+                if shown(key, cache: cache) != next { read = next }
                 cache.setProcesses(fresh, for: key)
-                set(Shown(key: key, processes: fresh), in: kind)
             } catch {
                 if Task.isCancelled { return }
-                if shown(kind)?.processes == nil { set(Shown(key: key, failure: CaptureEngine.message(for: error)), in: kind) }
+                if shown(key, cache: cache).processes == nil { read = Shown(key: key, failure: CaptureEngine.message(for: error)) }
             }
             try? await Task.sleep(for: .seconds(10))
-        }
-    }
-
-    private func set(_ shown: Shown?, in kind: HostKind) {
-        switch kind {
-        case .domain: if domain != shown { domain = shown }
-        case .ip: if ip != shown { ip = shown }
         }
     }
 }
@@ -74,12 +59,10 @@ final class AppDetailHostProcesses {
 /// never flashes it.
 struct AppDetailHostProcessList: View {
     @Environment(AppModel.self) private var model
-    var processes: AppDetailHostProcesses
-    /// Whether it lists the selected domain's processes or the selected IP's.
-    var kind: HostKind
+    /// The domain or IP, of the tab's app and scope.
+    var key: AppDetailCache.HostKey
     var app: MonitoredApp
-    /// The domain or IP.
-    var host: String
+    var cache: AppDetailCache
     var requests: AppDetailRequestsLink
     var showsFirstSeen: Bool
     /// Where the rows' tree glyph starts: under the domain's name, or in from the IP.
@@ -87,37 +70,48 @@ struct AppDetailHostProcessList: View {
     /// The caption names the date columns, which the IP pane's header does not.
     var labelsDates: Bool
 
+    @State private var processes = AppDetailHostProcesses()
+
+    /// What the list is read for: the address, and each Try Again.
+    private struct Reading: Equatable {
+        var key: AppDetailCache.HostKey
+        var attempt: Int
+    }
+
     var body: some View {
-        let shown = processes.shown(kind)
+        let shown = processes.shown(key, cache: cache)
         VStack(spacing: 0) {
             caption(shown)
-            if let list = shown?.processes {
+            if let list = shown.processes {
                 if list.isEmpty {
                     note(Text(tr("No process on record for it.", "AppDetail")))
                 }
                 ForEach(list) { process in
                     AppDetailHostProcessRow(process: process, app: app, macs: macs(of: process), showsFirstSeen: showsFirstSeen,
-                                            indent: indent, host: host, open: openRequests)
+                                            indent: indent, host: key.value, open: openRequests)
                 }
-            } else if let failure = shown?.failure {
+            } else if let failure = shown.failure {
                 note(HStack(spacing: 8.px) {
                     Text(tr("Couldn't load the processes.", "AppDetail")).help(failure)
-                    Button(tr("Try Again", "AppDetail")) { processes.retry(kind) }
+                    Button(tr("Try Again", "AppDetail")) { processes.retry() }
                         .buttonStyle(.link)
                 })
             }
         }
         .padding(.bottom, 4.px)
         .background(Theme.accentTint.opacity(0.4))
+        .task(id: Reading(key: key, attempt: processes.attempt)) {
+            await processes.follow(key, model: model, cache: cache)
+        }
     }
 
-    private func caption(_ shown: AppDetailHostProcesses.Shown?) -> some View {
+    private func caption(_ shown: AppDetailHostProcesses.Shown) -> some View {
         AnalyzeColumnsLayout(columns: AppDetailInventoryTab.domainColumns(showsFirstSeen: showsFirstSeen)) {
             HStack(alignment: .firstTextBaseline, spacing: 7.px) {
                 Text(tr("Processes", "AppDetail")).foregroundStyle(Theme.ink2).fixedSize()
-                if let list = shown?.processes {
+                if let list = shown.processes {
                     Text(verbatim: String(list.count)).fontWeight(.medium).foregroundStyle(Theme.ink3).fixedSize()
-                } else if shown?.failure == nil {
+                } else if shown.failure == nil {
                     AppDetailDelayedText(text: tr("Loading…", "AppDetail"))
                 }
             }

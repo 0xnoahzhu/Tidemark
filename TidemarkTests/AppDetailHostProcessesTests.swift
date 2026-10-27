@@ -14,9 +14,9 @@ import Testing
         }
     }
 
-    /// A selection shows what the cache had for its address while the database reads it, then what it read; a failed
-    /// read keeps a list and otherwise says why; no selection shows nothing.
-    @Test func aSelectionStartsFromTheCacheAndFollowsTheDatabase() async throws {
+    /// A list shows what the cache had for its address while the database reads it, then what it read; a failed read
+    /// keeps a list and otherwise says why, until Try Again reads again.
+    @Test func aListStartsFromTheCacheAndFollowsTheDatabase() async throws {
         let defaults = TestDefaults()
         let model = AppModel(preferences: Preferences(defaults: defaults.make()))
         let cursor = F.cursor.id
@@ -27,40 +27,110 @@ import Testing
         cache.setProcesses([curl], for: key)
         let processes = AppDetailHostProcesses()
 
-        // The cached list while a slow read runs, then the list read.
+        // The cached list from the start, while a slow read runs, then the list read.
+        #expect(processes.shown(key, cache: cache) == AppDetailHostProcesses.Shown(key: key, processes: [curl]))
         model.database = RequestsStubDatabase(processes: { kind, value in
             try await Task.sleep(for: .milliseconds(300))
             return kind == .domain && value == "api2.cursor.sh" ? [node] : []
         })
-        let reading = Task { await processes.follow(key, in: .domain, model: model, cache: cache) }
-        try await eventually { processes.shown(.domain) != nil }
-        #expect(processes.shown(.domain)?.processes == [curl])
-        try await eventually { processes.shown(.domain)?.processes == [node] }
-        #expect(processes.shown(.domain)?.processes == [node])
+        let reading = Task { await processes.follow(key, model: model, cache: cache) }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(processes.shown(key, cache: cache).processes == [curl])
+        try await eventually { processes.shown(key, cache: cache).processes == [node] }
+        #expect(processes.shown(key, cache: cache).processes == [node])
         #expect(cache.processes(key) == [node])
-        #expect(processes.shown(.ip) == nil)
         reading.cancel()
         await reading.value
 
-        // A read that fails keeps the list shown; with none, the selection says why.
+        // A read that fails keeps the list shown; with none, the list says why.
         model.database = RequestsStubDatabase(processes: { _, _ in throw DatabaseError.unreachable(.poolClosed) })
-        let failing = Task { await processes.follow(key, in: .domain, model: model, cache: cache) }
+        let failing = Task { await processes.follow(key, model: model, cache: cache) }
         try await Task.sleep(for: .milliseconds(100))
-        #expect(processes.shown(.domain) == AppDetailHostProcesses.Shown(key: key, processes: [node]))
+        #expect(processes.shown(key, cache: cache) == AppDetailHostProcesses.Shown(key: key, processes: [node]))
         failing.cancel()
         await failing.value
         let ipKey = AppDetailCache.HostKey(appID: cursor, scope: .all, kind: .ip, value: "104.18.19.125")
-        let failingIP = Task { await processes.follow(ipKey, in: .ip, model: model, cache: cache) }
-        try await eventually { processes.shown(.ip)?.failure != nil }
-        #expect(processes.shown(.ip)?.processes == nil)
-        #expect(processes.shown(.ip)?.failure == CaptureEngine.message(for: DatabaseError.unreachable(.poolClosed)))
+        let ip = AppDetailHostProcesses()
+        #expect(ip.shown(ipKey, cache: cache) == AppDetailHostProcesses.Shown(key: ipKey))
+        let failingIP = Task { await ip.follow(ipKey, model: model, cache: cache) }
+        try await eventually { ip.shown(ipKey, cache: cache).failure != nil }
+        #expect(ip.shown(ipKey, cache: cache).processes == nil)
+        #expect(ip.shown(ipKey, cache: cache).failure == CaptureEngine.message(for: DatabaseError.unreachable(.poolClosed)))
         failingIP.cancel()
         await failingIP.value
 
-        await processes.follow(nil, in: .domain, model: model, cache: cache)
-        #expect(processes.shown(.domain) == nil && processes.shown(.ip) != nil)
-        processes.retry(.ip)
-        #expect(processes.attempt(.ip) == 1 && processes.attempt(.domain) == 0)
+        // Try Again: loading again, then what the read gives.
+        ip.retry()
+        #expect(ip.attempt == 1 && processes.attempt == 0)
+        model.database = RequestsStubDatabase(processes: { _, _ in
+            try await Task.sleep(for: .milliseconds(300))
+            return [curl]
+        })
+        let again = Task { await ip.follow(ipKey, model: model, cache: cache) }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(ip.shown(ipKey, cache: cache) == AppDetailHostProcesses.Shown(key: ipKey))
+        try await eventually { ip.shown(ipKey, cache: cache).processes == [curl] }
+        #expect(ip.shown(ipKey, cache: cache).processes == [curl])
+        again.cancel()
+        await again.value
+    }
+
+    /// A list shows only its own address's processes: what was read for another address (the list's app, scope or
+    /// address changed under it) gives way to what the cache has for its own, or to nothing, never to another list.
+    @Test func aListShowsOnlyItsOwnAddress() async throws {
+        let defaults = TestDefaults()
+        let model = AppModel(preferences: Preferences(defaults: defaults.make()))
+        let cursor = F.cursor.id
+        let api = AppDetailCache.HostKey(appID: cursor, scope: .all, kind: .domain, value: "api2.cursor.sh")
+        let onMini = AppDetailCache.HostKey(appID: cursor, scope: .device(F.otherMac), kind: .domain, value: "api2.cursor.sh")
+        let push = AppDetailCache.HostKey(appID: cursor, scope: .all, kind: .domain, value: "courier.push.apple.com")
+        let node = HostProcess(path: "/usr/local/bin/node", name: "node", firstSeen: .now, lastSeen: .now, requestCount: 2, deviceIDs: [F.thisMac])
+        let cursorProcess = HostProcess(path: "/Applications/Cursor.app/Contents/MacOS/Cursor", name: "Cursor", firstSeen: .now, lastSeen: .now,
+                                        requestCount: 27, deviceIDs: [F.thisMac])
+        let cache = AppDetailCache()
+        cache.setProcesses([cursorProcess], for: push)
+        model.database = RequestsStubDatabase(processes: { _, value in value == "api2.cursor.sh" ? [node] : [cursorProcess] })
+        let processes = AppDetailHostProcesses()
+        let reading = Task { await processes.follow(api, model: model, cache: cache) }
+        try await eventually { processes.shown(api, cache: cache).processes == [node] }
+        reading.cancel()
+        await reading.value
+
+        #expect(processes.shown(api, cache: cache).processes == [node])
+        #expect(processes.shown(push, cache: cache) == AppDetailHostProcesses.Shown(key: push, processes: [cursorProcess]))
+        #expect(processes.shown(onMini, cache: cache) == AppDetailHostProcesses.Shown(key: onMini))
+    }
+
+    /// A read that answers with the list the cache gave changes nothing the rows observe, so they are not drawn again.
+    @Test func aReadOfTheCachedListLeavesTheRowsAlone() async throws {
+        let defaults = TestDefaults()
+        let model = AppModel(preferences: Preferences(defaults: defaults.make()))
+        let key = AppDetailCache.HostKey(appID: F.cursor.id, scope: .all, kind: .domain, value: "api2.cursor.sh")
+        let node = HostProcess(path: "/usr/local/bin/node", name: "node", firstSeen: .now, lastSeen: .now, requestCount: 2, deviceIDs: [F.thisMac])
+        let cache = AppDetailCache()
+        cache.setProcesses([node], for: key)
+        let answered = Counter()
+        model.database = RequestsStubDatabase(processes: { _, _ in
+            await answered.add()
+            return [node]
+        })
+        let processes = AppDetailHostProcesses()
+        let changed = Counter()
+        withObservationTracking {
+            _ = processes.shown(key, cache: cache)
+        } onChange: {
+            Task { await changed.add() }
+        }
+        let reading = Task { await processes.follow(key, model: model, cache: cache) }
+        for _ in 0..<100 where await answered.value == 0 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        reading.cancel()
+        await reading.value
+        #expect(await answered.value == 1)
+        #expect(await changed.value == 0)
+        #expect(processes.shown(key, cache: cache).processes == [node])
     }
 
     /// Another app's page opens with nothing selected while the same app's keeps its selection, so its cached list fits;
@@ -138,4 +208,11 @@ import Testing
         let wide = AppDetailInventoryTab.split(1_700, factor: 1)
         #expect(AppDetailInventoryTab.ipProcessesShowFirstSeen(1_700 - wide.domainsWidth - 0.5, factor: 1))
     }
+}
+
+/// Counts what happened across tasks.
+private actor Counter {
+    private(set) var value = 0
+
+    func add() { value += 1 }
 }
