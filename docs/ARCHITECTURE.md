@@ -431,16 +431,20 @@ app's newest as the engine updates it): then after the write batch interval and 
 also advances its domain's and IP's `last_seen` takes to be written, so a site moves to the top a few seconds after its
 request, and one read follows however many requests. Every row is one element with a stable identity
 (`AppDetailInventoryRowID`: a site, a domain or IP, the processes under a selected one, a group header), so a reorder
-slides the rows that move for 0.2 s (at once with Reduce Motion; only the update marked `reordersAppInventory` keeps
-its animation, a process list still opens at once) and a selection and its process list move with their row. SwiftUI
-keeps the rows on screen where they are when rows above them change, and a pane at its top at its top. A selected row
-on screen that moves to the front of its list itself (its domain, another domain of its site, or the IP got a request)
-would leave the screen upwards, so its pane goes there just before the rows move, where the place is still exact, and
-the row slides into view (`AppDetailPaneScroll`): the Domains pane to its top, the IP pane to its top or, below the
-Direct group, to the start of the Resolved from domains group. A pane's scroll position
-is set only for such a move, for the filter's scroll to the top or for an alert's View (below), and is emptied before
-every reorder and again half a second after a move: a position that kept a row or an edge, or the row SwiftUI writes
-into it as the user scrolls, would hold the pane on it through later updates.
+slides the rows that move for 0.2 s (at once with Reduce Motion; only the update marked `reordersAppInventory` keeps its
+animation, a process list still opens at once) and a selection and its process list move with their row. A row that
+moves goes up, to the front of its list, and the others keep their order, so just before the rows move each pane holds
+its topmost row on screen that doesn't move where it is (`AppDetailInventorySummary.reorderTarget`): its scroll position
+keeps that row's id, with the anchor at which the row is where it already is on screen (from the frames of the rows the
+pane has laid out and the part of its content on screen, which it reports to `AppDetailPaneScroll` without redrawing
+anything), so the rows on screen stay put while rows above them change. SwiftUI on its own kept them only some of the
+time. A pane at its top holds its top, so the newest activity shows there. A selected row on screen that moves above
+that row (its domain, another domain of its site, or the IP got a request) would leave the screen upwards, so its pane
+goes to the front of its list instead, just before the rows move, where the place is still exact, and the row slides
+into view: the Domains pane to its top, the IP pane to its top or, below the Direct group, to the start of the Resolved
+from domains group. A pane's scroll position is set only for a reorder, for the filter's scroll to the top or for an
+alert's View (below), and is emptied half a second later: a position that kept a row or an edge, or the row SwiftUI
+writes into it as the user scrolls, would hold the pane on it through later updates.
 
 An alert's View (a Notifications card, an alert in the menu bar panel, or a notification's View, which takes the alert
 the notification names first) opens the app's tab with the alert's domain or IP selected

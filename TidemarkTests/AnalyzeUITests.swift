@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import SwiftUI
 import Testing
 @testable import Tidemark
 
@@ -189,8 +190,37 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(AppDetailInventorySummary().ipRows(filter: .direct, domain: nil, opening: nil).map(\.id) == [.section(.direct), .note])
     }
 
-    /// A selected row that moves to the front of its list takes its pane there with it, since that move takes it above
-    /// the rows on screen; any other reorder leaves the pane where SwiftUI keeps the rows on screen.
+    /// Through a reorder a pane holds its topmost row on screen that doesn't move up, or its top; rows that move go up,
+    /// to the front of their list. A selected row on screen that moves above that row takes its pane to the front of its
+    /// list instead.
+    @Test func aReorderHoldsTheTopmostRowOnScreenThatStays() {
+        let rows: [AppDetailInventoryRowID] = [.site("a"), .host(.domain, "a1"), .site("b"), .host(.domain, "b1"), .site("c"), .host(.domain, "c1"),
+                                               .site("d"), .host(.domain, "d1")]
+        // c's domain got a request: c moves to the top.
+        let moved: [AppDetailInventoryRowID] = [.site("c"), .host(.domain, "c1"), .site("a"), .host(.domain, "a1"), .site("b"), .host(.domain, "b1"),
+                                                .site("d"), .host(.domain, "d1")]
+        func target(_ visible: Set<AppDetailInventoryRowID>, atTop: Bool = false, selected: AppDetailInventoryRowID? = nil)
+            -> AppDetailInventorySummary.ScrollTarget? {
+            AppDetailInventorySummary.reorderTarget(from: rows, to: moved, visible: visible, atTop: atTop, selected: selected, front: .top)
+        }
+        // c was below the screen: the topmost row on screen holds.
+        #expect(target([.host(.domain, "a1"), .site("b"), .host(.domain, "b1")]) == .keep(.host(.domain, "a1")))
+        // c was at the top of the screen: the first row on screen that stays holds, not c's.
+        #expect(target([.site("c"), .host(.domain, "c1"), .site("d"), .host(.domain, "d1")]) == .keep(.site("d")))
+        // At its top, the pane stays there, with c.
+        #expect(target([.site("a"), .host(.domain, "a1"), .site("b")], atTop: true) == .top)
+        // Every row on screen moves up, and none is selected: nothing holds.
+        #expect(target([.site("c"), .host(.domain, "c1")]) == nil)
+        // A selected row on screen that moves up goes with its pane to the front; one that stays, or isn't on screen, doesn't.
+        #expect(target([.host(.domain, "c1"), .site("b")], selected: .host(.domain, "c1")) == .top)
+        #expect(target([.site("c"), .host(.domain, "c1")], selected: .host(.domain, "c1")) == .top)
+        #expect(target([.site("b"), .host(.domain, "b1")], selected: .host(.domain, "b1")) == .keep(.site("b")))
+        #expect(target([.site("a"), .host(.domain, "a1")], selected: .host(.domain, "c1")) == .keep(.site("a")))
+        #expect(AppDetailInventorySummary.reorderTarget(from: [], to: [], visible: [], atTop: false, selected: nil, front: .top) == nil)
+    }
+
+    /// A selected row that moves above the rows on screen takes its pane to the front of its list with it; any other
+    /// reorder holds the rows on screen.
     @Test func aSelectedRowMovingToTheFrontTakesItsPaneThere() {
         let now = Date()
         var hosts = [
@@ -208,21 +238,94 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         hosts[2].lastSeen = now
         hosts[6].lastSeen = now
         let after = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
-        // github.com's site moved to the top: so does a pane showing either of its domains.
-        #expect(after.domainsTarget(keeping: "github.com", from: before) == .top)
-        #expect(after.domainsTarget(keeping: "api.github.com", from: before) == .top)
-        #expect(after.domainsTarget(keeping: "api2.cursor.sh", from: before) == nil)
-        #expect(after.domainsTarget(keeping: nil, from: before) == nil)
-        #expect(after.domainsTarget(keeping: "github.com", from: after) == nil, "already on top")
+        // The pane scrolled to github.com's rows, with notion.com's under them.
+        let github: Set<AppDetailInventoryRowID> = [.site("github.com"), .host(.domain, "api.github.com"), .host(.domain, "github.com"),
+                                                    .processes(.domain, "github.com"), .processes(.domain, "api.github.com"), .site("notion.com")]
+        // github.com's site moved to the top: so does a pane showing either of its domains selected.
+        #expect(after.domainsTarget(keeping: "github.com", from: before, visible: github, atTop: false) == .top)
+        #expect(after.domainsTarget(keeping: "api.github.com", from: before, visible: github, atTop: false) == .top)
+        // A selected domain that stays, or one off screen, leaves the rows on screen held.
+        let cursor: Set<AppDetailInventoryRowID> = [.site("cursor.sh"), .host(.domain, "api2.cursor.sh"), .processes(.domain, "api2.cursor.sh")]
+        #expect(after.domainsTarget(keeping: "api2.cursor.sh", from: before, visible: cursor, atTop: false) == .keep(.site("cursor.sh")))
+        #expect(after.domainsTarget(keeping: "github.com", from: before, visible: [.site("notion.com")], atTop: false) == .keep(.site("notion.com")))
+        #expect(after.domainsTarget(keeping: nil, from: before, visible: cursor, atTop: true) == .top)
+        #expect(after.domainsTarget(keeping: "github.com", from: after, visible: github, atTop: false) == .keep(.site("github.com")), "already on top")
+
         // The IP moved to the front of the Resolved group, below the Direct one: its last row goes to the top edge.
-        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: nil, filter: .all, from: before) == .row(.host(.ip, "91.108.56.130")))
-        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: nil, filter: .resolved, from: before) == .top)
-        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: nil, filter: .direct, from: before) == nil)
-        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: "github.com", filter: .all, from: before) == .top)
-        #expect(after.ipsTarget(keeping: "140.82.112.5", domain: nil, filter: .all, from: before) == nil)
+        let resolved: Set<AppDetailInventoryRowID> = [.host(.ip, "104.18.19.125"), .host(.ip, "140.82.112.5"), .host(.ip, "140.82.112.6"),
+                                                      .processes(.ip, "140.82.112.6"), .processes(.ip, "140.82.112.5")]
+        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: nil, filter: .all, from: before, visible: resolved, atTop: false)
+            == .row(.host(.ip, "91.108.56.130")))
+        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: nil, filter: .resolved, from: before, visible: resolved, atTop: false) == .top)
+        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: "github.com", filter: .all, from: before, visible: resolved, atTop: false) == .top)
+        // Listed only in the other group, or not moving to the front: the rows on screen hold.
+        let directRows: Set<AppDetailInventoryRowID> = [.section(.direct), .host(.ip, "149.154.175.60"), .host(.ip, "91.108.56.130")]
+        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: nil, filter: .direct, from: before, visible: directRows, atTop: false)
+            == .keep(.section(.direct)))
+        #expect(after.ipsTarget(keeping: "140.82.112.5", domain: nil, filter: .all, from: before, visible: resolved, atTop: false)
+            == .keep(.host(.ip, "104.18.19.125")))
+        // A direct IP moves to the front of its group, under its header on screen: the header holds, the IP shows under it.
         hosts[8].lastSeen = now
         let direct = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
-        #expect(direct.ipsTarget(keeping: "91.108.56.130", domain: nil, filter: .all, from: after) == .top)
+        let directOpen = directRows.union([.processes(.ip, "91.108.56.130")])
+        #expect(direct.ipsTarget(keeping: "91.108.56.130", domain: nil, filter: .all, from: after, visible: directOpen, atTop: false)
+            == .keep(.section(.direct)))
+        #expect(direct.ipsTarget(keeping: "91.108.56.130", domain: nil, filter: .all, from: after, visible: directOpen, atTop: true) == .top)
+    }
+
+    /// A selected domain lower in the top site that gets a request moves to the front of the site, which stays on top:
+    /// above the rows on screen of a pane scrolled a little, so the pane goes to its top. So it does when the domain's
+    /// site ends up second, after another site's request in the same read.
+    @Test func aSelectedDomainMovingUpInItsSiteTakesItsPaneToTheTop() {
+        let now = Date()
+        var hosts = [
+            host("api2.cursor.sh", seenMinutesAgo: 1, now: now),
+            host("api3.cursor.sh", seenMinutesAgo: 2, now: now),
+            host("metrics.cursor.sh", seenMinutesAgo: 3, now: now),
+            host("api.github.com", seenMinutesAgo: 20, now: now),
+            host("api.notion.com", seenMinutesAgo: 40, now: now),
+        ]
+        let before = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        hosts[2].lastSeen = now
+        let after = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(after.groups.map(\.site) == before.groups.map(\.site))
+        let onScreen: Set<AppDetailInventoryRowID> = [.host(.domain, "api3.cursor.sh"), .host(.domain, "metrics.cursor.sh"),
+                                                      .processes(.domain, "metrics.cursor.sh"), .site("github.com")]
+        #expect(after.domainsTarget(keeping: "metrics.cursor.sh", from: before, visible: onScreen, atTop: false) == .top)
+        // Off screen, it doesn't move the pane.
+        #expect(after.domainsTarget(keeping: "metrics.cursor.sh", from: before, visible: [.site("github.com")], atTop: false)
+            == .keep(.site("github.com")))
+
+        // api.notion.com, on screen, gets a request, and api2.cursor.sh one right after: notion.com ends up second.
+        hosts[4].lastSeen = now.addingTimeInterval(-1)
+        hosts[0].lastSeen = now
+        let both = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(both.groups.map(\.site) == ["cursor.sh", "notion.com", "github.com"])
+        let notion: Set<AppDetailInventoryRowID> = [.site("github.com"), .host(.domain, "api.github.com"), .site("notion.com"),
+                                                    .host(.domain, "api.notion.com"), .processes(.domain, "api.notion.com")]
+        #expect(both.domainsTarget(keeping: "api.notion.com", from: after, visible: notion, atTop: false) == .top)
+    }
+
+    /// The anchor that holds a row where it is: the point of the row at the same point of the pane.
+    @Test func aHeldRowKeepsItsPlaceOnScreen() {
+        let scroll = AppDetailPaneScroll()
+        #expect(scroll.isAtTop)
+        scroll.visibleRect = CGRect(x: 0, y: 300, width: 585, height: 520)
+        scroll.frames[.site("github.com")] = CGRect(x: 0, y: 312, width: 568, height: 30)
+        scroll.frames[.host(.domain, "api.github.com")] = CGRect(x: 0, y: 286, width: 568, height: 28)
+        scroll.frames[.processes(.domain, "api.github.com")] = CGRect(x: 0, y: 0, width: 568, height: 520)
+        #expect(!scroll.isAtTop)
+        // 12 pt down a pane 520 tall: the row's point 12 / 490 down sits 12 / 490 down the pane.
+        let anchor = scroll.anchor(keeping: .site("github.com"))
+        #expect(anchor.map { abs($0.y - 12.0 / 490) < 1e-9 } == true)
+        #expect(anchor.map { abs((312 + $0.y * 30) - (300 + $0.y * 520)) < 1e-9 } == true)
+        // Partly above the pane.
+        #expect(scroll.anchor(keeping: .host(.domain, "api.github.com")).map { abs($0.y - -14.0 / 492) < 1e-9 } == true)
+        // Not laid out, or as tall as the pane: no anchor holds it.
+        #expect(scroll.anchor(keeping: .site("notion.com")) == nil)
+        #expect(scroll.anchor(keeping: .processes(.domain, "api.github.com")) == nil)
+        #expect(scroll.position(.keep(.site("notion.com"))).viewID == nil)
+        #expect(scroll.position(.keep(.site("github.com"))).viewID(type: AppDetailInventoryRowID.self) == .site("github.com"))
     }
 
     /// An alert's View brings its domain's row into view in the Domains pane and its IP's in the IP pane as it lists every

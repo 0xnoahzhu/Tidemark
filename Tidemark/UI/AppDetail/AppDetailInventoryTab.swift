@@ -23,8 +23,9 @@ struct AppDetailInventoryTab: View {
     var cache: AppDetailCache
 
     @State private var content = Content()
-    /// Where each pane is scrolled to, set only for a moment: to take a pane to the front of its list with a selected row
-    /// that moves there, or the IP pane to its top when its filter changes (`AppDetailPaneScroll`).
+    /// Where each pane is scrolled to, set only for a moment: to hold a pane's rows on screen (or its top) through a
+    /// reorder, take it to the front of its list with a selected row that moves there, bring an alert's row into view,
+    /// or take the IP pane to its top when its filter changes (`AppDetailPaneScroll`).
     @State private var domainsPosition = ScrollPosition(idType: AppDetailInventoryRowID.self)
     @State private var ipsPosition = ScrollPosition(idType: AppDetailInventoryRowID.self)
     @State private var domainsScroll = AppDetailPaneScroll()
@@ -260,15 +261,20 @@ struct AppDetailInventoryTab: View {
                     Section {
                         // One row each, so a site, a domain and its processes keep their identity as they move.
                         ForEach(summary.domainRows(opening: selected)) { row in
-                            switch row {
-                            case .site(let group):
-                                siteRow(group, showsFirstSeen: showsFirstSeen)
-                            case .domain(let host):
-                                AppDetailDomainRow(requests: requestsLink, host: host, selected: selected == host.value, arrived: arrived == row.id,
-                                                   showsFirstSeen: showsFirstSeen)
-                            case .processes(let domain):
-                                // The processes' tree glyphs under the domain's name.
-                                processList(.domain, host: domain, showsFirstSeen: showsFirstSeen, indent: 26.px)
+                            Group {
+                                switch row {
+                                case .site(let group):
+                                    siteRow(group, showsFirstSeen: showsFirstSeen)
+                                case .domain(let host):
+                                    AppDetailDomainRow(requests: requestsLink, host: host, selected: selected == host.value, arrived: arrived == row.id,
+                                                       showsFirstSeen: showsFirstSeen)
+                                case .processes(let domain):
+                                    // The processes' tree glyphs under the domain's name.
+                                    processList(.domain, host: domain, showsFirstSeen: showsFirstSeen, indent: 26.px)
+                                }
+                            }
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(AppDetailPaneScroll.content)) } action: {
+                                domainsScroll.frames[row.id] = $0
                             }
                         }
                     } header: {
@@ -282,6 +288,7 @@ struct AppDetailInventoryTab: View {
                     }
                 }
                 .scrollTargetLayout()
+                .coordinateSpace(.named(AppDetailPaneScroll.content))
                 .padding(.bottom, 10.px)
                 // A process list opens and closes at once rather than sliding the rows below it: that animation lays out
                 // every row of the pane in each of its frames, at twice the work of a frame on a page without the lists.
@@ -290,6 +297,7 @@ struct AppDetailInventoryTab: View {
             }
             .scrollPosition($domainsPosition)
             .onScrollTargetVisibilityChange(idType: AppDetailInventoryRowID.self, threshold: 0.5) { domainsScroll.visible = Set($0) }
+            .onScrollGeometryChange(for: CGRect.self, of: \.visibleRect) { domainsScroll.visibleRect = $1 }
         }
     }
 
@@ -361,19 +369,24 @@ struct AppDetailInventoryTab: View {
                         // With a domain selected only the IPs it resolved to, whichever group they are in; an IP also
                         // reached by IP alone has its BY IP badge. One row each, like the Domains pane's.
                         ForEach(summary.ipRows(filter: nav.appIPFilter, domain: selected, opening: selectedIP)) { row in
-                            switch row {
-                            case .section(let group, let count):
-                                ipGroupHeader(group, count: count)
-                            case .nothingDirect:
-                                ipNote(tr("Nothing reached by IP alone.", "AppDetail"))
-                            case .noIPs:
-                                ipNote(selected.map(summary.hasIPs) == true ? tr("None of its IPs match the search.", "AppDetail")
-                                    : tr("No IP on record for this domain.", "AppDetail"))
-                            case .ip(let ip):
-                                AppDetailIPRow(requests: requestsLink, ip: ip, selected: selectedIP == ip.value, arrived: arrived == row.id)
-                            case .processes(let ip):
-                                processList(.ip, host: ip, showsFirstSeen: showsProcessFirstSeen, indent: 12.px)
-                                    .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
+                            Group {
+                                switch row {
+                                case .section(let group, let count):
+                                    ipGroupHeader(group, count: count)
+                                case .nothingDirect:
+                                    ipNote(tr("Nothing reached by IP alone.", "AppDetail"))
+                                case .noIPs:
+                                    ipNote(selected.map(summary.hasIPs) == true ? tr("None of its IPs match the search.", "AppDetail")
+                                        : tr("No IP on record for this domain.", "AppDetail"))
+                                case .ip(let ip):
+                                    AppDetailIPRow(requests: requestsLink, ip: ip, selected: selectedIP == ip.value, arrived: arrived == row.id)
+                                case .processes(let ip):
+                                    processList(.ip, host: ip, showsFirstSeen: showsProcessFirstSeen, indent: 12.px)
+                                        .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
+                                }
+                            }
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(AppDetailPaneScroll.content)) } action: {
+                                ipsScroll.frames[row.id] = $0
                             }
                         }
                     } header: {
@@ -386,11 +399,13 @@ struct AppDetailInventoryTab: View {
                     }
                 }
                 .scrollTargetLayout()
+                .coordinateSpace(.named(AppDetailPaneScroll.content))
                 // Like the Domains pane's: only a reorder moves rows; the rows animate their own highlight.
                 .transaction { if !$0.reordersAppInventory { $0.animation = nil } }
             }
             .scrollPosition($ipsPosition)
             .onScrollTargetVisibilityChange(idType: AppDetailInventoryRowID.self, threshold: 0.5) { ipsScroll.visible = Set($0) }
+            .onScrollGeometryChange(for: CGRect.self, of: \.visibleRect) { ipsScroll.visibleRect = $1 }
         }
     }
 
@@ -449,31 +464,17 @@ struct AppDetailInventoryTab: View {
         letGo(ips: true)
     }
 
-    /// Before the rows reorder to `next`: a pane whose selected row on screen moves to the front of its list goes there
-    /// first, in the layout it has, where the place is exact (`AppDetailPaneScroll`), and keeps its position through
-    /// the reorder; the other panes' positions are emptied, so SwiftUI keeps their rows on screen (or the top) where
-    /// they are.
+    /// Before the rows reorder to `next`: each pane holds its topmost row on screen that doesn't move where it is, or its
+    /// top, through the reorder; one whose selected row on screen moves above that row goes to the front of its list
+    /// first, in the layout it has, where the place is exact (`AppDetailPaneScroll`).
     private func positionPanes(for next: AppDetailInventorySummary) {
-        func position(_ target: AppDetailInventorySummary.ScrollTarget?) -> ScrollPosition {
-            var position = ScrollPosition(idType: AppDetailInventoryRowID.self)
-            switch target {
-            case .top: position.scrollTo(edge: .top)
-            case .row(let id): position.scrollTo(id: id, anchor: .top)
-            case nil: break
-            }
-            return position
-        }
         let domain = summary.selectedHost(model.nav.appSelectedHost)
         let ip = summary.selectedIP(model.nav.appSelectedIP, usedBy: domain)
-        let domainsTarget = domain.flatMap {
-            domainsScroll.visible.contains(.host(.domain, $0)) ? next.domainsTarget(keeping: $0, from: summary) : nil
-        }
-        let ipsTarget = ip.flatMap {
-            ipsScroll.visible.contains(.host(.ip, $0))
-                ? next.ipsTarget(keeping: $0, domain: domain, filter: model.nav.appIPFilter, from: summary) : nil
-        }
-        domainsPosition = position(domainsTarget)
-        ipsPosition = position(ipsTarget)
+        let domainsTarget = next.domainsTarget(keeping: domain, from: summary, visible: domainsScroll.visible, atTop: domainsScroll.isAtTop)
+        let ipsTarget = next.ipsTarget(keeping: ip, domain: domain, filter: model.nav.appIPFilter, from: summary,
+                                       visible: ipsScroll.visible, atTop: ipsScroll.isAtTop)
+        domainsPosition = domainsScroll.position(domainsTarget)
+        ipsPosition = ipsScroll.position(ipsTarget)
         letGo(domains: domainsTarget != nil, ips: ipsTarget != nil)
     }
 
@@ -600,8 +601,8 @@ struct AppDetailInventoryTab: View {
 
     /// Shows hosts just read. Nothing changes when they are the ones shown and the summary is still current (its
     /// NEW marks expire with time); otherwise the summary is computed off the main actor. Rows that move slide to their
-    /// place (at once with Reduce Motion) while the rows on screen stay where they are, and a selected row on screen that
-    /// moves to the front of its list takes its pane there (`AppDetailPaneScroll`).
+    /// place (at once with Reduce Motion) while each pane holds the rows on screen where they are, and a selected row on
+    /// screen that moves to the front of its list takes its pane there (`positionPanes`).
     private func show(_ fresh: [AppHost], for key: AppDetailCache.Key) async {
         let same = content.key == key && fresh == content.hosts
         if same, content.summary.isCurrent(search: model.nav.appInventorySearch, at: .now) { return }
