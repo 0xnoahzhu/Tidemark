@@ -282,6 +282,39 @@
         }
       }
     },
+    "Copy IP Address" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制 IP 地址"
+          }
+        }
+      }
+    },
+    "Copy Path" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制路径"
+          }
+        }
+      }
+    },
+    "Couldn't load the processes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法载入进程。"
+          }
+        }
+      }
+    },
     "Delete" : {
       "localizations" : {
         "zh-Hans" : {
@@ -342,12 +375,13 @@
         }
       }
     },
-    "Every domain and IP %@ has used, each listed once. The first time a new one appears you get an alert, and it stays marked NEW for 24 hours." : {
+    "Every domain and IP %@ has used, each listed once; select one to see the processes that reached it. The first time a new one appears you get an alert, and it stays marked NEW for 24 hours." : {
+      "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 用过的每个域名和 IP 都只列一次。新的一出现就会提醒你，并在 24 小时内标为“新”。"
+            "value" : "%@ 用过的每个域名和 IP 都只列一次，选中一个即可查看访问过它的进程。新的一出现就会提醒你，并在 24 小时内标为“新”。"
           }
         }
       }
@@ -398,6 +432,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "首次出现"
+          }
+        }
+      }
+    },
+    "First seen %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "首次出现：%@"
           }
         }
       }
@@ -578,6 +623,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有域名，直接用 IP 连接"
+          }
+        }
+      }
+    },
+    "No process on record for it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有记录到访问它的进程。"
           }
         }
       }
@@ -768,6 +824,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "远端 IP"
+          }
+        }
+      }
+    },
+    "Reported by %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由 %@ 记录"
           }
         }
       }
@@ -1041,6 +1108,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "耗时"
+          }
+        }
+      }
+    },
+    "Try Again" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重试"
           }
         }
       }

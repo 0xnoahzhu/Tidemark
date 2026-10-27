@@ -1250,11 +1250,12 @@ private actor RequestsGate {
     func noteCancellation() { cancellations += 1 }
 }
 
-/// A database whose request queries are answered by closures; by default they fail.
-private struct RequestsStubDatabase: TidemarkDatabase {
+/// A database whose request queries and process lists are answered by closures; by default the queries fail.
+struct RequestsStubDatabase: TidemarkDatabase {
     var query: @Sendable (RequestQuery) async throws -> RequestPage = { _ in throw DatabaseError.unreachable("connection refused") }
     var buckets: @Sendable (RequestQuery, Int) async throws -> Histogram = { _, _ in throw DatabaseError.unreachable("connection refused") }
     var policies: @Sendable (Date?) async throws -> [String] = { _ in [] }
+    var processes: @Sendable (HostKind, String) async throws -> [HostProcess] = { _, _ in [] }
 
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage { try await self.query(query) }
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram { try await self.buckets(query, buckets) }
@@ -1292,7 +1293,9 @@ private struct RequestsStubDatabase: TidemarkDatabase {
     func appHosts(_ appID: AppID, scope: DeviceScope) async throws -> [AppHost] { [] }
     func touchHostSources(_ sources: [HostSourceTouch]) async throws {}
     func inventory(kind: HostKind?, search: String, scope: DeviceScope) async throws -> [InventoryEntry] { [] }
-    func hostProcesses(kind: HostKind, value: String, appID: AppID, scope: DeviceScope) async throws -> [HostProcess] { [] }
+    func hostProcesses(kind: HostKind, value: String, appID: AppID, scope: DeviceScope) async throws -> [HostProcess] {
+        try await processes(kind, value)
+    }
     func ipInfo(_ ip: String) async throws -> GeoInfo? { nil }
     func saveIPInfo(_ ip: String, geo: GeoInfo) async throws {}
     func insertAlerts(_ alerts: [AlertItem]) async throws -> [AlertItem] { [] }

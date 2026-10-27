@@ -195,4 +195,10 @@ enum AppDetailProcessPath {
         }
         return path
     }
+
+    /// The outermost app bundle an executable lives in (`/Applications/Docker.app`), nil for one outside any bundle.
+    static func bundle(of path: String) -> String? {
+        guard let end = path.range(of: ".app/") else { return nil }
+        return String(path[..<end.lowerBound]) + ".app"
+    }
 }

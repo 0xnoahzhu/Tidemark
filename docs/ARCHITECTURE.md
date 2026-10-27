@@ -411,6 +411,18 @@ so an IP opens `Navigation.openRequests(reaching:)` (`RequestQuery.remoteIP`, an
 is shared) while History keeps the sidebar's Mac, so with one Mac selected there the count's help says that History
 lists only that Mac's requests.
 
+Selecting a domain or an IP in an app's Domains & IPs tab (a click on its row; a notification's View selects the new
+domain or IP) lists under it every process that reached it, like the children of the process tree (`hostProcesses`):
+the app's `host_sources` rows of that address, read through the table's primary key, merged by executable path across
+Macs (their requests added up, the earliest first seen and the latest last seen, the Macs named when there are
+several). What first reached the address in the last 24 hours comes first, marked NEW, then the busiest. With one Mac in
+the sidebar only that Mac's rows count. A domain and an IP can be open at once; each list is read as its selection opens
+and every 10 s while it stays open, a change of selection cancels the read, and an address opened before shows its last
+list at once (`AppDetailCache`) while it is read again. History has no filter for a process, so a process row's count is
+no link and its context menu opens the app's requests to the address. `host_sources` keeps one row per Mac and
+executable whatever the app, so an executable two apps both ran to the same address (`/usr/bin/curl`) is listed under
+the app that used it last, with both apps' requests.
+
 The Domains & IPs page draws its table itself, as the native inset table looks and behaves (header and separators,
 rounded alternate rows continued below the last one, each row one VoiceOver element naming its columns), in one
 scroll view whose rows are built as they scroll into view: a `Table` builds and measures every row it shows again on

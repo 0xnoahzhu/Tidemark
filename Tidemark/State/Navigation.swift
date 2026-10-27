@@ -50,8 +50,10 @@ final class Navigation {
     var appRequestsLive = true
     var appRequestSearch = ""
     var appInventorySearch = ""
-    /// Host selected in the app's domain list; highlights the IPs it resolved to.
+    /// Host selected in the app's domain list; highlights the IPs it resolved to and lists the processes that reached it.
     var appSelectedHost: String?
+    /// IP selected in the app's IP list; lists the processes that reached it.
+    var appSelectedIP: String?
     var appIPFilter: IPFilter = .all
 
     enum IPFilter: String, CaseIterable, Sendable { case all, direct, resolved }

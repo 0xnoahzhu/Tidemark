@@ -195,8 +195,10 @@ struct MenuBarPanel: View {
             let id = alert.id
             Task { await model.capture.markAlertsRead([id]) }
         }
-        // Highlight the new host in the app's Domains & IPs tab, like a notification card's View.
+        // Select the new domain or IP in the app's Domains & IPs tab, which lists the processes that reached it, like a
+        // notification card's View.
         model.nav.appSelectedHost = alert.kind == .domain ? alert.value : nil
+        model.nav.appSelectedIP = alert.kind == .ip ? alert.value : nil
         model.nav.open(.app(alert.appID), tab: .inventory)
         showMainWindow()
     }

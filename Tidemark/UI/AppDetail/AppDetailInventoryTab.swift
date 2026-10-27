@@ -3,9 +3,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// "Domains & IPs" tab of a monitored app: every domain (grouped by site) and every IP it used, each
-/// listed once, with a search field and CSV export. Selecting a domain highlights the IPs it resolved to. A row's count
-/// and context menu open the app's requests to that host in History, filtered to the app as the count is
-/// (`AppDetailRequestsLink`).
+/// listed once, with a search field and CSV export. Selecting a domain highlights the IPs it resolved to; selecting a
+/// domain or an IP lists under it every process that reached it (`AppDetailHostProcessList`). A row's count and context
+/// menu open the app's requests to that host in History, filtered to the app as the count is (`AppDetailRequestsLink`).
 ///
 /// The tab shows what it showed last for the app (`AppDetailCache`) right after its first frame and reads the
 /// database again in the background; the summary is computed off the main actor, and only when the hosts, the
@@ -20,6 +20,7 @@ struct AppDetailInventoryTab: View {
     var cache: AppDetailCache
 
     @State private var content = Content()
+    @State private var processes = AppDetailHostProcesses()
     @State private var exportDocument: AnalyzeCSVDocument?
     @State private var isExporting = false
     @State private var exportError: (any Error)?
@@ -28,6 +29,16 @@ struct AppDetailInventoryTab: View {
     /// The Domains pane's columns without First seen, for a narrow page.
     static let narrowDomainColumns = domainColumns(factor: UIScale.factor, showsFirstSeen: false)
     static let ipColumns = ipColumns(factor: UIScale.factor)
+
+    /// The width of a pane less its names at `factor`: its fixed columns, the spaces between its columns, its 16 px
+    /// margins and the scroller.
+    private static func fixedWidth(_ columns: [AnalyzeColumnsLayout.Column], factor: CGFloat) -> CGFloat {
+        func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
+        let scroller = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+        return columns.reduce(px(10) * CGFloat(columns.count - 1) + px(16) * 2 + scroller) { total, column in
+            if case .fixed(let width) = column { total + width } else { total }
+        }
+    }
 
     // The columns at any UI scale. First seen, Last seen and the counts are fixed to the longest of their text
     // (`Yesterday 23:59` in 12 px, `Yesterday` and `1,234,567` in 11 px SF Mono), the IP to `255.255.255.255` in
@@ -62,20 +73,19 @@ struct AppDetailInventoryTab: View {
     /// pane.
     static func split(_ width: CGFloat, factor: CGFloat = UIScale.factor) -> PaneSplit {
         func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
-        let scroller = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
-        // A pane's width less its names: its fixed columns, the spaces between its columns, its 16 px margins and the
-        // scroller.
-        func fixed(_ columns: [AnalyzeColumnsLayout.Column]) -> CGFloat {
-            columns.reduce(px(10) * CGFloat(columns.count - 1) + px(16) * 2 + scroller) { total, column in
-                if case .fixed(let width) = column { total + width } else { total }
-            }
-        }
+        func fixed(_ columns: [AnalyzeColumnsLayout.Column]) -> CGFloat { fixedWidth(columns, factor: factor) }
         // The IP pane with the hairline between the panes.
         let ipMinimum = fixed(ipColumns(factor: factor)) + px(90) + 0.5
         let showsFirstSeen = fixed(domainColumns(factor: factor)) + px(150) + ipMinimum <= width
         let domainsMinimum = fixed(domainColumns(factor: factor, showsFirstSeen: showsFirstSeen)) + px(150)
         let domains = min(max(width * 1.4 / 2.4, domainsMinimum), width - ipMinimum)
         return PaneSplit(domainsWidth: max(0, domains), showsFirstSeen: showsFirstSeen)
+    }
+
+    /// Whether the processes of a selected IP have room for their First seen column in an IP pane `width` points wide:
+    /// they take the Domains pane's columns, and their names keep 200 px for a process's tile, name and path.
+    static func ipProcessesShowFirstSeen(_ width: CGFloat, factor: CGFloat = UIScale.factor) -> Bool {
+        fixedWidth(domainColumns(factor: factor), factor: factor) + UIScale.length(200, factor: factor) <= width
     }
 
     /// The hosts and the summary shown, with what they were read and computed for.
@@ -89,21 +99,35 @@ struct AppDetailInventoryTab: View {
         var summary = AppDetailInventorySummary()
     }
 
-    /// What the tab last showed for `key`, when it fits the search and the selected domain.
-    private static func cached(_ key: AppDetailCache.Key, search: String, selectedHost: String?, in cache: AppDetailCache) -> Content? {
-        guard let cached = cache.inventory(key), cached.fits(search: search, selectedHost: selectedHost) else { return nil }
+    /// What the tab last showed for `key`, when it fits the search and the selected domain and IP.
+    private static func cached(_ key: AppDetailCache.Key, search: String, selectedHost: String?, selectedIP: String?,
+                               in cache: AppDetailCache) -> Content? {
+        guard let cached = cache.inventory(key), cached.fits(search: search, selectedHost: selectedHost, selectedIP: selectedIP) else { return nil }
         return Content(key: key, hosts: cached.hosts, summary: cached.summary)
+    }
+
+    /// What a selection's processes are read for: the address, and each Try Again.
+    private struct ProcessesTask: Equatable {
+        var key: AppDetailCache.HostKey?
+        var attempt: Int
+    }
+
+    private func processesTask(_ kind: HostKind, _ value: String?) -> ProcessesTask {
+        ProcessesTask(key: value.map { AppDetailCache.HostKey(appID: app.id, scope: scope, kind: kind, value: $0) },
+                      attempt: processes.attempt(kind))
     }
 
     var body: some View {
         let key = AppDetailCache.Key(appID: app.id, scope: scope)
+        let domainProcesses = processesTask(.domain, summary.selectedHost(model.nav.appSelectedHost))
+        let ipProcesses = processesTask(.ip, summary.selectedIP(model.nav.appSelectedIP))
         Group {
             if content.key == key && content.hosts.isEmpty {
                 waitingState
             } else {
                 VStack(spacing: 0) {
                     summaryLine
-                    Text(trf("Every domain and IP %@ has used, each listed once. The first time a new one appears you get an alert, and it stays marked NEW for 24 hours.", "AppDetail", app.name))
+                    Text(trf("Every domain and IP %@ has used, each listed once; select one to see the processes that reached it. The first time a new one appears you get an alert, and it stays marked NEW for 24 hours.", "AppDetail", app.name))
                         .font(.design(11.5))
                         .foregroundStyle(Theme.ink2)
                         .lineHeight(Theme.noteLineHeight)
@@ -116,7 +140,8 @@ struct AppDetailInventoryTab: View {
                         HStack(spacing: 0) {
                             domainsPane(showsFirstSeen: split.showsFirstSeen).frame(width: split.domainsWidth)
                             Rectangle().fill(Theme.line).frame(width: 0.5)
-                            ipsPane.frame(maxWidth: .infinity)
+                            ipsPane(showsProcessFirstSeen: Self.ipProcessesShowFirstSeen(geometry.size.width - split.domainsWidth - 0.5))
+                                .frame(maxWidth: .infinity)
                         }
                     }
                 }
@@ -135,6 +160,12 @@ struct AppDetailInventoryTab: View {
         }
         .task(id: search) {
             await follow(search)
+        }
+        .task(id: domainProcesses) {
+            await processes.follow(domainProcesses.key, in: .domain, model: model, cache: cache)
+        }
+        .task(id: ipProcesses) {
+            await processes.follow(ipProcesses.key, in: .ip, model: model, cache: cache)
         }
     }
 
@@ -211,6 +242,10 @@ struct AppDetailInventoryTab: View {
                             siteRow(group, showsFirstSeen: showsFirstSeen)
                             ForEach(group.hosts) { host in
                                 AppDetailDomainRow(requests: requestsLink, host: host, selected: selected == host.value, showsFirstSeen: showsFirstSeen)
+                                if selected == host.value {
+                                    // The processes' tree glyphs under the domain's name.
+                                    processList(.domain, host: host.value, showsFirstSeen: showsFirstSeen, indent: 26.px)
+                                }
                             }
                         }
                     } header: {
@@ -268,6 +303,12 @@ struct AppDetailInventoryTab: View {
         requestsLink.open(host, in: model.nav)
     }
 
+    /// The processes under the selected domain or IP; the IP pane's header has no date columns, so their caption names them.
+    private func processList(_ kind: HostKind, host: String, showsFirstSeen: Bool, indent: CGFloat) -> some View {
+        AppDetailHostProcessList(processes: processes, kind: kind, app: app, host: host, requests: requestsLink,
+                                 showsFirstSeen: showsFirstSeen, indent: indent, labelsDates: kind == .ip)
+    }
+
     /// What the rows open in History. History keeps the sidebar's Mac, not the tab's.
     private var requestsLink: AppDetailRequestsLink {
         AppDetailRequestsLink(appID: app.id, appName: app.name, oneMac: model.devices.scope.deviceID != nil)
@@ -275,9 +316,18 @@ struct AppDetailInventoryTab: View {
 
     // MARK: IPs
 
-    private var ipsPane: some View {
+    private func ipsPane(showsProcessFirstSeen: Bool) -> some View {
         @Bindable var nav = model.nav
         let selected = summary.selectedHost(nav.appSelectedHost)
+        let selectedIP = summary.selectedIP(nav.appSelectedIP)
+        // An IP's row, and the processes that reached it under it when it is selected.
+        @ViewBuilder func ip(_ ip: AppHost) -> some View {
+            ipRow(ip, selected: selected, selectedIP: selectedIP)
+            if selectedIP == ip.value {
+                processList(.ip, host: ip.value, showsFirstSeen: showsProcessFirstSeen, indent: 12.px)
+                    .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
+            }
+        }
         // Like the design's "N of M", the Direct / From domains switch doesn't change the count.
         let shown = summary.visibleIPCount(selectedHost: selected)
         let title = HStack(alignment: .firstTextBaseline, spacing: 8.px) {
@@ -312,7 +362,7 @@ struct AppDetailInventoryTab: View {
                         if nav.appIPFilter != .resolved {
                             ipGroupHeader(tr("Direct", "AppDetail"), count: summary.directIPs.count,
                                           note: tr("reached by IP, no hostname", "AppDetail"))
-                            ForEach(summary.directIPs) { ipRow($0, selected: selected) }
+                            ForEach(summary.directIPs) { ip($0) }
                             if summary.directIPs.isEmpty {
                                 Text(tr("Nothing reached by IP alone.", "AppDetail"))
                                     .font(.design(11.5))
@@ -325,7 +375,7 @@ struct AppDetailInventoryTab: View {
                         if nav.appIPFilter != .direct {
                             ipGroupHeader(tr("Resolved from domains", "AppDetail"), count: summary.resolvedIPs.count,
                                           note: tr("the domains on the left resolved to these", "AppDetail"))
-                            ForEach(summary.resolvedIPs) { ipRow($0, selected: selected) }
+                            ForEach(summary.resolvedIPs) { ip($0) }
                         }
                     } header: {
                         AnalyzeHeaderRow(columns: Self.ipColumns, height: 26.px, horizontalPadding: 16.px) {
@@ -340,8 +390,8 @@ struct AppDetailInventoryTab: View {
         }
     }
 
-    private func ipRow(_ ip: AppHost, selected: String?) -> some View {
-        let highlighted = selected.map { ip.hosts.contains($0) } ?? false
+    private func ipRow(_ ip: AppHost, selected: String?, selectedIP: String?) -> some View {
+        let highlighted = selectedIP == ip.value || (selected.map { ip.hosts.contains($0) } ?? false)
         return AppDetailIPRow(requests: requestsLink, ip: ip, highlighted: highlighted, dimmed: selected != nil && !highlighted)
     }
 
@@ -382,7 +432,8 @@ struct AppDetailInventoryTab: View {
             // Then what the tab last showed for the app and scope, while it reads the database. SwiftUI can start
             // this task while it draws the tab, so the lists wait for the next turn of the run loop: the switch to the
             // tab draws as fast as an empty tab, and the lists follow in the next frame.
-            if let cached = Self.cached(key, search: model.nav.appInventorySearch, selectedHost: model.nav.appSelectedHost, in: cache) {
+            if let cached = Self.cached(key, search: model.nav.appInventorySearch, selectedHost: model.nav.appSelectedHost,
+                                        selectedIP: model.nav.appSelectedIP, in: cache) {
                 await Task.yield()
                 if Task.isCancelled { return }
                 content = cached
@@ -489,7 +540,9 @@ private struct AppDetailDomainRow: View {
     }
 }
 
-/// An IP with its network and the domains that resolved to it; dimmed when another domain is selected.
+/// An IP with its network and the domains that resolved to it; dimmed when another domain is selected. A click selects
+/// it, which lists the processes that reached it under it, and another click closes them. The address is not selectable
+/// text, which would take the click on it; the context menu copies it.
 ///
 /// It takes its highlight as plain flags rather than the selection, so selecting another domain only redraws the
 /// rows whose state changes.
@@ -497,7 +550,7 @@ private struct AppDetailIPRow: View {
     @Environment(AppModel.self) private var model
     var requests: AppDetailRequestsLink
     var ip: AppHost
-    /// A domain that resolved to it is selected.
+    /// It, or a domain that resolved to it, is selected.
     var highlighted: Bool
     /// Another domain is selected.
     var dimmed: Bool
@@ -506,7 +559,7 @@ private struct AppDetailIPRow: View {
         let hosts = InventoryRequests.hosts(of: ip)
         AnalyzeColumnsLayout(columns: AppDetailInventoryTab.ipColumns) {
             HStack(spacing: 6.px) {
-                Text(ip.value).font(Theme.mono(11.5)).lineLimit(1).textSelection(.enabled)
+                Text(ip.value).font(Theme.mono(11.5)).lineLimit(1)
                 if ip.isNew() { TagBadge(text: tr("NEW", "AppDetail"), style: .new) }
             }
             VStack(alignment: .leading, spacing: 1.px) {
@@ -537,7 +590,18 @@ private struct AppDetailIPRow: View {
         .opacity(dimmed ? 0.35 : 1)
         .animation(.easeOut(duration: 0.2), value: dimmed)
         .contentShape(.rect)
-        .contextMenu { AnalyzeRequestsMenu(hosts: hosts, open: openRequests) }
+        .onTapGesture {
+            withAnimation(.easeOut(duration: 0.2)) {
+                model.nav.appSelectedIP = model.nav.appSelectedIP == ip.value ? nil : ip.value
+            }
+        }
+        .contextMenu {
+            AnalyzeRequestsMenu(hosts: hosts, open: openRequests)
+            Button(tr("Copy IP Address", "AppDetail")) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(ip.value, forType: .string)
+            }
+        }
     }
 
     private func openRequests(_ value: String) {
@@ -718,6 +782,7 @@ struct AppDetailInventorySummary: Sendable {
     /// When the first of the hosts' NEW marks runs out; the order and `newCount` change then.
     private(set) var expires: Date?
     private var domainValues: Set<String> = []
+    private var ipValues: Set<String> = []
 
     /// No hosts.
     init() {}
@@ -728,6 +793,7 @@ struct AppDetailInventorySummary: Sendable {
         let domains = hosts.filter { $0.kind == .domain }
         let ips = hosts.filter { $0.kind == .ip }
         domainValues = Set(domains.map(\.value))
+        ipValues = Set(ips.map(\.value))
         domainCount = domains.count
         ipCount = ips.count
         directIPCount = ips.filter(\.isDirect).count
@@ -795,6 +861,12 @@ struct AppDetailInventorySummary: Sendable {
     func selectedHost(_ host: String?) -> String? {
         guard let host, domainValues.contains(host) else { return nil }
         return host
+    }
+
+    /// The selected IP, if it is still one of the app's IPs.
+    func selectedIP(_ ip: String?) -> String? {
+        guard let ip, ipValues.contains(ip) else { return nil }
+        return ip
     }
 
     /// IPs the search keeps that the host selection doesn't dim (all of them when nothing is selected).
