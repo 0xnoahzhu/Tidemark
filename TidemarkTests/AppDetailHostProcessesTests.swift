@@ -63,6 +63,27 @@ import Testing
         #expect(processes.attempt(.ip) == 1 && processes.attempt(.domain) == 0)
     }
 
+    /// Another app's page opens with nothing selected while the same app's keeps its selection, so its cached list fits;
+    /// an alert's View selects its domain or IP in the app it opens.
+    @Test func anotherAppsPageOpensWithNothingSelected() {
+        let nav = Navigation()
+        let cursor = UUID(), raycast = UUID()
+        nav.open(.app(cursor), tab: .inventory)
+        nav.appSelectedHost = "api2.cursor.sh"
+        nav.appSelectedIP = "104.18.19.125"
+        nav.open(.requests)
+        nav.open(.app(cursor))
+        #expect(nav.appSelectedHost == "api2.cursor.sh" && nav.appSelectedIP == "104.18.19.125")
+        nav.page = .app(raycast)
+        #expect(nav.appSelectedHost == nil && nav.appSelectedIP == nil)
+        nav.appSelectedIP = "8.8.8.8"
+        nav.open(cursor, selecting: .ip, "17.57.146.20")
+        #expect(nav.page == .app(cursor) && nav.appTab == .inventory)
+        #expect(nav.appSelectedHost == nil && nav.appSelectedIP == "17.57.146.20")
+        nav.open(cursor, selecting: .domain, "courier.push.apple.com")
+        #expect(nav.appSelectedHost == "courier.push.apple.com" && nav.appSelectedIP == nil)
+    }
+
     /// The cache keeps each address's list apart, per app and scope.
     @Test func theCacheKeepsEachAddressApart() {
         let cache = AppDetailCache(hostLimit: 2)

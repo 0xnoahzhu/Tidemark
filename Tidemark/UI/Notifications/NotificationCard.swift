@@ -127,8 +127,6 @@ struct NotificationCard: View {
 
     private func view() {
         markRead()
-        model.nav.appSelectedHost = alert.kind == .domain ? alert.value : nil
-        model.nav.appSelectedIP = alert.kind == .ip ? alert.value : nil
-        model.nav.open(.app(alert.appID), tab: .inventory)
+        model.nav.open(alert.appID, selecting: alert.kind, alert.value)
     }
 }

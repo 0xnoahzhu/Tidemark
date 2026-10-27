@@ -419,10 +419,10 @@ first reached the address in the last 24 hours comes first, marked NEW, then the
 the list keeps the processes that Mac reported, with every Mac's counts and dates as the address's own row has them. A
 domain and an IP can be open at once; each list is read as its selection opens and every 10 s while it stays open, a
 change of selection cancels the read, and an address opened before shows its last list at once (`AppDetailCache`) while
-it is read again. History has no filter for a process, so a process row's count is no link and its context menu opens
-the app's requests to the address. `host_sources` keeps one row per Mac and executable whatever the app, so an
-executable two apps both ran to the same address (`/usr/bin/curl`) is listed under the app that used it last, with both
-apps' requests.
+it is read again. Another app's page opens with nothing selected, so its tab can show its last list at once. History has
+no filter for a process, so a process row's count is no link and its context menu opens the app's requests to the
+address. `host_sources` keeps one row per Mac and executable whatever the app, so an executable two apps both ran to the
+same address (`/usr/bin/curl`) is listed under the app that used it last, with both apps' requests.
 
 The Domains & IPs page draws its table itself, as the native inset table looks and behaves (header and separators,
 rounded alternate rows continued below the last one, each row one VoiceOver element naming its columns), in one

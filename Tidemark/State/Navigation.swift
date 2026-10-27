@@ -29,7 +29,16 @@ enum SettingsTab: String, Hashable, Sendable, CaseIterable {
 @MainActor
 @Observable
 final class Navigation {
-    var page: Page = .requests
+    var page: Page = .requests {
+        didSet {
+            // Another app's page opens with nothing selected in its Domains & IPs tab: the last app's domain or IP is none
+            // of its own, and would keep the tab from showing its last list at once (`AppDetailCache.Inventory.fits`).
+            guard case .app(let id) = page, id != selectionAppID else { return }
+            selectionAppID = id
+            appSelectedHost = nil
+            appSelectedIP = nil
+        }
+    }
     var appTab: AppTab = .requests
 
     // Requests page
@@ -54,6 +63,8 @@ final class Navigation {
     var appSelectedHost: String?
     /// IP selected in the app's IP list; lists the processes that reached it.
     var appSelectedIP: String?
+    /// The app whose page the selected domain and IP belong to.
+    @ObservationIgnored private var selectionAppID: AppID?
     var appIPFilter: IPFilter = .all
 
     enum IPFilter: String, CaseIterable, Sendable { case all, direct, resolved }
@@ -71,6 +82,14 @@ final class Navigation {
     func open(_ page: Page, tab: AppTab? = nil) {
         self.page = page
         if let tab { appTab = tab }
+    }
+
+    /// Opens an app's Domains & IPs tab with one of its domains or IPs selected, which lists the processes that reached
+    /// it: an alert's View.
+    func open(_ app: AppID, selecting kind: HostKind, _ value: String) {
+        open(.app(app), tab: .inventory)
+        appSelectedHost = kind == .domain ? value : nil
+        appSelectedIP = kind == .ip ? value : nil
     }
 
     func openAddApp(preselect path: String? = nil) {

@@ -197,9 +197,7 @@ struct MenuBarPanel: View {
         }
         // Select the new domain or IP in the app's Domains & IPs tab, which lists the processes that reached it, like a
         // notification card's View.
-        model.nav.appSelectedHost = alert.kind == .domain ? alert.value : nil
-        model.nav.appSelectedIP = alert.kind == .ip ? alert.value : nil
-        model.nav.open(.app(alert.appID), tab: .inventory)
+        model.nav.open(alert.appID, selecting: alert.kind, alert.value)
         showMainWindow()
     }
 }
