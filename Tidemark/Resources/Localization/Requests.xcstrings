@@ -342,6 +342,17 @@
         }
       }
     },
+    "Can't read this alert's request." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取这条提醒对应的请求。"
+          }
+        }
+      }
+    },
     "Chart unavailable" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -672,6 +683,17 @@
         }
       }
     },
+    "Finding the request…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查找请求…"
+          }
+        }
+      }
+    },
     "FIRST VISIT" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -734,6 +756,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "历史"
+          }
+        }
+      }
+    },
+    "History doesn't list this alert's request." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "历史里没有列出这条提醒对应的请求。"
           }
         }
       }
@@ -1387,6 +1420,17 @@
         }
       }
     },
+    "Requests that started by %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 及之前开始的请求"
+          }
+        }
+      }
+    },
     "Requests to this host" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1548,6 +1592,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在历史中显示发往 %@ 的全部已存请求"
+          }
+        }
+      }
+    },
+    "Show the newer requests too" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "也显示更新的请求"
+          }
+        }
+      }
+    },
+    "Showing every request that reached %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在显示到达 %@ 的全部请求。"
+          }
+        }
+      }
+    },
+    "Showing every request to %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在显示发往 %@ 的全部请求。"
           }
         }
       }
@@ -1794,6 +1871,17 @@
         }
       }
     },
+    "This alert's request isn't stored." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "数据库里没有这条提醒对应的请求。"
+          }
+        }
+      }
+    },
     "Through Surge (takeover mode %lld)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1922,6 +2010,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未知进程"
+          }
+        }
+      }
+    },
+    "Until" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "截至"
           }
         }
       }

@@ -23,8 +23,28 @@ extension Navigation {
         openHistory(host: nil, remoteIP: normalized, app: app, range: range)
     }
 
+    /// Opens the request an alert is about in History: found, selected, scrolled into the middle of the table and open in
+    /// the inspector (`RequestReveal`). History lists it among the requests to its host by its app (those that reached the
+    /// alert's IP, for an IP alert) over all time, starting a little above it when it sits deep in them, and the Mac menu
+    /// shows every Mac when the request is another Mac's. Until the request is found, History waits on those filters for the
+    /// alert's host or IP; without the request it lists them and says why.
+    ///
+    /// A request the Requests page's inspector shows stays until History selects this one, which replaces it: closing the
+    /// inspector first would have its closing clear the new selection.
+    func openRequest(_ target: RequestTarget) {
+        let value = RequestsHostFilter.normalized(target.value)
+        if page != .requests { selectedRequest = nil }
+        setHistory(host: target.kind == .domain ? value : nil, remoteIP: target.kind == .ip ? value : nil, app: target.appID, range: .all)
+        revealing = RequestReveal(target: target)
+    }
+
     private func openHistory(host: String?, remoteIP: String?, app: AppID?, range: HistoryRange?) {
         if page != .requests || requestsLive { selectedRequest = nil }
+        setHistory(host: host, remoteIP: remoteIP, app: app, range: range)
+    }
+
+    private func setHistory(host: String?, remoteIP: String?, app: AppID?, range: HistoryRange?) {
+        revealing = nil
         history.host = host
         history.remoteIP = remoteIP
         history.appID = app
@@ -32,6 +52,7 @@ extension Navigation {
         history.policy = nil
         history.status = .any
         history.endedWithError = false
+        history.until = nil
         requestSearch = ""
         requestsLive = false
         open(.requests)

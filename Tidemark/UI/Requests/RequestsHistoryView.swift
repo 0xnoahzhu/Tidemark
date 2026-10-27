@@ -13,6 +13,8 @@ struct RequestsHistoryView: View {
     @State private var lastSearch: String?
     /// False while the table is built empty, until its first layout.
     @State private var showsRows: Bool
+    /// The request the table last scrolled into view, found for `Navigation.revealing`.
+    @State private var tableReveal: RequestsTableReveal?
 
     /// `opensPage` is true for the first History since the Requests page opened and false for the ones the Live /
     /// History switch brings back.
@@ -35,23 +37,19 @@ struct RequestsHistoryView: View {
 
     var body: some View {
         @Bindable var nav = model.nav
-        let key = RequestsHistoryKey(
-            scope: model.devices.scope,
-            range: nav.history.range,
-            appID: nav.history.appID,
-            policy: nav.history.policy,
-            status: nav.history.status,
-            host: nav.history.host,
-            remoteIP: nav.history.remoteIP,
-            endedWithError: nav.history.endedWithError,
-            search: nav.requestSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
+        let key = RequestsHistoryKey(nav: nav, scope: model.devices.scope)
         let results = opensPage && lastSearch == nil && !history.keeps(key.query) ? Self.unloaded : history
         VStack(spacing: 0) {
-            RequestsHistoryFilterBar(history: results)
+            RequestsHistoryFilterBar(history: results, finding: key.waiting)
                 .padding(.horizontal, 20.px)
                 .padding(.top, 12.px)
                 .padding(.bottom, 4.px)
+
+            if let reveal = nav.revealing, case .missing(let missing, let fallback) = reveal.phase, fallback == key.query {
+                RequestsRevealNote(missing: missing, target: reveal.target) { nav.revealing = nil }
+                    .padding(.horizontal, 20.px)
+                    .padding(.top, 4.px)
+            }
 
             Group {
                 if let histogram = results.histogram, histogram.counts.contains(where: { $0 > 0 }) {
@@ -73,12 +71,18 @@ struct RequestsHistoryView: View {
 
             RequestsTable(
                 model: model, rows: showsRows ? results.rows : [], selection: $nav.selectedRequest, timeStyle: .dayClock, now: nil,
-                showsHostBadges: false
+                showsHostBadges: false, reveal: tableReveal
             ) {
                 Task { await history.loadMore(database: model.database) }
             }
             .scrollEdgeEffectStyle(.hard, for: .top)
-            .overlay { RequestsHistoryOverlay(history: results, search: key.search, host: key.host ?? key.remoteIP, endedWithError: key.endedWithError) }
+            .overlay {
+                if key.waiting {
+                    RequestsRevealFinding()
+                } else {
+                    RequestsHistoryOverlay(history: results, search: key.search, host: key.host ?? key.remoteIP, endedWithError: key.endedWithError)
+                }
+            }
         }
         .task {
             guard !showsRows else { return }
@@ -86,7 +90,16 @@ struct RequestsHistoryView: View {
             await Task.yield()
             showsRows = true
         }
+        .task(id: nav.revealing?.id) {
+            await revealRequest()
+        }
+        .onDisappear {
+            // A note about a request History could not show belongs to that visit.
+            if case .missing = nav.revealing?.phase { nav.revealing = nil }
+        }
         .task(id: key) {
+            // While the request History is to show is read, the filters that list it are not known yet.
+            guard !key.waiting else { return }
             let first = lastSearch == nil
             if let lastSearch, lastSearch != key.search {
                 try? await Task.sleep(for: .milliseconds(300))
@@ -108,6 +121,90 @@ struct RequestsHistoryView: View {
             await history.loadMore(database: model.database)
         }
     }
+
+    // MARK: Showing one request
+
+    /// Shows the request History is asked to show: reads it and sets the filters that list it (`RequestReveal.locate`),
+    /// or says why it cannot, keeping the alert's host or IP; then follows History's query until its page has the
+    /// request (`showRevealedRequest`).
+    ///
+    /// The query's progress is followed through `Observations` rather than a task keyed on it, which SwiftUI at times
+    /// did not run again when the page arrived, leaving the request unselected.
+    private func revealRequest() async {
+        let nav = model.nav
+        guard let reveal = nav.revealing else { return }
+        if reveal.phase == .finding {
+            let location = await RequestReveal.locate(reveal.target, scope: model.devices.scope, database: model.database)
+            guard !Task.isCancelled, nav.revealing?.id == reveal.id else { return }
+            switch location {
+            case .found(let record, let query):
+                nav.history.host = query.host
+                nav.history.remoteIP = query.remoteIP
+                nav.history.appID = query.appID
+                nav.history.range = query.range
+                nav.history.until = query.until
+                if model.devices.scope != query.scope { model.devices.scope = query.scope }
+                nav.revealing?.phase = .showing(record.key, pagesLeft: RequestReveal.extraPages)
+            case .missing(let missing):
+                // The request the inspector showed before is not the one asked for.
+                nav.selectedRequest = nil
+                let fallback = currentQuery
+                nav.revealing?.phase = .missing(missing, fallback: fallback)
+                return
+            }
+        }
+        let history = history, devices = model.devices
+        let progress = Observations {
+            RequestsRevealProgress(
+                reveal: nav.revealing, rows: history.rows.count, isLoading: history.isLoading, isLoadingMore: history.isLoadingMore,
+                query: RequestsHistoryKey(nav: nav, scope: devices.scope).query
+            )
+        }
+        for await state in progress {
+            guard state.reveal?.id == reveal.id, case .showing = state.reveal?.phase else { return }
+            showRevealedRequest(in: state.query)
+        }
+    }
+
+    /// Selects the request History is to show once its page has arrived, reading more pages when it is not on the first,
+    /// and has the table scroll it into the middle; History lists the alert's host or IP instead when it is not found.
+    private func showRevealedRequest(in query: RequestQuery) {
+        let nav = model.nav
+        guard let reveal = nav.revealing, case .showing(let key, let pagesLeft) = reveal.phase else { return }
+        let step = RequestReveal.step(
+            for: key, rows: history.rows, pageArrived: history.hasPage(for: query), failed: history.failed(query),
+            loadingMore: history.isLoadingMore, canLoadMore: history.canLoadMore, pagesLeft: pagesLeft
+        )
+        switch step {
+        case .wait:
+            break
+        case .select:
+            nav.selectedRequest = key
+            nav.revealing = nil
+            tableReveal = RequestsTableReveal(key: key)
+        case .loadMore:
+            nav.revealing?.phase = .showing(key, pagesLeft: pagesLeft - 1)
+            Task { await history.loadMore(database: model.database) }
+        case .giveUp:
+            let target = reveal.target
+            let value = RequestsHostFilter.normalized(target.value)
+            nav.history.host = target.kind == .domain ? value : nil
+            nav.history.remoteIP = target.kind == .ip ? value : nil
+            nav.history.appID = target.appID
+            nav.history.until = nil
+            nav.selectedRequest = nil
+            let fallback = currentQuery
+            nav.revealing?.phase = .missing(.notListed, fallback: fallback)
+        case .stop:
+            nav.selectedRequest = nil
+            nav.revealing = nil
+        }
+    }
+
+    /// The query History's filters make now.
+    private var currentQuery: RequestQuery {
+        RequestsHistoryKey(nav: model.nav, scope: model.devices.scope).query
+    }
 }
 
 /// Everything that re-runs the History query when it changes.
@@ -120,14 +217,42 @@ private struct RequestsHistoryKey: Hashable {
     var host: String?
     var remoteIP: String?
     var endedWithError: Bool
+    var until: Date?
     var search: String
+    /// A request History is to show is being read: no query runs until its filters are known.
+    var waiting: Bool
+
+    /// History's filters, its search and the Mac menu's `scope`.
+    @MainActor
+    init(nav: Navigation, scope: DeviceScope) {
+        self.scope = scope
+        range = nav.history.range
+        appID = nav.history.appID
+        policy = nav.history.policy
+        status = nav.history.status
+        host = nav.history.host
+        remoteIP = nav.history.remoteIP
+        endedWithError = nav.history.endedWithError
+        until = nav.history.until
+        search = nav.requestSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        waiting = nav.revealing?.phase == .finding
+    }
 
     var query: RequestQuery {
         RequestQuery(
             scope: scope, range: range, appID: appID, policy: policy, status: status, search: search, host: host,
-            remoteIP: remoteIP, endedWithError: endedWithError
+            remoteIP: remoteIP, endedWithError: endedWithError, until: until
         )
     }
+}
+
+/// What moves the request History is to show along: its phase, and the rows and loading state of History's query.
+private struct RequestsRevealProgress: Sendable {
+    var reveal: RequestReveal?
+    var rows: Int
+    var isLoading: Bool
+    var isLoadingMore: Bool
+    var query: RequestQuery
 }
 
 /// Range, app, policy and status menus and the exact host or IP; row count and query time. The filters wrap onto a second
@@ -135,6 +260,8 @@ private struct RequestsHistoryKey: Hashable {
 private struct RequestsHistoryFilterBar: View {
     @Environment(AppModel.self) private var model
     var history: RequestsHistoryModel
+    /// A request History is to show is being read.
+    var finding = false
 
     var body: some View {
         @Bindable var nav = model.nav
@@ -180,11 +307,18 @@ private struct RequestsHistoryFilterBar: View {
                     help: trf("Every request that reached %@, to it or to a domain that resolved to it", "Requests", ip)
                 ) { nav.history.remoteIP = nil }
             }
+            if let until = nav.history.until {
+                let time = RequestsHistoryLabels.until(until)
+                RequestsHostChip(
+                    title: tr("Until", "Requests"), host: time,
+                    help: trf("Requests that started by %@", "Requests", time), removeHelp: tr("Show the newer requests too", "Requests")
+                ) { nav.history.until = nil }
+            }
             Group {
-                if history.isLoading {
+                if history.isLoading || finding {
                     ProgressView().controlSize(.small)
                 }
-                if history.errorMessage == nil, history.totalCount > 0 || !history.isLoading {
+                if !finding, history.errorMessage == nil, history.totalCount > 0 || !history.isLoading {
                     Text(RequestsHistoryLabels.rowCount(history.totalCount, elapsed: history.elapsed))
                         .font(Theme.mono(11))
                         .foregroundStyle(Theme.ink3)
@@ -288,6 +422,71 @@ private struct RequestsHistoryOverlay: View {
     }
 }
 
+/// Over the table while the request History is to show is read.
+private struct RequestsRevealFinding: View {
+    var body: some View {
+        VStack(spacing: 10.px) {
+            ProgressView().controlSize(.small)
+            Text(tr("Finding the request…", "Requests"))
+                .font(.design(13))
+                .foregroundStyle(Theme.ink2)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Why History lists the alert's host or IP rather than the request it was asked to show: `ⓘ This alert's request isn't
+/// stored. Showing every request to api.linear.app.`, closed by its button.
+private struct RequestsRevealNote: View {
+    var missing: RequestReveal.Missing
+    var target: RequestTarget
+    var dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8.px) {
+            Image(systemName: "exclamationmark.circle")
+                .foregroundStyle(Theme.ink2)
+                .accessibilityHidden(true)
+            Text("\(Text(title).foregroundStyle(Theme.ink).fontWeight(.medium)) \(Text(detail).foregroundStyle(Theme.ink2))")
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.design(9, .bold))
+                    .foregroundStyle(Theme.ink2)
+                    .frame(width: 16.px, height: 16.px)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(tr("Close", "Requests"))
+            .accessibilityLabel(tr("Close", "Requests"))
+        }
+        .font(.design(12))
+        .padding(.horizontal, 10.px)
+        .padding(.vertical, 6.px)
+        .frame(minHeight: 30.px)
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 7.px, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+
+    private var title: String {
+        switch missing {
+        case .notStored: tr("This alert's request isn't stored.", "Requests")
+        case .notListed: tr("History doesn't list this alert's request.", "Requests")
+        case .unreadable: tr("Can't read this alert's request.", "Requests")
+        }
+    }
+
+    private var detail: String {
+        if case .unreadable(let message) = missing { return message }
+        let value = RequestsHostFilter.normalized(target.value)
+        return target.kind == .ip
+            ? trf("Showing every request that reached %@.", "Requests", value)
+            : trf("Showing every request to %@.", "Requests", value)
+    }
+}
+
 /// Labels of the History filter menus.
 enum RequestsHistoryLabels {
     @MainActor
@@ -317,6 +516,12 @@ enum RequestsHistoryLabels {
         case .state(let status): Self.status(status)
         case .endedWithError: tr("Ended with an error", "Requests")
         }
+    }
+
+    /// `Oct 24 14:21:25` (`10月24日 14:21:25`): where History opened on one request ends.
+    @MainActor
+    static func until(_ date: Date) -> String {
+        Fmt.monthDay(date, locale: Localizer.shared.locale) + " " + Fmt.hms(date)
     }
 
     /// `1 row · query 38 ms`, `12,345 rows · query 38 ms`

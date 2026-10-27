@@ -467,6 +467,18 @@ read yet: the tab opens with nothing new selected and selects the alert's domain
 another page, tab or row was opened meanwhile. The sidebar's Mac still scopes the tab: while it shows one Mac, an alert
 another Mac raised for a host only that Mac has reached has no row to bring into view.
 
+An alert's Show Request (`Navigation.openRequest`, `RequestReveal`) opens the request that raised it in History: selected,
+scrolled into the middle of the table, which takes the focus so the selection shows in the accent color, and open in the
+inspector with its journey, Surge's log and the related records. While the request is read by its row (`request(id:)`,
+`alerts.request_id`), History waits on the alert's host or IP over all time; it then lists the request's host by its app
+(the requests that reached the alert's IP, when the request did), and every Mac when the sidebar shows another one. A
+first contact is its app's oldest request to the host, often thousands of rows down, so when more than 200 newer requests
+match, History ends at the start of the 200th (`newerRequestStarts`, an `Until` chip beside the host's, removable), which
+puts the request on the first page; it reads up to three more pages for one that requests arriving meanwhile pushed down.
+The row lights up once and fades back to the selection, not under Reduce Motion. An alert stored without its request, a
+row no longer stored, a request History does not list in those pages or one that cannot be read leaves History on the
+alert's host or IP with a note that says so.
+
 Selecting a domain or an IP in an app's Domains & IPs tab (a click on its row; a notification's View selects the new
 domain or IP) lists under it every process that reached it, like the children of the process tree (`hostProcesses`): the
 app's `app_host_sources` rows of that address, with the `host_sources` rows that name the app for what Macs with earlier

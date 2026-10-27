@@ -6,17 +6,29 @@ import SwiftUI
 /// As the inspector opens, SwiftUI lays the page out a few times at no height at all. AppKit's table, seeing none of
 /// itself then, scrolls its rows back to the top, so the selected row and the reader's place would be gone once the
 /// inspector is in. `Table` has no API for its scroll position, so this invisible view sits in the first row's cell,
-/// finds its table and has a `RequestsTablePlaceKeeper` watch it.
+/// finds its table and has a `RequestsTablePlaceKeeper` watch it. It also hands the table to its `RequestsTable`'s
+/// `handle`, which scrolls a row into view.
 struct RequestsTablePlace: NSViewRepresentable {
+    var handle: RequestsTableHandle?
+
     func makeNSView(context: Context) -> RequestsTablePlaceAnchor {
-        RequestsTablePlaceAnchor()
+        let anchor = RequestsTablePlaceAnchor()
+        anchor.handle = handle
+        return anchor
     }
 
-    func updateNSView(_ anchor: RequestsTablePlaceAnchor, context: Context) {}
+    func updateNSView(_ anchor: RequestsTablePlaceAnchor, context: Context) {
+        anchor.handle = handle
+    }
 }
 
 /// The invisible marker inside a cell.
 final class RequestsTablePlaceAnchor: NSView {
+    weak var handle: RequestsTableHandle? {
+        didSet { if let table { handle?.table = table } }
+    }
+    private weak var table: NSTableView?
+
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func viewDidMoveToWindow() {
@@ -24,7 +36,10 @@ final class RequestsTablePlaceAnchor: NSView {
         guard window != nil else { return }
         var view = superview
         while let current = view, !(current is NSTableView) { view = current.superview }
-        if let table = view as? NSTableView { RequestsTablePlaceKeeper.watch(table) }
+        guard let table = view as? NSTableView else { return }
+        self.table = table
+        RequestsTablePlaceKeeper.watch(table)
+        handle?.table = table
     }
 }
 

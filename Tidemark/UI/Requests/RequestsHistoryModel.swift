@@ -56,6 +56,8 @@ final class RequestsHistoryModel {
     /// When the current query's page and histogram both last arrived; nil while it first loads, and after either
     /// failed.
     @ObservationIgnored private var completedAt: ContinuousClock.Instant?
+    /// The current query's first page arrived (and did not fail since). It changes with `isLoading`, which views watch.
+    @ObservationIgnored private var pageArrived = false
     /// The range and database `policies` belong to, and when they arrived.
     @ObservationIgnored private var policiesLoaded: (range: HistoryRange, database: Int, at: ContinuousClock.Instant)?
 
@@ -76,6 +78,17 @@ final class RequestsHistoryModel {
     func keeps(_ query: RequestQuery) -> Bool {
         guard let completedAt, queryDatabase == databaseGeneration, sameFilter(query, self.query) else { return false }
         return ContinuousClock.now - completedAt < reuseInterval
+    }
+
+    /// Whether the rows here are `query`'s: its first page arrived from the current database, whether or not its histogram
+    /// has (`RequestReveal` looks for a request in them).
+    func hasPage(for query: RequestQuery) -> Bool {
+        pageArrived && queryDatabase == databaseGeneration && sameFilter(query, self.query)
+    }
+
+    /// Whether `query`'s first page failed ("Can't load history").
+    func failed(_ query: RequestQuery) -> Bool {
+        failure != nil && !isLoading && queryDatabase == databaseGeneration && sameFilter(query, self.query)
     }
 
     /// Shows the results of `query`. Results it `keeps` stay up, and once older than `refreshInterval` they are
@@ -103,6 +116,7 @@ final class RequestsHistoryModel {
         queryDatabase = databaseGeneration
         nextPageFailures = 0
         completedAt = nil
+        pageArrived = false
         isLoading = true
         isLoadingHistogram = true
         await run(first, quietly: false, database: database)
@@ -221,6 +235,7 @@ final class RequestsHistoryModel {
     private func apply(_ part: Part, quietly: Bool) {
         switch part {
         case .page(let result):
+            if case .success = result { pageArrived = true }
             if isLoading { isLoading = false }
             switch result {
             case .success(let page) where quietly:
@@ -245,6 +260,7 @@ final class RequestsHistoryModel {
                 }
             case .failure(let error):
                 guard !(error is CancellationError) else { return }
+                pageArrived = false
                 rows = []
                 totalCount = 0
                 failure = error
@@ -278,6 +294,6 @@ final class RequestsHistoryModel {
     private func sameFilter(_ a: RequestQuery, _ b: RequestQuery) -> Bool {
         a.scope == b.scope && a.range == b.range && a.appID == b.appID && a.policy == b.policy
             && a.status == b.status && a.search == b.search && a.host == b.host && a.remoteIP == b.remoteIP
-            && a.endedWithError == b.endedWithError
+            && a.endedWithError == b.endedWithError && a.until == b.until
     }
 }

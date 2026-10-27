@@ -145,10 +145,10 @@ private struct RequestsInspectorHeader: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// History already shows exactly this host's requests.
+    /// History already shows exactly this host's requests, the newest included.
     private var showsHostHistory: Bool {
         let nav = model.nav
-        return !nav.requestsLive && nav.history.host == RequestsHostFilter.normalized(record.host)
+        return !nav.requestsLive && nav.history.host == RequestsHostFilter.normalized(record.host) && nav.history.until == nil
     }
 }
 

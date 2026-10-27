@@ -22,8 +22,13 @@ struct RequestsTable: View {
     var now: Date?
     /// The BY IP and NEW badges after the host, which the design shows in the live table only.
     var showsHostBadges = true
+    /// A row to scroll into the middle of the table and light up once, when it changes (History showing one request).
+    var reveal: RequestsTableReveal? = nil
     /// Called when the last row comes into view (History loads its next page).
     var onReachEnd: (() -> Void)?
+
+    /// The table's AppKit view, for what `Table` has no API for.
+    @State private var handle = RequestsTableHandle()
 
     /// Fits History's longest time, `10月24日 23:59:59.999` in Chinese, in 11 px SF Mono with the cell's inset.
     static let historyTimeWidth = historyTimeWidth(factor: UIScale.factor)
@@ -67,6 +72,10 @@ struct RequestsTable: View {
         // A table reports the sum of its column widths as its minimum, which would push the split view past the
         // window once the inspector opens (see `RequestsView`); narrower than its columns it scrolls horizontally.
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: reveal) {
+            guard let reveal, let row = rows.firstIndex(where: { $0.key == reveal.key }) else { return }
+            await handle.reveal(row: row)
+        }
     }
 
     @TableColumnBuilder<RequestRecord, Never>
@@ -79,9 +88,10 @@ struct RequestsTable: View {
                         RequestsRowTint(key: record.key, isFresh: isFresh(record), isSelected: record.key == selectedKey)
                     }
                     // One cell reaches its table for what `Table` has no API for, the first row's, which every table
-                    // loads: it keeps the rows' place and, where needed, sets the header's height.
+                    // loads: it keeps the rows' place, hands the table to `handle` and, where needed, sets the header's
+                    // height.
                     if record.key == rows.first?.key {
-                        RequestsTablePlace()
+                        RequestsTablePlace(handle: handle)
                         if RequestsTableHeaderHeight.isNeeded { RequestsTableHeaderHeight() }
                     }
                 }

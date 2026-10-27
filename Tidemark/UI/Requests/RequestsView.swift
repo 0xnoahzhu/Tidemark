@@ -39,7 +39,11 @@ struct RequestsView: View {
         .pageToolbar(tr("Requests", "Requests"), subtitle: tr("Every request Surge sees, kept in PostgreSQL", "Requests")) {
             RequestsToolbar(model: model)
         }
-        .onChange(of: nav.requestsLive) { nav.selectedRequest = nil }
+        .onChange(of: nav.requestsLive) {
+            // Live is no place to show a stored request; one History is to show replaces the selection itself.
+            if nav.requestsLive { nav.revealing = nil }
+            if nav.revealing == nil { nav.selectedRequest = nil }
+        }
     }
 }
 

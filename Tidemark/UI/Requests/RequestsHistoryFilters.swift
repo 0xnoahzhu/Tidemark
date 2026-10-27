@@ -27,12 +27,14 @@ enum RequestsStatusChoice: Hashable {
 }
 
 /// `Host api2.cursor.sh ✕` or `IP 104.18.19.125 ✕`: the exact host or IP History shows, on the accent tint, removed
-/// by its button.
+/// by its button; `Until Oct 24 14:21:25 ✕` for where History opened on one request ends.
 struct RequestsHostChip: View {
     /// `Host`, or `IP` for the requests that reached an address.
     var title: String
     var host: String
     var help: String
+    /// The remove button's help, "Show every host" when nil.
+    var removeHelp: String? = nil
     var remove: () -> Void
 
     var body: some View {
@@ -49,7 +51,7 @@ struct RequestsHostChip: View {
                     .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help(tr("Show every host", "Requests"))
+            .help(removeHelp ?? tr("Show every host", "Requests"))
             .accessibilityLabel(trf("Remove the filter for %@", "Requests", host))
         }
         .font(.design(12))

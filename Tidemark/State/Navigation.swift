@@ -46,6 +46,9 @@ final class Navigation {
     var requestSearch = ""
     var selectedRequest: RequestKey?
     var history = RequestQuery()
+    /// A stored request History is to find, select and scroll to (an alert's Show Request), until it has, or has said why
+    /// it cannot (`openRequest`).
+    var revealing: RequestReveal?
 
     // Notifications page
     var alertFilter: AlertFilter = .all
