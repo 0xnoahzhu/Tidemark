@@ -29,7 +29,7 @@ struct RequestsRevealTests {
         nav.history.endedWithError = true
         nav.history.until = Self.start
 
-        let target = RequestTarget(rowID: 42, kind: .domain, value: " API2.Cursor.sh ", appID: M.cursor.id)
+        let target = RequestTarget(rowID: 42, kind: .domain, value: " API2.Cursor.sh ", appID: M.cursor.id, deviceID: M.thisMac)
         nav.openRequest(target)
         #expect(nav.page == .requests && !nav.requestsLive)
         // The inspector keeps the request it shows until the one asked for replaces it: closing it would clear that.
@@ -41,7 +41,7 @@ struct RequestsRevealTests {
 
         // An IP alert opens on the requests that reached the IP; each ask is its own.
         let first = nav.revealing?.id
-        nav.openRequest(RequestTarget(rowID: 42, kind: .ip, value: "104.18.19.125", appID: M.cursor.id))
+        nav.openRequest(RequestTarget(rowID: 42, kind: .ip, value: "104.18.19.125", appID: M.cursor.id, deviceID: M.thisMac))
         #expect(nav.history.remoteIP == "104.18.19.125" && nav.history.host == nil)
         #expect(nav.revealing?.id != first)
 
@@ -58,7 +58,7 @@ struct RequestsRevealTests {
     @Test func findsTheRequestAmongItsHostsRequestsByItsApp() async throws {
         let rows = [Self.row(1, seconds: 0), Self.row(2, seconds: 10), Self.row(3, host: "api.github.com", seconds: 20), Self.row(4, seconds: 30)]
         let database = ShellDemoDatabase(rows: rows)
-        let target = RequestTarget(rowID: 1, kind: .domain, value: "api2.cursor.sh", appID: M.cursor.id)
+        let target = RequestTarget(rowID: 1, kind: .domain, value: "api2.cursor.sh", appID: M.cursor.id, deviceID: M.thisMac)
         guard case .found(let record, let query) = await RequestReveal.locate(target, scope: .all, database: database) else {
             Issue.record("the request is stored")
             return
@@ -74,7 +74,7 @@ struct RequestsRevealTests {
     @Test func startsALittleAboveARequestDeepInItsHost() async throws {
         let newer = (2...800).map { Self.row(Int64($0), seconds: Double($0)) }
         let database = ShellDemoDatabase(rows: [Self.row(1, seconds: 0)] + newer)
-        let target = RequestTarget(rowID: 1, kind: .domain, value: "api2.cursor.sh", appID: M.cursor.id)
+        let target = RequestTarget(rowID: 1, kind: .domain, value: "api2.cursor.sh", appID: M.cursor.id, deviceID: M.thisMac)
         guard case .found(let record, let query) = await RequestReveal.locate(target, scope: .all, database: database) else {
             Issue.record("the request is stored")
             return
@@ -92,13 +92,13 @@ struct RequestsRevealTests {
             Self.row(2, host: "registry.npmjs.org", ip: "104.16.27.34", seconds: 0, device: M.otherMac, app: nil),
         ]
         let database = ShellDemoDatabase(rows: rows)
-        let reached = RequestTarget(rowID: 1, kind: .ip, value: "104.16.98.215", appID: M.cursor.id)
+        let reached = RequestTarget(rowID: 1, kind: .ip, value: "104.16.98.215", appID: M.cursor.id, deviceID: M.thisMac)
         if case .found(_, let query) = await RequestReveal.locate(reached, scope: .device(M.thisMac), database: database) {
             #expect(query.remoteIP == "104.16.98.215" && query.host == nil && query.scope == .device(M.thisMac))
         } else {
             Issue.record("the request is stored")
         }
-        let elsewhere = RequestTarget(rowID: 2, kind: .ip, value: "104.16.98.215", appID: M.cursor.id)
+        let elsewhere = RequestTarget(rowID: 2, kind: .ip, value: "104.16.98.215", appID: M.cursor.id, deviceID: M.otherMac)
         if case .found(_, let query) = await RequestReveal.locate(elsewhere, scope: .device(M.thisMac), database: database) {
             #expect(query.host == "registry.npmjs.org" && query.remoteIP == nil)
             #expect(query.scope == .all && query.appID == nil)
@@ -110,9 +110,9 @@ struct RequestsRevealTests {
     @Test func saysWhyItCannotFindTheRequest() async {
         Localizer.shared.override = "en"
         let database = ShellDemoDatabase(rows: [Self.row(1, seconds: 0)])
-        let noRow = RequestTarget(rowID: nil, kind: .domain, value: "api2.cursor.sh", appID: M.cursor.id)
+        let noRow = RequestTarget(rowID: nil, kind: .domain, value: "api2.cursor.sh", appID: M.cursor.id, deviceID: M.thisMac)
         #expect(await RequestReveal.locate(noRow, scope: .all, database: database) == .missing(.notStored))
-        let gone = RequestTarget(rowID: 99, kind: .domain, value: "api2.cursor.sh", appID: M.cursor.id)
+        let gone = RequestTarget(rowID: 99, kind: .domain, value: "api2.cursor.sh", appID: M.cursor.id, deviceID: M.thisMac)
         #expect(await RequestReveal.locate(gone, scope: .all, database: database) == .missing(.notStored))
         let offline = await RequestReveal.locate(gone, scope: .all, database: OfflineDatabase())
         guard case .missing(.unreadable(let message)) = offline else {
@@ -120,6 +120,19 @@ struct RequestsRevealTests {
             return
         }
         #expect(!message.isEmpty)
+    }
+
+    /// Without its request History lists the alert's host or IP by its app over all time, on every Mac when the sidebar
+    /// shows another than the alert's.
+    @Test func listsTheAlertsHostWithoutItsRequest() {
+        let gone = RequestTarget(rowID: 99, kind: .ip, value: " 104.16.98.215 ", appID: M.cursor.id, deviceID: M.otherMac)
+        #expect(RequestReveal.fallback(for: gone, scope: .device(M.thisMac))
+                == RequestQuery(scope: .all, range: .all, appID: M.cursor.id, remoteIP: "104.16.98.215"))
+        #expect(RequestReveal.fallback(for: gone, scope: .device(M.otherMac)).scope == .device(M.otherMac))
+        // A notification that names no Mac keeps the sidebar's.
+        let unnamed = RequestTarget(rowID: nil, kind: .domain, value: "API2.cursor.sh", appID: M.cursor.id, deviceID: nil)
+        #expect(RequestReveal.fallback(for: unnamed, scope: .device(M.thisMac))
+                == RequestQuery(scope: .device(M.thisMac), range: .all, appID: M.cursor.id, host: "api2.cursor.sh"))
     }
 
     @Test func stepsThroughThePagesToTheRequest() {

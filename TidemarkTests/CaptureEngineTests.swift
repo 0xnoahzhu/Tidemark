@@ -356,10 +356,10 @@ struct CaptureEngineTests {
         #expect(posted.map(\.body) == ["api2.cursor.sh · via com.docker.backend", "Mac mini (Office) · 104.16.98.215 · via com.docker.backend"])
         // A notification only knows how to open its alerts and the request of the first (none stored here): there is
         // nothing to mute.
-        let keys: Set<String> = ["appID", "alertIDs", "hostKind", "hostValue"]
+        let keys: Set<String> = ["appID", "alertIDs", "hostKind", "hostValue", "deviceID"]
         #expect(posted.map { Set($0.userInfo.keys.compactMap { $0 as? String }) } == [keys, keys])
         #expect(posted.last.flatMap { CaptureNotifier.route(action: CaptureNotifier.showRequestAction, userInfo: $0.userInfo) }
-                == .showRequest(RequestTarget(rowID: nil, kind: .ip, value: "104.16.98.215", appID: docker.id), alertIDs: [2]))
+                == .showRequest(RequestTarget(rowID: nil, kind: .ip, value: "104.16.98.215", appID: docker.id, deviceID: mini.id), alertIDs: [2]))
         #expect(model.alerts.items.map(\.id) == [2, 1])
     }
 

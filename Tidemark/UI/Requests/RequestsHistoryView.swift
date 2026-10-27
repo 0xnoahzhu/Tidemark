@@ -138,18 +138,10 @@ struct RequestsHistoryView: View {
             guard !Task.isCancelled, nav.revealing?.id == reveal.id else { return }
             switch location {
             case .found(let record, let query):
-                nav.history.host = query.host
-                nav.history.remoteIP = query.remoteIP
-                nav.history.appID = query.appID
-                nav.history.range = query.range
-                nav.history.until = query.until
-                if model.devices.scope != query.scope { model.devices.scope = query.scope }
+                setFilters(query)
                 nav.revealing?.phase = .showing(record.key, pagesLeft: RequestReveal.extraPages)
             case .missing(let missing):
-                // The request the inspector showed before is not the one asked for.
-                nav.selectedRequest = nil
-                let fallback = currentQuery
-                nav.revealing?.phase = .missing(missing, fallback: fallback)
+                showFallback(missing, for: reveal.target)
                 return
             }
         }
@@ -186,19 +178,34 @@ struct RequestsHistoryView: View {
             nav.revealing?.phase = .showing(key, pagesLeft: pagesLeft - 1)
             Task { await history.loadMore(database: model.database) }
         case .giveUp:
-            let target = reveal.target
-            let value = RequestsHostFilter.normalized(target.value)
-            nav.history.host = target.kind == .domain ? value : nil
-            nav.history.remoteIP = target.kind == .ip ? value : nil
-            nav.history.appID = target.appID
-            nav.history.until = nil
-            nav.selectedRequest = nil
-            let fallback = currentQuery
-            nav.revealing?.phase = .missing(.notListed, fallback: fallback)
+            showFallback(.notListed, for: reveal.target)
         case .stop:
             nav.selectedRequest = nil
             nav.revealing = nil
         }
+    }
+
+    /// Lists the alert's host or IP instead of its request (`RequestReveal.fallback`) and says why.
+    private func showFallback(_ missing: RequestReveal.Missing, for target: RequestTarget) {
+        let nav = model.nav
+        setFilters(RequestReveal.fallback(for: target, scope: model.devices.scope))
+        // The request the inspector showed before is not the one asked for.
+        nav.selectedRequest = nil
+        // Read before the phase is set: the query reads `revealing` too.
+        let fallback = currentQuery
+        nav.revealing?.phase = .missing(missing, fallback: fallback)
+    }
+
+    /// Sets the filters and the Mac menu's scope that `RequestReveal` chose; the other filters were cleared when the
+    /// request was asked for.
+    private func setFilters(_ query: RequestQuery) {
+        let nav = model.nav
+        nav.history.host = query.host
+        nav.history.remoteIP = query.remoteIP
+        nav.history.appID = query.appID
+        nav.history.range = query.range
+        nav.history.until = query.until
+        if model.devices.scope != query.scope { model.devices.scope = query.scope }
     }
 
     /// The query History's filters make now.

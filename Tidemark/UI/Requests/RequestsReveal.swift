@@ -1,7 +1,7 @@
 import Foundation
 
-/// What an alert's Show Request opens: the request that raised the alert, and the alert's new host or IP and app, which
-/// History lists when the request is gone.
+/// What an alert's Show Request opens: the request that raised the alert, and the alert's new host or IP, app and Mac,
+/// which History lists when the request is gone.
 struct RequestTarget: Hashable, Sendable {
     /// The request's row in `requests`; nil for an alert stored without it.
     var rowID: Int64?
@@ -9,16 +9,19 @@ struct RequestTarget: Hashable, Sendable {
     /// The new domain, or the IP the app reached.
     var value: String
     var appID: AppID?
+    /// The Mac whose alert it is; nil for a notification posted by a build that did not name it.
+    var deviceID: DeviceID?
 
-    init(rowID: Int64?, kind: HostKind, value: String, appID: AppID?) {
+    init(rowID: Int64?, kind: HostKind, value: String, appID: AppID?, deviceID: DeviceID?) {
         self.rowID = rowID
         self.kind = kind
         self.value = value
         self.appID = appID
+        self.deviceID = deviceID
     }
 
     init(_ alert: AlertItem) {
-        self.init(rowID: alert.requestRowID, kind: alert.kind, value: alert.value, appID: alert.appID)
+        self.init(rowID: alert.requestRowID, kind: alert.kind, value: alert.value, appID: alert.appID, deviceID: alert.deviceID)
     }
 }
 
@@ -94,6 +97,20 @@ struct RequestReveal: Equatable, Sendable {
             query.until = starts.last
         }
         return .found(record, query)
+    }
+
+    /// History's filters when it cannot show the request: the alert's host or IP by its app over all time, and every Mac
+    /// when `scope` leaves out the alert's, as `locate` does for a request it finds.
+    static func fallback(for target: RequestTarget, scope: DeviceScope) -> RequestQuery {
+        let value = RequestsHostFilter.normalized(target.value)
+        let shown = target.deviceID.map(scope.includes) ?? true
+        var query = RequestQuery(scope: shown ? scope : .all, range: .all, appID: target.appID)
+        if target.kind == .ip {
+            query.remoteIP = value
+        } else {
+            query.host = value
+        }
+        return query
     }
 
     /// What History does next for the request `key` it is to show.

@@ -111,7 +111,7 @@ struct CaptureNotifierTests {
             let content = request.content
             #expect(content.categoryIdentifier == CaptureNotifier.categoryIdentifier)
             let route = CaptureNotifier.route(action: CaptureNotifier.showRequestAction, userInfo: content.userInfo)
-            #expect(route == .showRequest(RequestTarget(rowID: 1_284_093, kind: .ip, value: "18.97.36.52", appID: app),
+            #expect(route == .showRequest(RequestTarget(rowID: 1_284_093, kind: .ip, value: "18.97.36.52", appID: app, deviceID: device),
                                           alertIDs: request === delivered[0] ? [1] : [1, 2]))
         }
         let category = CaptureNotifier.category
@@ -125,7 +125,7 @@ struct CaptureNotifierTests {
     /// notification go nowhere, and one posted before Show Request existed opens Domains & IPs.
     @Test func routesEachActionOfANotification() {
         let app = UUID()
-        let target = RequestTarget(rowID: nil, kind: .domain, value: "api.linear.app", appID: app)
+        let target = RequestTarget(rowID: nil, kind: .domain, value: "api.linear.app", appID: app, deviceID: device)
         let info = CaptureNotifier.userInfo(appID: app, alertIDs: [7, 9], request: target)
         #expect(info["requestRowID"] == nil)
         #expect(CaptureNotifier.route(action: CaptureNotifier.viewAction, userInfo: info) == .view(app, alertIDs: [7, 9]))
@@ -135,6 +135,12 @@ struct CaptureNotifierTests {
         #expect(CaptureNotifier.route(action: CaptureNotifier.showRequestAction, userInfo: [:]) == nil)
         let older: [AnyHashable: Any] = ["appID": app.uuidString, "alertIDs": [NSNumber(value: 3)]]
         #expect(CaptureNotifier.route(action: CaptureNotifier.showRequestAction, userInfo: older) == .view(app, alertIDs: [3]))
+        // One that names no Mac leaves History on the sidebar's.
+        var unnamed = info
+        unnamed["deviceID"] = nil
+        var anyMac = target
+        anyMac.deviceID = nil
+        #expect(CaptureNotifier.route(action: CaptureNotifier.showRequestAction, userInfo: unnamed) == .showRequest(anyMac, alertIDs: [7, 9]))
     }
 
     @Test func translatesAlertsToChinese() {

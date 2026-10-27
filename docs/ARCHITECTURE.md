@@ -482,7 +482,8 @@ second line), measuring the rows that come into view before it is drawn, so the 
 if a later change of the layout takes it out of view, and not after the reader scrolled or clicked in the table or
 pressed a key in it (`RequestsTableHandle`). The row lights up once and fades back to the selection, not under Reduce
 Motion. An alert stored without its request, a row no longer stored, a request History does not list in those pages or
-one that cannot be read leaves History on the alert's host or IP with a note that says so.
+one that cannot be read leaves History on the alert's host or IP, on every Mac when the sidebar shows another than the
+alert's, with a note that says so.
 
 Selecting a domain or an IP in an app's Domains & IPs tab (a click on its row; a notification's View selects the new
 domain or IP) lists under it every process that reached it, like the children of the process tree (`hostProcesses`): the

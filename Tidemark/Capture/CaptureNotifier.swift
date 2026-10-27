@@ -169,6 +169,7 @@ final class CaptureNotifier: NSObject {
             "hostKind": request.kind.rawValue, "hostValue": request.value,
         ]
         if let rowID = request.rowID { info["requestRowID"] = NSNumber(value: rowID) }
+        if let device = request.deviceID { info["deviceID"] = device.uuidString }
         return info
     }
 
@@ -193,7 +194,8 @@ final class CaptureNotifier: NSObject {
             guard let kind = (userInfo["hostKind"] as? String).flatMap(HostKind.init(rawValue:)),
                   let value = userInfo["hostValue"] as? String else { return .view(appID, alertIDs: alertIDs) }
             let rowID = (userInfo["requestRowID"] as? NSNumber)?.int64Value
-            return .showRequest(RequestTarget(rowID: rowID, kind: kind, value: value, appID: appID), alertIDs: alertIDs)
+            let device = (userInfo["deviceID"] as? String).flatMap(UUID.init(uuidString:))
+            return .showRequest(RequestTarget(rowID: rowID, kind: kind, value: value, appID: appID, deviceID: device), alertIDs: alertIDs)
         default:
             return nil
         }
