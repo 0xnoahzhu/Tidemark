@@ -427,7 +427,9 @@ enum DeviceMergeSQL {
     ]
 
     /// An app both report keeps the later check. A host source both have (same kind, value and source path) keeps
-    /// the earlier first seen and the later last seen (with that observation's title), and adds the counts.
+    /// the earlier first seen and the later last seen (with that observation's title), and adds the counts; so does an
+    /// app's host source both have (same app, kind, value and source path), which stays a copy of `host_sources`
+    /// (`backfilled`) only when both were.
     static let installsAndSources = [
         """
         UPDATE app_installs i SET installed = f.installed, checked_at = f.checked_at
@@ -456,6 +458,24 @@ enum DeviceMergeSQL {
         WHERE f.device_id = $1 AND i.device_id = $2 AND i.kind = f.kind AND i.value = f.value AND i.source_path = f.source_path
         """,
         "UPDATE host_sources SET device_id = $2 WHERE device_id = $1",
+        """
+        UPDATE app_host_sources i SET
+            first_seen = LEAST(i.first_seen, f.first_seen),
+            last_seen = GREATEST(i.last_seen, f.last_seen),
+            request_count = i.request_count + f.request_count,
+            source_title = CASE WHEN f.last_seen > i.last_seen THEN f.source_title ELSE i.source_title END,
+            bundle_path = COALESCE(i.bundle_path, f.bundle_path),
+            backfilled = i.backfilled AND f.backfilled
+        FROM app_host_sources f
+        WHERE f.device_id = $1 AND i.device_id = $2
+          AND i.app_id = f.app_id AND i.kind = f.kind AND i.value = f.value AND i.source_path = f.source_path
+        """,
+        """
+        DELETE FROM app_host_sources f USING app_host_sources i
+        WHERE f.device_id = $1 AND i.device_id = $2
+          AND i.app_id = f.app_id AND i.kind = f.kind AND i.value = f.value AND i.source_path = f.source_path
+        """,
+        "UPDATE app_host_sources SET device_id = $2 WHERE device_id = $1",
     ]
 
     /// Alerts, probe sessions, egress checks and changes, DNS answers and proxy errors move; inventory entries `from`

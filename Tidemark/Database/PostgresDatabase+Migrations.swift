@@ -7,7 +7,8 @@ import Synchronization
 ///
 /// `migrate()` runs on every connect, so it first reads `schema_migrations` without any lock: a Mac with
 /// nothing to apply never waits for another Mac. Only when this build has migrations to apply does it take
-/// the migration advisory lock, read again, and run each migration's transaction, which also records it.
+/// the migration advisory lock, read again, and run each migration's transaction, which also records it (a
+/// migration with a backfill commits its statements first, copies in short batches, then records itself).
 ///
 /// Index steps (`Schema.ConcurrentStep`) run afterwards, outside the migration lock, under a per-schema
 /// index lock instead, so one Mac builds while every other Mac keeps connecting and writing. Whether a step
@@ -231,27 +232,70 @@ extension PostgresDatabase {
         return state
     }
 
-    /// A lost lock wait (`55P03`), deadlock or serialization conflict: the statement can simply run again.
+    /// A lost lock wait (`55P03`), deadlock or serialization conflict: the statement can simply run again. So can a
+    /// backfill's batch that copied a row whose app or Mac was deleted meanwhile (`23503`): it reads them afresh.
     private static func isRetryableMigrationFailure(_ error: any Error) -> Bool {
         guard let state = sqlState(of: error) else { return false }
-        return state == "55P03" || state == "40P01" || state == "40001"
+        return state == "55P03" || state == "40P01" || state == "40001" || state == "23503"
     }
 
-    /// Runs the migration's transaction, which records it. Its index steps are applied separately.
+    /// Runs the migration's transaction, which records it, or with a backfill: the transaction, the backfill's batches
+    /// and then the record. Its index steps are applied separately.
     private static func apply(_ migration: Schema.Migration, on connection: PostgresConnection, schema: String, quotedSchema: String) async throws {
         let searchPath = try await migrationSearchPath(on: connection, schema: schema, quotedSchema: quotedSchema)
+        let record = recordStatement(migration, quotedSchema: quotedSchema)
+        try await inTransaction(on: connection, searchPath: searchPath) {
+            for statement in Schema.statements(in: migration.sql) {
+                try await connection.query(PostgresQuery(unsafeSQL: statement), logger: logger)
+            }
+            if migration.backfill == nil { try await connection.query(record, logger: logger) }
+        }
+        guard let backfill = migration.backfill else { return }
+        try await copy(backfill, on: connection, searchPath: searchPath)
+        try await inTransaction(on: connection, searchPath: searchPath) {
+            try await connection.query(record, logger: logger)
+        }
+    }
+
+    /// Runs `body` in a transaction with the migrations' search path and lock timeout.
+    private static func inTransaction(on connection: PostgresConnection, searchPath: String, _ body: () async throws -> Void) async throws {
         try await connection.query("BEGIN", logger: logger)
         do {
             try await connection.query(PostgresQuery(unsafeSQL: "SET LOCAL search_path TO \(searchPath)"), logger: logger)
             try await connection.query(PostgresQuery(unsafeSQL: "SET LOCAL lock_timeout = '\(migrationLockTimeout)'"), logger: logger)
-            for statement in Schema.statements(in: migration.sql) {
-                try await connection.query(PostgresQuery(unsafeSQL: statement), logger: logger)
-            }
-            try await connection.query(recordStatement(migration, quotedSchema: quotedSchema), logger: logger)
+            try await body()
             try await connection.query("COMMIT", logger: logger)
         } catch {
             await rollback(connection)
             throw error
+        }
+    }
+
+    /// Runs a backfill's batches, each in its own transaction, from where an interrupted run stopped until one reads
+    /// fewer rows than its size.
+    private static func copy(_ backfill: Schema.Backfill, on connection: PostgresConnection, searchPath: String) async throws {
+        func lastKey(_ row: PostgresRow) throws -> [String] {
+            let read = PostgresRowReader(row)
+            return try backfill.key.map { try read($0, as: String.self) }
+        }
+        var key = backfill.start
+        try await inTransaction(on: connection, searchPath: searchPath) {
+            if let row = try await connection.query(PostgresQuery(unsafeSQL: backfill.resume), logger: logger).collect().first {
+                key = try lastKey(row)
+            }
+        }
+        while true {
+            var binds = PostgresBindings()
+            for value in key { binds.append(value) }
+            binds.append(Int64(backfill.batchSize))
+            var read = 0
+            try await inTransaction(on: connection, searchPath: searchPath) {
+                let rows = try await connection.query(PostgresQuery(unsafeSQL: backfill.batch, binds: binds), logger: logger).collect()
+                guard let row = rows.first else { return }
+                read = try PostgresRowReader(row)("n", as: Int.self)
+                key = try lastKey(row)
+            }
+            if read < backfill.batchSize { return }
         }
     }
 

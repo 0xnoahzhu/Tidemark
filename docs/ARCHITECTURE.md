@@ -154,13 +154,14 @@ session):
 ## Database
 
 `Database/Schema.swift` holds versioned migrations (`schema_migrations`). Main tables: `devices`, `apps`,
-`app_installs`, `processes`, `requests`, `app_hosts`, `host_sources`, `ip_info`, `alerts`,
+`app_installs`, `processes`, `requests`, `app_hosts`, `host_sources`, `app_host_sources`, `ip_info`, `alerts`,
 `probe_sessions`, `probe_hosts`, `egress_checks`, `egress_changes` (`mutes` is still created, but nothing reads or
 writes it any more). Connecting reads `schema_migrations`
 without a lock; only a build with migrations to apply takes the migration lock, and index changes (such as
 schema v3's `requests_active_idx`) are built `CONCURRENTLY` outside it, in the background on large tables, so
-no Mac waits for another Mac's upgrade. [DATABASE.md](DATABASE.md) describes the schema versions, the
-migration runner and every time limit.
+no Mac waits for another Mac's upgrade. A migration that fills a new table (v5 copies `host_sources` into
+`app_host_sources`) does so in short batches after its own transaction commits. [DATABASE.md](DATABASE.md) describes
+the schema versions, the migration runner and every time limit.
 
 * **Writes** go through `CaptureWriteBuffer`: flush every *N* rows or *T* seconds (default 200 rows / 1 s), as
   multi-row `INSERT … ON CONFLICT (device_id, surge_session, surge_id) DO UPDATE`. A request is written when

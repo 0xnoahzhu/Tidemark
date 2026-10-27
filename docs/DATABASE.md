@@ -9,6 +9,13 @@ migration to apply does it take an advisory lock (waiting at most 30 s for anoth
 each pending migration in one transaction and record it in that same transaction. A Mac with nothing to
 apply never waits for another Mac.
 
+A migration that copies rows into a table it creates (v5) commits its statements first, which releases the locks they
+took, then copies in batches of 10,000 rows of the source table, each in a transaction of its own with the migration's
+limits, and records itself only after the last batch. The copy walks the source's primary key and skips what is there
+already (`ON CONFLICT DO NOTHING`), so a copy that stopped (a lost connection, a quit) resumes after the last row it
+copied when the migration runs again. It still holds the migration lock, so another Mac applying the same migration
+waits for it (at most 30 s, then retries); Macs with nothing to apply, older builds among them, never do.
+
 Index changes (`CREATE INDEX CONCURRENTLY`, `DROP INDEX CONCURRENTLY`, BRIN settings) are not part of
 those transactions and are not recorded: Tidemark compares the catalog with what the applied migrations
 ask for and applies whatever is missing under a second, per-schema advisory lock, so one Mac builds while
@@ -29,6 +36,7 @@ engine start time in milliseconds.
 | 2 | `egress_checks.network_type` / `has_ipv6`; `requests` fillfactor 80; the btree on `requests.updated_at` replaced by a BRIN index (so rewriting a request row can stay a HOT update on PostgreSQL 16+); one trigram index over host, process name, remote IP and bundle path for searches, replacing the separate `host`, host-trigram and remote-IP indexes; `host_sources_last_seen_idx` dropped (no query used it); `schema_migrations.requires_version`. |
 | 3 | `requests_active_idx`, a partial index on `requests (device_id, surge_session) WHERE state = 'active'`, so closing the requests left active by an ended Surge session or by a crash reads only the rows still active; `autosummarize = on` for the BRIN index on `requests.updated_at`, so block ranges are summarized as they fill instead of at the next vacuum. Index changes only: every older Tidemark keeps writing. |
 | 4 | What happened to a request on its way ([Request details](#request-details)): `requests.timing`, `entry_mode`, `original_policy`, `modified`, `end_reason`, `remote_ip_source` and `remote_ip_resolved_at` (nullable, no default: a catalog-only change); the tables `dns_answers` and `proxy_errors`; `requests_host_started_idx` on `requests (host, started_at DESC)`, `requests_remote_ip_started_idx` on `requests (remote_ip, started_at DESC)` for the requests that reached one IP (History opened from an IP of Domains & IPs), `requests_ended_error_idx` on `requests (started_at DESC)` for the requests that ended with an error (a partial index whose predicate is History's "ended with an error" filter, so that filter over all time never reads the rows before v4) and an index by host on each new table, built concurrently. Additive only (`requires_version` 1): every older Tidemark keeps writing, and its writes never touch the new columns. |
+| 5 | `app_host_sources`, each app's processes of a domain or IP: `host_sources` has no app in its key, so an executable two monitored apps both ran to one address had one row per Mac, under the app that used it last, counting both apps' requests. Every `host_sources` row with an app is copied into it (`backfilled`), in batches after the table's transaction commits (about 20 s per million rows of `host_sources`). Additive only (`requires_version` 1): older builds keep writing `host_sources` alone. |
 
 Indexes are built and dropped `CONCURRENTLY`, so an upgrade does not block reads or writes (v3's BRIN
 setting locks that index for a moment and gives up after 3 s, to try again). Tidemark builds whose schema
@@ -55,7 +63,7 @@ Tidemark opens a 6-connection pool for reads and a 2-connection writer pool (`Ti
 | Merging devices: every transaction of a merge | 10 min (`SET LOCAL`) | 1 s (`SET LOCAL`, below capture's; the transaction is tried again) | 60 s |
 | Capture writes (`Tidemark writer`) | 15 s | 5 s | 15 s |
 | Closing (or counting) requests of ended sessions or that ended while Tidemark was not running | 15 s (`SET LOCAL`) | 10 s | 60 s |
-| Migration transactions | 5 min | 3 s per statement (retried) | 60 s |
+| Migration transactions, and each batch of a migration's copy | 5 min | 3 s per statement (retried) | 60 s |
 | Index builds of migrations | none | none in the background; 10 s while connecting; 3 s for a BRIN setting | 60 s |
 
 The capture writes and the session closing stay below capture's own 20 s bound per write, so the server
@@ -94,6 +102,7 @@ loopback; `sslmode=require`, `verify-ca` and `verify-full` (with `sslrootcert=`)
 | `processes` | (Mac, PID, start time) | process tree with `parent_id`; PIDs are reused, so the start time is part of the key |
 | `app_hosts` | (app, domain or IP) | a monitored app's inventory; `first_seen` within 24 h means NEW |
 | `host_sources` | (domain or IP, Mac, source process or probe) | the global Domains & IPs page, and the processes listed under a domain or IP of an app's Domains & IPs tab (`app_id`, the app the process's requests rolled up to when it last reached the address) |
+| `app_host_sources` | (app, domain or IP, Mac, source process) | each app's processes of a domain or IP, with that app's own requests (schema v5); `backfilled` while a row holds what v5 copied from `host_sources` |
 | `alerts` | first contact of a monitored app with a new site, host or IP | `read_at` is null while unread |
 | `mutes` | host pattern earlier versions muted (`host`, `IP` or `*.example.com`) | unused: Tidemark has no mutes and neither reads nor writes it, so every host alerts. Schema v1 creates it with `*.apple.com`, `*.icloud.com` and `*.mzstatic.com`; it stays, since migrations are never edited |
 | `ip_info` | IP address | GeoIP / ASN cache from Surge's databases |
@@ -287,8 +296,9 @@ transaction fails and is tried again (three times, 1 s apart) rather than captur
    stays moved); requests written under it since its batches moved go back to step 2. Then:
    * `processes`: one both have (same PID and start time) is merged into `into`'s (earlier first seen, later last
      seen, app, path, parent), its children and requests link to `into`'s, and it is deleted; the rest moves.
-   * `app_installs` (the later check wins) and `host_sources` (earlier first seen, later last seen and its title,
-     counts added) merge the same way. A request both IDs recorded may count twice in a merged `request_count`:
+   * `app_installs` (the later check wins), `host_sources` and `app_host_sources` (earlier first seen, later last seen
+     and its title, counts added; a merged `app_host_sources` row stays `backfilled` only when both were) merge the
+     same way. A request both IDs recorded may count twice in a merged `request_count`:
      only when the second ID saw it live, since a launch never counts a request it read back from Surge's recent
      list. (`processes.request_count` is not maintained.)
    * `alerts`, `probe_sessions`, `egress_checks`, `egress_changes`, `dns_answers` and `proxy_errors` move (a DNS answer
@@ -394,9 +404,16 @@ GROUP BY host ORDER BY requests DESC LIMIT 25;
   its answer, so roughly 3,000–10,000 rows a day on a busy Mac (1–4 MB at about 400 B a row with its indexes; the
   1,000 a day measured before Tidemark honoured Surge's expiry counted almost none of them), more in rule mode,
   bounded by the re-resolutions of the hosts in use. They are kept at full rate, since each is the answer a
-  `tidemark-lookup` address came from. `proxy_errors` gets about 100 rows a day.
+  `tidemark-lookup` address came from. `proxy_errors` gets about 100 rows a day. `app_host_sources` has about a row
+  for each `host_sources` row with an app (one more for each further app that ran the same process to the same
+  address), about 330 B with its primary key: 667,000 rows took 217 MB beside a `host_sources` of a million rows
+  (306 MB).
 * **Schema changes** — never edit the tables by hand while Tidemark runs; new versions of the app add
-  migrations instead of changing existing ones.
+  migrations instead of changing existing ones. v5's copy of `host_sources` took 19.5 s for a million rows (101
+  batches of about 0.2 s), while writes like capture's on another connection waited 24 ms at most; the same copy as one
+  statement in the transaction that creates the table took 14.4 s and held those writes up until their 5 s lock timeout
+  (the new table's foreign keys lock `devices` and `apps` until it commits). `SchemaBackfillMeasurement` in
+  `TidemarkTests/DatabaseLiveTests.swift` measures both in a throwaway schema when `TIDEMARK_BACKFILL_ROWS` is set.
 * **Index builds** — after an upgrade on a large database, `pg_stat_progress_create_index` shows a
   background build's progress (`SELECT * FROM pg_stat_progress_create_index;`). It waits for transactions
   older than itself (a long `pg_dump`, a psql session left idle in a transaction) before it can finish.

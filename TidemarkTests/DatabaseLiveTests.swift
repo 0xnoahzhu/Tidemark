@@ -26,7 +26,7 @@ struct DatabaseLiveTests {
             let tables = try await db.tableNames()
             for table in ["devices", "apps", "app_installs", "processes", "requests", "app_hosts", "host_sources", "ip_info",
                           "alerts", "mutes", "probe_sessions", "probe_hosts", "host_insights", "egress_checks", "egress_changes",
-                          "dns_answers", "proxy_errors"] {
+                          "dns_answers", "proxy_errors", "app_host_sources"] {
                 #expect(tables.contains(table), "missing table \(table)")
             }
             #expect(!tables.contains("schema_migrations"))
@@ -37,7 +37,7 @@ struct DatabaseLiveTests {
                 let read = PostgresRowReader(row)
                 return "\(try read("version", as: Int.self)):\(try read("requires_version", as: Int?.self).map(String.init) ?? "-")"
             }
-            #expect(requires == ["1:-", "2:1", "3:1", "4:1"])
+            #expect(requires == ["1:-", "2:1", "3:1", "4:1", "5:1"])
 
             // Every index step is in effect.
             let built = try await indexes(db)
@@ -1024,6 +1024,124 @@ struct DatabaseLiveTests {
         }
     }
 
+    /// Schema v5 copies every `host_sources` row that has an app into `app_host_sources`, in batches, once: running it
+    /// again, or resuming a copy that stopped, copies nothing twice. The processes listed stay what they were.
+    @Test func upgradeFromV4CopiesTheSourcesOfEachApp() async throws {
+        try await withTestDatabase(upTo: 4) { db in
+            let mac = Fixture.device("MacBook Pro")
+            let mini = Fixture.device("Mac mini")
+            try await db.upsertDevice(mac)
+            try await db.upsertDevice(mini)
+            let cursor = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            let raycast = Fixture.app("Raycast", path: "/Applications/Raycast.app")
+            try await db.insertApp(cursor)
+            try await db.insertApp(raycast)
+            // What v4 builds recorded: the shared rows only, more of them than one batch copies.
+            let node = "/usr/local/bin/node"
+            for touch in [
+                Fixture.source(.domain, "api.github.com", device: mac.id, app: cursor.id, path: node, title: "node", at: -600, requests: 5),
+                Fixture.source(.domain, "api.github.com", device: mini.id, app: cursor.id, path: node, title: "node", at: -60, requests: 2),
+                Fixture.source(.domain, "api.github.com", device: mac.id, app: raycast.id),
+                Fixture.source(.domain, "example.org", device: mac.id, app: nil),
+            ] {
+                try await Self.olderBuildTouchHostSource(db, touch)
+            }
+            try await db.execute("""
+                INSERT INTO host_sources (kind, value, device_id, source_path, source_title, app_id, first_seen, last_seen, request_count)
+                SELECT 'domain', 'svc' || i || '.example.com', \(mac.id), '/usr/bin/curl', 'curl',
+                       CASE WHEN i % 3 = 0 THEN NULL ELSE \(cursor.id)::uuid END, \(Fixture.now), \(Fixture.now), i
+                FROM generate_series(1, 24000) AS i
+                """)
+            #expect(try await db.migrate() == 5)
+            func count(_ sql: String) async throws -> Int {
+                try await db.rows(PostgresQuery(unsafeSQL: sql)).first.map { try PostgresRowReader($0)("n", as: Int.self) } ?? -1
+            }
+            // Every row with an app, as it was, marked as a copy.
+            let copies = """
+                SELECT count(*) AS n FROM host_sources s JOIN app_host_sources a
+                    ON a.app_id = s.app_id AND a.kind = s.kind AND a.value = s.value AND a.device_id = s.device_id AND a.source_path = s.source_path
+                   AND a.source_title = s.source_title AND a.first_seen = s.first_seen AND a.last_seen = s.last_seen
+                   AND a.request_count = s.request_count AND a.backfilled
+                """
+            let all = "SELECT count(*) AS n FROM app_host_sources"
+            #expect(try await count("SELECT count(*) AS n FROM host_sources WHERE app_id IS NOT NULL") == 16_003)
+            #expect(try await count(copies) == 16_003)
+            #expect(try await count(all) == 16_003)
+
+            // Run again, its record lost: nothing changes.
+            try await db.execute("DELETE FROM schema_migrations WHERE version = 5")
+            #expect(try await db.migrate() == 5)
+            #expect(try await count(copies) == 16_003)
+            #expect(try await count(all) == 16_003)
+
+            // A copy that stopped part of the way resumes after the last row it copied.
+            try await db.execute("DELETE FROM schema_migrations WHERE version = 5")
+            try await db.execute("DELETE FROM app_host_sources WHERE value > 'svc5'")
+            #expect(try await count(all) < 16_003)
+            #expect(try await db.migrate() == 5)
+            #expect(try await count(copies) == 16_003)
+            #expect(try await count(all) == 16_003)
+            #expect(try await db.migrate() == 5)
+        }
+    }
+
+    /// Merging a device merges each app's host sources like the shared ones: counts added, the earlier first seen and
+    /// the later last seen with its title; a row only the merged ID has moves. A merged row stays a copy of
+    /// `host_sources` only when both were.
+    @Test func mergingADeviceMergesEachAppsHostSources() async throws {
+        try await withTestDatabase(upTo: 4) { db in
+            let old = Fixture.device("Noah’s Mac mini")
+            let new = Fixture.device("Mac mini")
+            for device in [old, new] { try await db.upsertDevice(device) }
+            let cursor = Fixture.app("Cursor", path: "/Applications/Cursor.app")
+            let raycast = Fixture.app("Raycast", path: "/Applications/Raycast.app")
+            try await db.insertApp(cursor)
+            try await db.insertApp(raycast)
+            let git = "/usr/bin/git", node = "/usr/local/bin/node"
+            // Copies the upgrade made of what both IDs recorded before it.
+            try await Self.olderBuildTouchHostSource(db, Fixture.source(.domain, "github.com", device: old.id, app: cursor.id, path: git, title: "git",
+                                                                        at: -7_200, requests: 2))
+            try await Self.olderBuildTouchHostSource(db, Fixture.source(.domain, "github.com", device: new.id, app: cursor.id, path: git, title: "git",
+                                                                        at: -3_600, requests: 3))
+            try await Self.olderBuildTouchHostSource(db, Fixture.source(.domain, "example.org", device: old.id, app: raycast.id, at: -100))
+            #expect(try await db.migrate() == 5)
+            // Rows counted for the apps' own requests under both IDs.
+            func at(_ seconds: TimeInterval) -> Date { Fixture.now.addingTimeInterval(seconds) }
+            try await db.execute("""
+                INSERT INTO app_host_sources (app_id, kind, value, device_id, source_path, source_title, first_seen, last_seen, request_count)
+                VALUES (\(cursor.id), 'domain', 'api.github.com', \(old.id), \(node), 'node', \(at(-600)), \(at(-600)), 4),
+                       (\(cursor.id), 'domain', 'api.github.com', \(new.id), \(node), 'node (new)', \(at(-60)), \(at(-60)), 1),
+                       (\(raycast.id), 'domain', 'api.github.com', \(old.id), \(node), 'node', \(at(-30)), \(at(-30)), 2),
+                       (\(raycast.id), 'domain', 'example.org', \(new.id), '/usr/bin/curl', 'curl', \(at(-20)), \(at(-20)), 1)
+                """)
+
+            #expect(try await db.mergeDevice(old.id, into: new.id, batchSize: 2) == DeviceMergeResult(merged: true))
+            let rows = try await db.rows("""
+                SELECT a.app_id, a.value, a.device_id, a.source_title, a.first_seen, a.last_seen, a.request_count, a.backfilled
+                FROM app_host_sources a ORDER BY a.value, a.app_id
+                """).map { row in
+                let read = PostgresRowReader(row)
+                let app = try read("app_id", as: UUID.self) == cursor.id ? "Cursor" : "Raycast"
+                let device = try read("device_id", as: UUID.self) == new.id ? "new" : "old"
+                let first = Int(Fixture.now.timeIntervalSince(try read("first_seen", as: Date.self)))
+                let last = Int(Fixture.now.timeIntervalSince(try read("last_seen", as: Date.self)))
+                let origin = try read("backfilled", as: Bool.self) ? "copy" : "recorded"
+                return "\(app) \(try read("value", as: String.self)) \(device) \(try read("source_title", as: String.self)) "
+                    + "\(try read("request_count", as: Int64.self)) \(first)-\(last) \(origin)"
+            }
+            #expect(rows.sorted() == [
+                "Cursor api.github.com new node (new) 5 600-60 recorded",
+                "Cursor github.com new git 5 7200-3600 copy",
+                "Raycast api.github.com new node 2 30-30 recorded",
+                "Raycast example.org new curl 2 100-20 recorded",
+            ])
+
+            // Merging again does nothing.
+            #expect(try await db.mergeDevice(old.id, into: new.id) == DeviceMergeResult())
+            #expect(try await appHostSources(db).count == 4)
+        }
+    }
+
     @Test func ipInfoRoundTrip() async throws {
         try await withTestDatabase { db in
             #expect(try await db.ipInfo("8.8.8.8") == nil)
@@ -1435,7 +1553,7 @@ struct DatabaseLiveTests {
             for id: Int64 in 1...3 { try await Self.olderBuildUpsert(db, olderRow(id)) }
             let before = try await indexes(db)
 
-            #expect(try await db.migrate() == 4)
+            #expect(try await db.migrate(upTo: 4) == 4)
             let upgraded = try await indexes(db)
             for name in ["requests_host_started_idx", "requests_remote_ip_started_idx", "dns_answers_domain_idx", "proxy_errors_target_idx",
                          "requests_ended_error_idx", "dns_answers_pkey", "proxy_errors_pkey"] {
@@ -1448,7 +1566,7 @@ struct DatabaseLiveTests {
 
             // A migration whose record is lost runs again without changing anything.
             try await db.execute("DELETE FROM schema_migrations WHERE version = 4")
-            #expect(try await db.migrate() == 4)
+            #expect(try await db.migrate(upTo: 4) == 4)
             #expect(try await indexes(db) == upgraded)
             let columns = try await db.rows("""
                 SELECT count(*) AS n FROM information_schema.columns WHERE table_schema = \(db.schema) AND table_name = 'requests'
@@ -1760,6 +1878,23 @@ struct DatabaseLiveTests {
         let result = try #require(written)
         if result.inserted { try await db.execute("UPDATE devices SET row_count = row_count + 1 WHERE id = \(row.deviceID)") }
         return result.id
+    }
+
+    /// A host source written the way builds before schema v5 write one: `host_sources` only, under the app that used the
+    /// process last.
+    private static func olderBuildTouchHostSource(_ db: PostgresDatabase, _ touch: HostSourceTouch) async throws {
+        try await db.execute("""
+            INSERT INTO host_sources AS s (kind, value, device_id, source_path, source_title, app_id, bundle_path, first_seen, last_seen, request_count)
+            VALUES (\(touch.kind.rawValue), \(touch.value), \(touch.deviceID), \(touch.sourcePath), \(touch.sourceTitle), \(touch.appID),
+                    \(touch.bundlePath), \(touch.seenAt), \(touch.seenAt), \(touch.requestDelta))
+            ON CONFLICT (kind, value, device_id, source_path) DO UPDATE SET
+                source_title = excluded.source_title,
+                app_id = COALESCE(excluded.app_id, s.app_id),
+                bundle_path = COALESCE(excluded.bundle_path, s.bundle_path),
+                first_seen = LEAST(s.first_seen, excluded.first_seen),
+                last_seen = GREATEST(s.last_seen, excluded.last_seen),
+                request_count = s.request_count + excluded.request_count
+            """)
     }
 
     // MARK: - Write path robustness
@@ -2326,6 +2461,15 @@ struct DatabaseLiveTests {
     // MARK: - Harness
 
     /// The storage parameters of an index of the test schema (`pg_class.reloptions`).
+    /// Every `app_host_sources` row: app, value, title and requests, sorted.
+    private func appHostSources(_ db: PostgresDatabase) async throws -> [String] {
+        try await db.rows("SELECT app_id, value, source_title, request_count FROM app_host_sources").map { row in
+            let read = PostgresRowReader(row)
+            return "\(try read("app_id", as: UUID.self)) \(try read("value", as: String.self)) \(try read("source_title", as: String.self)) "
+                + "\(try read("request_count", as: Int64.self))"
+        }.sorted()
+    }
+
     private func indexOptions(_ db: PostgresDatabase, _ name: String) async throws -> [String] {
         try await db.rows("""
             SELECT COALESCE(c.reloptions, '{}') AS options FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -2358,7 +2502,7 @@ struct DatabaseLiveTests {
 
     /// Runs `body` against a freshly migrated `tm_test_<8 hex>` schema (up to migration `version`, all of
     /// them when nil) and always drops it afterwards.
-    private func withTestDatabase(upTo version: Int? = nil, _ body: (PostgresDatabase) async throws -> Void) async throws {
+    fileprivate func withTestDatabase(upTo version: Int? = nil, _ body: (PostgresDatabase) async throws -> Void) async throws {
         let url = try #require(Self.databaseURL)
         let schema = "tm_test_" + String(format: "%08x", UInt32.random(in: .min ... .max))
         let db = PostgresDatabase(url: url, schema: schema)
@@ -2465,13 +2609,145 @@ private enum Fixture {
                 isDirect: false, hosts: [])
     }
 
-    static func source(_ kind: HostKind, _ value: String, device: DeviceID, app: AppID?, path: String = "/usr/bin/curl", title: String = "curl") -> HostSourceTouch {
+    static func source(_ kind: HostKind, _ value: String, device: DeviceID, app: AppID?, path: String = "/usr/bin/curl", title: String = "curl",
+                       at seconds: TimeInterval = 0, requests: Int64 = 1) -> HostSourceTouch {
         HostSourceTouch(kind: kind, value: value, deviceID: device, sourcePath: path, sourceTitle: title, appID: app,
-                        bundlePath: nil, seenAt: now, requestDelta: 1, geo: nil)
+                        bundlePath: nil, seenAt: now.addingTimeInterval(seconds), requestDelta: requests, geo: nil)
     }
 
     static func alert(device: DeviceID, app: AppID, value: String) -> AlertItem {
         AlertItem(id: 0, deviceID: device, appID: app, kind: .domain, scope: .site, value: value, site: NaiveSiteClassifier().site(for: value),
                   host: value, ip: nil, geo: nil, processName: "node", isDirect: false, requestRowID: nil, createdAt: now, readAt: nil)
+    }
+}
+
+/// `TIDEMARK_BACKFILL_ROWS`: how many `host_sources` rows `SchemaBackfillMeasurement` builds, or nil (skipped).
+private let backfillRows: Int? = ProcessInfo.processInfo.environment["TIDEMARK_BACKFILL_ROWS"].flatMap { Int($0) }
+
+/// Schema v5's copy of `host_sources`, measured on request (`TIDEMARK_BACKFILL_ROWS`, e.g. 1000000) in a throwaway schema:
+/// how long upgrading from v4 takes, and how long writes like capture's (on the writer pool, a `devices` update and a
+/// `host_sources` upsert in one transaction, about 20 a second) wait meanwhile; then the same copy as one statement in the
+/// transaction that creates the table, for comparison. Prints its figures.
+@Suite(.serialized, .enabled(if: liveDatabaseURL != nil && backfillRows != nil, "Set TIDEMARK_BACKFILL_ROWS to measure"), .timeLimit(.minutes(30)))
+struct SchemaBackfillMeasurement {
+    @Test func copiesHostSourcesWithoutHoldingCaptureUp() async throws {
+        let rows = try #require(backfillRows)
+        try await DatabaseLiveTests().withTestDatabase(upTo: 4) { db in
+            let macs = (0..<3).map { Fixture.device("Mac \($0)") }
+            for mac in macs { try await db.upsertDevice(mac) }
+            let apps = (0..<20).map { Fixture.app("App \($0)", path: "/Applications/App \($0).app") }
+            for app in apps { try await db.insertApp(app) }
+            // Three Macs, 41 processes, two rows in three with one of the apps.
+            let macIDs = macs.map { "'\($0.id)'::uuid" }.joined(separator: ", ")
+            let appIDs = apps.map { "'\($0.id)'::uuid" }.joined(separator: ", ")
+            try await db.execute(PostgresQuery(unsafeSQL: """
+                INSERT INTO host_sources (kind, value, device_id, source_path, source_title, app_id, first_seen, last_seen, request_count)
+                SELECT CASE WHEN i % 2 = 0 THEN 'domain' ELSE 'ip' END,
+                       CASE WHEN i % 2 = 0 THEN 'svc' || (i / 6) || '.example' || (i % 97) || '.com'
+                            ELSE '10.' || (i / 65536) % 256 || '.' || (i / 256) % 256 || '.' || i % 256 END,
+                       (ARRAY[\(macIDs)])[1 + i % 3], '/usr/local/bin/tool' || (i % 41), 'tool' || (i % 41),
+                       CASE WHEN i % 3 = 0 THEN NULL ELSE (ARRAY[\(appIDs)])[1 + i % 20] END,
+                       now() - interval '30 days' + (i % 1000) * interval '1 minute', now() - (i % 1000) * interval '1 second', 1 + i % 50
+                FROM generate_series(1, \(rows)) AS i
+                ON CONFLICT DO NOTHING
+                """), statementTimeout: .seconds(1_800))
+            try await db.execute("ANALYZE host_sources")
+            let stored = try await db.rows("""
+                SELECT count(*) AS n, count(app_id) AS linked, pg_size_pretty(pg_total_relation_size('host_sources')) AS size FROM host_sources
+                """).first.map { row in
+                let read = PostgresRowReader(row)
+                return (rows: try read("n", as: Int.self), linked: try read("linked", as: Int.self), size: try read("size", as: String.self))
+            }
+            let table = try #require(stored)
+
+            let upgrade = try await Self.whileCaptureWrites(db, device: macs[0].id) { _ = try await db.migrate() }
+            let copied = try await db.rows("SELECT count(*) AS n, pg_size_pretty(pg_total_relation_size('app_host_sources')) AS size FROM app_host_sources")
+                .first.map { row in (rows: try PostgresRowReader(row)("n", as: Int.self), size: try PostgresRowReader(row)("size", as: String.self)) }
+            #expect(copied?.rows == table.linked)
+
+            // The same copy as one statement, in the transaction that creates the table.
+            let single = try await Self.whileCaptureWrites(db, device: macs[0].id) {
+                try await db.withTransaction(statementTimeout: .seconds(1_800)) { connection in
+                    for statement in [
+                        """
+                        CREATE TABLE app_host_sources_single (LIKE app_host_sources INCLUDING ALL,
+                            FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE, FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE)
+                        """,
+                        """
+                        INSERT INTO app_host_sources_single (app_id, kind, value, device_id, source_path, source_title, first_seen, last_seen,
+                                                             request_count, bundle_path, backfilled)
+                        SELECT app_id, kind, value, device_id, source_path, source_title, first_seen, last_seen, request_count, bundle_path, true
+                        FROM host_sources WHERE app_id IS NOT NULL
+                        """,
+                    ] {
+                        try await connection.query(PostgresQuery(unsafeSQL: statement), logger: PostgresDatabase.logger)
+                    }
+                }
+            }
+            let batches = table.rows / (Schema.migrations.last?.backfill?.batchSize ?? 1) + 1
+            print("""
+                v5 backfill: host_sources \(table.rows) rows (\(table.linked) with an app, \(table.size)); app_host_sources \(copied?.rows ?? -1) rows \
+                (\(copied?.size ?? "?")).
+                  migrate() v4 to v5 in \(batches) batches: \(upgrade.took); capture-like writes: \(upgrade.writes), the slowest \(upgrade.slowest), \
+                \(upgrade.failures) failed.
+                  one statement in the creating transaction: \(single.took); capture-like writes: \(single.writes), the slowest \(single.slowest), \
+                \(single.failures) failed.
+                """)
+        }
+    }
+
+    struct Measured {
+        var took: Duration
+        var writes: Int
+        var slowest: Duration
+        var failures: Int
+    }
+
+    /// Runs `work` while a task writes like capture every 50 ms, and reports how long it took and how the writes fared.
+    private static func whileCaptureWrites(_ db: PostgresDatabase, device: DeviceID, _ work: () async throws -> Void) async throws -> Measured {
+        final class Flag: Sendable {
+            private let value = Atomic(false)
+            var isSet: Bool { value.load(ordering: .acquiring) }
+            func set() { value.store(true, ordering: .releasing) }
+        }
+        let clock = ContinuousClock()
+        let stop = Flag()
+        let writer = Task { () -> (writes: Int, slowest: Duration, failures: Int) in
+            var (writes, slowest, failures) = (0, Duration.zero, 0)
+            while !stop.isSet {
+                let started = clock.now
+                do {
+                    try await db.withTransaction(on: .writer) { connection in
+                        _ = try await connection.query("UPDATE devices SET row_count = row_count + 1, last_write_at = now() WHERE id = \(device)",
+                                                       logger: PostgresDatabase.logger).collect()
+                        _ = try await connection.query("""
+                            INSERT INTO host_sources AS s (kind, value, device_id, source_path, source_title, first_seen, last_seen, request_count)
+                            VALUES ('domain', 'capture.example.com', \(device), '/usr/bin/curl', 'curl', now(), now(), 1)
+                            ON CONFLICT (kind, value, device_id, source_path) DO UPDATE SET last_seen = excluded.last_seen,
+                                request_count = s.request_count + 1
+                            """, logger: PostgresDatabase.logger).collect()
+                    }
+                    writes += 1
+                } catch {
+                    failures += 1
+                }
+                slowest = max(slowest, started.duration(to: clock.now))
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            return (writes, slowest, failures)
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        let started = clock.now
+        do {
+            try await work()
+        } catch {
+            stop.set()
+            _ = await writer.value
+            throw error
+        }
+        let took = started.duration(to: clock.now)
+        stop.set()
+        let written = await writer.value
+        return Measured(took: took, writes: written.writes, slowest: written.slowest, failures: written.failures)
     }
 }

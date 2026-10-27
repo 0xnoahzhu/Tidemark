@@ -322,9 +322,24 @@ struct DatabaseUnitTests {
         guard case .createIndex(_, "requests", let errorIndex)? = v4.concurrentSteps.last else { Issue.record("no index of errors"); return }
         let condition = PostgresDatabase.endedWithErrorCondition.dropFirst().dropLast().replacingOccurrences(of: "r.", with: "")
         #expect(errorIndex == "(started_at DESC) WHERE " + condition)
+        // v5 creates one table, which older builds never write, and copies into it in batches outside its transaction
+        // (the new table's foreign keys lock `devices` and `apps` until it commits).
+        let v5 = try #require(Schema.migrations.first { $0.version == 5 })
+        let v5Statements = Schema.statements(in: v5.sql)
+        #expect(v5Statements.count == 1 && v5Statements[0].hasPrefix("CREATE TABLE IF NOT EXISTS app_host_sources"))
+        #expect(v5Statements[0].contains("PRIMARY KEY (app_id, kind, value, device_id, source_path)"))
+        #expect(v5Statements[0].contains("REFERENCES apps(id) ON DELETE CASCADE") && v5Statements[0].contains("REFERENCES devices(id) ON DELETE CASCADE"))
+        #expect(v5.requiresVersion == 1 && v5.concurrentSteps.isEmpty)
+        let backfill = try #require(v5.backfill)
+        #expect(backfill.key == ["kind", "value", "device_id", "source_path"] && backfill.start.count == backfill.key.count)
+        #expect(backfill.batch.contains("ON CONFLICT (app_id, kind, value, device_id, source_path) DO NOTHING"))
+        #expect(backfill.batch.contains("(s.kind, s.value, s.device_id, s.source_path) > ($1::text, $2::text, $3::uuid, $4::text)"))
+        #expect(backfill.batch.contains("LIMIT $5") && backfill.batchSize == 10_000)
+        #expect(Schema.statements(in: backfill.batch).count == 1 && Schema.statements(in: backfill.resume).count == 1)
+        #expect(Schema.migrations.allSatisfy { $0.version == 5 || $0.backfill == nil })
         // Shipped migrations never change.
         #expect(Schema.migrations.map(\.name) == ["initial", "write path and egress details", "active requests and brin autosummarize",
-                                                  "request details, dns answers and proxy errors"])
+                                                  "request details, dns answers and proxy errors", "host sources per app"])
     }
 
     @Test func indexStepsFollowTheCatalog() {

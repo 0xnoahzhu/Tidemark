@@ -28,10 +28,30 @@ enum Schema {
         /// block writes. Writers never depend on them (they only make queries faster): Tidemark applies the
         /// missing ones in the background, in this order, until the catalog shows every one in effect.
         var concurrentSteps: [ConcurrentStep] = []
+        /// Rows copied after `sql` commits and before the migration is recorded (see `Backfill`).
+        var backfill: Backfill? = nil
         /// The oldest schema version whose Tidemark can still write correctly once this migration is applied
         /// (`schema_migrations.requires_version`, from v2 on). An older Tidemark that finds a newer migration
         /// requiring more than it knows stops writing instead of failing on every statement.
         var requiresVersion: Int? = nil
+    }
+
+    /// A copy into a table the migration creates, in batches that each run in a transaction of their own after the
+    /// migration's statements commit, still under the migration lock, and before the migration is recorded: the locks
+    /// its DDL took (a new table's foreign keys lock the tables they reference, which every Mac's writes need) are
+    /// released at once, no statement runs long, and a copy that was interrupted resumes when the migration runs again.
+    /// Batches walk the source table's primary key (`key`, compared as one row) and insert with `ON CONFLICT DO NOTHING`.
+    struct Backfill: Sendable, Equatable {
+        /// The key columns, in order. The statements bind and return them as text.
+        var key: [String]
+        /// Below every key: where the first batch starts.
+        var start: [String]
+        /// The last key copied, the start of a copy that resumes (no row: start from `start`).
+        var resume: String
+        /// One batch: copies what follows the key `$1…$n` (n = `key.count`), at most `$n+1` rows of the source table;
+        /// returns the last key it read and the number of rows it read (`n`), no row when it read none.
+        var batch: String
+        var batchSize: Int
     }
 
     /// An index change that runs outside the migration's transaction. Each one can tell from the catalog
@@ -71,7 +91,66 @@ enum Schema {
         Migration(version: 2, name: "write path and egress details", sql: v2, concurrentSteps: v2Indexes, requiresVersion: 1),
         Migration(version: 3, name: "active requests and brin autosummarize", sql: "", concurrentSteps: v3Indexes, requiresVersion: 1),
         Migration(version: 4, name: "request details, dns answers and proxy errors", sql: v4, concurrentSteps: v4Indexes, requiresVersion: 1),
+        Migration(version: 5, name: "host sources per app", sql: v5, backfill: v5Backfill, requiresVersion: 1),
     ]
+
+    /// v5 — `app_host_sources`, the processes that reached a domain or IP per app: `host_sources` has no app in its
+    /// key, so an executable two monitored apps both ran to one address (`node`, `curl`, `git`) has one row per Mac,
+    /// under the app that used it last, counting both apps' requests. Capture writes the new table beside
+    /// `host_sources`, in the same statement, for every request attributed to an app; older builds keep writing
+    /// `host_sources` only (`requiresVersion` 1), which `hostProcesses` reads for what only they recorded.
+    ///
+    /// `backfilled` marks a row copied from `host_sources` (by the backfill below, or merged from such rows only): it
+    /// holds `host_sources`' figures, every app's requests of that Mac and process, until capture first writes the row
+    /// for the app's own requests, continuing from them.
+    private static let v5 = """
+    CREATE TABLE IF NOT EXISTS app_host_sources (
+        app_id        uuid NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+        kind          text NOT NULL CHECK (kind IN ('domain', 'ip')),
+        value         text NOT NULL,
+        device_id     uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        source_path   text NOT NULL,
+        source_title  text NOT NULL,
+        first_seen    timestamptz NOT NULL,
+        last_seen     timestamptz NOT NULL,
+        request_count bigint NOT NULL DEFAULT 0,
+        bundle_path   text,
+        backfilled    boolean NOT NULL DEFAULT false,
+        PRIMARY KEY (app_id, kind, value, device_id, source_path)
+    );
+    """
+
+    /// v5's copy of every `host_sources` row that has an app, in batches of 10,000 rows of `host_sources` in primary-key
+    /// order (a range scan of its primary key each). Rows whose app was deleted meanwhile fail the batch on the foreign
+    /// key, and the migration tries again.
+    private static let v5Backfill = Backfill(
+        key: ["kind", "value", "device_id", "source_path"],
+        start: ["", "", "00000000-0000-0000-0000-000000000000", ""],
+        resume: """
+            SELECT kind, value, device_id::text AS device_id, source_path FROM app_host_sources WHERE backfilled
+            ORDER BY kind DESC, value DESC, device_id DESC, source_path DESC LIMIT 1
+            """,
+        batch: """
+            WITH batch AS (
+                SELECT s.kind, s.value, s.device_id, s.source_path, s.source_title, s.app_id, s.first_seen, s.last_seen,
+                       s.request_count, s.bundle_path
+                FROM host_sources s
+                WHERE (s.kind, s.value, s.device_id, s.source_path) > ($1::text, $2::text, $3::uuid, $4::text)
+                ORDER BY s.kind, s.value, s.device_id, s.source_path
+                LIMIT $5
+            ), copied AS (
+                INSERT INTO app_host_sources (app_id, kind, value, device_id, source_path, source_title, first_seen, last_seen,
+                                              request_count, bundle_path, backfilled)
+                SELECT b.app_id, b.kind, b.value, b.device_id, b.source_path, b.source_title, b.first_seen, b.last_seen,
+                       b.request_count, b.bundle_path, true
+                FROM batch b WHERE b.app_id IS NOT NULL
+                ON CONFLICT (app_id, kind, value, device_id, source_path) DO NOTHING
+            )
+            SELECT b.kind, b.value, b.device_id::text AS device_id, b.source_path, (SELECT count(*) FROM batch) AS n
+            FROM batch b ORDER BY b.kind DESC, b.value DESC, b.device_id DESC, b.source_path DESC LIMIT 1
+            """,
+        batchSize: 10_000
+    )
 
     /// v4 — what happened to a request on its way, recorded while Surge still has it (it keeps only its last ~200
     /// finished requests). Additive only, so every older Tidemark keeps writing (`requiresVersion` 1): its upserts
