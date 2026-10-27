@@ -412,45 +412,47 @@ struct AppDetailInventoryTab: View {
     /// The IP pane's title with how many IPs it lists, then the Direct / From domains switch; with a domain selected,
     /// "Show all" in the switch's place, which lists every IP again. The domain's IPs are those it resolved to whichever
     /// group they are in, so the switch keeps its choice for then.
-    @ViewBuilder
     private func ipsHeader(selected: String?) -> some View {
         @Bindable var nav = model.nav
-        // Like the design's "N of M", the Direct / From domains switch doesn't change the count.
-        let title = HStack(alignment: .firstTextBaseline, spacing: 8.px) {
-            Text(selected.map { trf("IPs used by %@", "AppDetail", $0) } ?? tr("All IPs", "AppDetail"))
-                .font(.design(12.5, .bold))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Text(trf("%1$lld of %2$lld", "AppDetail", summary.listedIPCount(selectedHost: selected), summary.ipCount))
-                .font(.design(11.5))
-                .foregroundStyle(Theme.ink3)
-                .fixedSize()
-        }
-        if selected != nil {
-            // The domain shortens in the middle before "Show all" gives way. As tall as the switch, so where the pane has
-            // room for the title and the switch on one row the list stays put.
-            HStack(alignment: .firstTextBaseline, spacing: 8.px) {
-                title
-                Spacer(minLength: 0)
+        // The counts are those of the list's group headers; a pane too narrow for the switch drops them, then its icons.
+        let filter = DesignSegmentedControl(tr("Show", "AppDetail"), selection: $nav.appIPFilter, segments: [
+            .init(.all, tr("All", "AppDetail"), systemImage: "list.bullet", count: summary.directIPs.count + summary.resolvedIPs.count),
+            .init(.direct, tr("Direct", "AppDetail"), systemImage: "number", count: summary.directIPs.count),
+            .init(.resolved, tr("From domains", "AppDetail"), systemImage: "globe", count: summary.resolvedIPs.count),
+        ])
+        // One row when the pane is wide enough, otherwise the switch moves under the title.
+        return AppDetailIPHeaderLayout {
+            if let selected {
+                // Every IP's title and the switch, hidden, keep the header as tall as without the domain, so the list
+                // stays put. The domain shortens in the middle before "Show all" gives way.
+                ipsTitle(tr("All IPs", "AppDetail"), listed: summary.listedIPCount(selectedHost: nil)).hidden()
+                filter.hidden().disabled(true)
+                ipsTitle(trf("IPs used by %@", "AppDetail", selected), listed: summary.listedIPCount(selectedHost: selected))
                 Button(tr("Show all", "AppDetail")) {
                     withAnimation(.easeOut(duration: 0.2)) { model.nav.appSelectedHost = nil }
                 }
                 .buttonStyle(.link)
                 .font(.design(11.5))
                 .fixedSize()
+            } else {
+                ipsTitle(tr("All IPs", "AppDetail"), listed: summary.listedIPCount(selectedHost: nil))
+                filter
             }
-            .frame(minHeight: DesignSegmentedControl<Navigation.IPFilter>.Size.small().height)
-        } else {
-            // One row when the pane is wide enough, otherwise the switch moves under the title. The counts are those of
-            // the list's group headers; a pane too narrow for the switch drops them, then its icons.
-            AppDetailIPHeaderLayout {
-                title
-                DesignSegmentedControl(tr("Show", "AppDetail"), selection: $nav.appIPFilter, segments: [
-                    .init(.all, tr("All", "AppDetail"), systemImage: "list.bullet", count: summary.directIPs.count + summary.resolvedIPs.count),
-                    .init(.direct, tr("Direct", "AppDetail"), systemImage: "number", count: summary.directIPs.count),
-                    .init(.resolved, tr("From domains", "AppDetail"), systemImage: "globe", count: summary.resolvedIPs.count),
-                ])
-            }
+        }
+    }
+
+    /// The IP pane's title with how many of the app's IPs it lists: like the design's "N of M", the Direct / From domains
+    /// switch doesn't change the count.
+    private func ipsTitle(_ title: String, listed: Int) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8.px) {
+            Text(title)
+                .font(.design(12.5, .bold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text(trf("%1$lld of %2$lld", "AppDetail", listed, summary.ipCount))
+                .font(.design(11.5))
+                .foregroundStyle(Theme.ink3)
+                .fixedSize()
         }
     }
 
@@ -779,11 +781,14 @@ private struct AppDetailIPRow: View {
     }
 }
 
-/// The IP pane's header while it lists every IP: the title and the Direct / From domains switch on one row when both fit
-/// at their ideal widths, otherwise the switch on a row of its own under the title. It lays out what a `ViewThatFits`
-/// of those two arrangements did, with each view built and measured once.
+/// The IP pane's header: the title and the Direct / From domains switch on one row when both fit at their ideal widths,
+/// otherwise the switch on a row of its own under the title. It lays out what a `ViewThatFits` of those two
+/// arrangements did, with each view built and measured once.
 ///
-/// Subviews: the title, then the switch.
+/// Subviews: the title, then the switch. With a domain selected, those two hidden, then the domain's title and "Show
+/// all", which take their places: the header keeps its height, so the list under it stays put. The domain's title
+/// shortens before "Show all" gives way, and "Show all" sits on the title's baseline at the end of the row, or
+/// centered in the switch's row.
 private struct AppDetailIPHeaderLayout: Layout {
     private let spacing = 8.px
     private let rowSpacing = 6.px
@@ -823,17 +828,37 @@ private struct AppDetailIPHeaderLayout: Layout {
         let oneRow = titleWidth + spacing + spacing + spacing + filterWidth
         let width = proposed ?? oneRow
 
+        var arrangement: Arrangement
         if oneRow <= width {
             let row = Self.row([Cell(subview: title, x: 0, width: titleWidth),
                                 Cell(subview: filter, x: width - filterWidth, width: filterWidth)])
-            return Arrangement(items: row.frames, width: width, height: row.height)
+            arrangement = Arrangement(items: row.frames, width: width, height: row.height)
+        } else {
+            // The title (cut if needed) on the first row, the switch under it.
+            let first = Self.row([Cell(subview: title, x: 0, width: min(titleWidth, width))])
+            // A pane narrower than the switch gets it without its counts (or icons).
+            let filterSize = filter.sizeThatFits(ProposedViewSize(width: min(filterWidth, width), height: nil))
+            let frames = first.frames + [CGRect(x: 0, y: first.height + rowSpacing, width: filterSize.width, height: filterSize.height)]
+            arrangement = Arrangement(items: frames, width: width, height: first.height + rowSpacing + filterSize.height)
         }
-        // The title (cut if needed) on the first row, the switch under it.
-        let first = Self.row([Cell(subview: title, x: 0, width: min(titleWidth, width))])
-        // A pane narrower than the switch gets it without its counts (or icons).
-        let filterSize = filter.sizeThatFits(ProposedViewSize(width: min(filterWidth, width), height: nil))
-        let frames = first.frames + [CGRect(x: 0, y: first.height + rowSpacing, width: filterSize.width, height: filterSize.height)]
-        return Arrangement(items: frames, width: width, height: first.height + rowSpacing + filterSize.height)
+        guard subviews.count >= 4 else { return arrangement }
+
+        // The domain's title and "Show all" in the places of the title and the switch.
+        let domain = subviews[2], showAll = subviews[3]
+        let showAllSize = showAll.sizeThatFits(.unspecified)
+        let titleFrame = arrangement.items[0], filterFrame = arrangement.items[1]
+        let baseline = titleFrame.minY + title.dimensions(in: ProposedViewSize(width: titleFrame.width, height: nil))[VerticalAlignment.firstTextBaseline]
+        // title, a spacer of at least 0 and "Show all", 8 apart.
+        let domainWidth = min(domain.sizeThatFits(.unspecified).width, oneRow <= width ? max(0, width - spacing - spacing - showAllSize.width) : width)
+        let domainSize = domain.dimensions(in: ProposedViewSize(width: domainWidth, height: nil))
+        arrangement.items.append(CGRect(x: 0, y: baseline - domainSize[VerticalAlignment.firstTextBaseline], width: domainWidth, height: domainSize.height))
+        if oneRow <= width {
+            let showAllBaseline = showAll.dimensions(in: .unspecified)[VerticalAlignment.firstTextBaseline]
+            arrangement.items.append(CGRect(x: width - showAllSize.width, y: baseline - showAllBaseline, width: showAllSize.width, height: showAllSize.height))
+        } else {
+            arrangement.items.append(CGRect(x: 0, y: filterFrame.midY - showAllSize.height / 2, width: showAllSize.width, height: showAllSize.height))
+        }
+        return arrangement
     }
 
     /// Cells at their x and width, aligned on their first text baselines like an `HStack(alignment: .firstTextBaseline)`.

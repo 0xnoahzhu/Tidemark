@@ -417,9 +417,12 @@ An app's Domains & IPs tab lists its domains grouped by site on the left and its
 (reached by IP alone) and a Resolved from domains group that the All / Direct / From domains switch picks from. Selecting
 a domain filters the IP pane to the IPs that domain resolved to ("IPs used by api2.cursor.sh 3 of 22"), one list
 whichever group they are in (an IP also reached by IP alone keeps its BY IP badge), so the switch gives way to "Show
-all", which deselects the domain and lists every IP again with the switch's choice. Each change of the filter takes the
-pane to its top, and a selected IP the filter leaves out is deselected, so "Show all" doesn't bring its processes back.
-The search applies to both panes as before; a domain whose IPs it all hides, or that has none on record, says so.
+all", which deselects the domain and lists every IP again with the switch's choice. "Show all" takes the switch's place:
+at the end of the title's row, or on a row of its own under the title where the pane is too narrow for the title and
+the switch on one row, so the header keeps its height and the list doesn't move (the hidden title and switch of every
+IP still size it). Each change of the filter takes the pane to its top, and a selected IP the filter leaves out is
+deselected, so "Show all" doesn't bring its processes back. The search applies to both panes as before; a domain whose
+IPs it all hides, or that has none on record, says so.
 
 Both panes list the latest activity first: sites by the last seen of their latest domain, the domains of a site and the
 IPs of each group (or of the selected domain) by their own last seen, then by name, so a domain that gets a request
