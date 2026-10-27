@@ -1294,7 +1294,7 @@ private final class SlowStopProbeActions: ProbeActions {
 
     @Test func asksAFailingDatabaseAgainOnlyOncePerInterval() async {
         struct Unreachable: Error {}
-        final class Calls { var count = 0 }
+        final class Calls { var times: [ContinuousClock.Instant] = [] }
         let cache = InventoryCache()
         cache.refreshInterval = .milliseconds(100)
         let calls = Calls()
@@ -1302,16 +1302,25 @@ private final class SlowStopProbeActions: ProbeActions {
         // The first query answers; every later one fails, as while the database reconnects.
         let task = Task {
             await cache.keepCurrent(all) { _ in
-                calls.count += 1
-                if calls.count == 1 { return list }
+                calls.times.append(.now)
+                if calls.times.count == 1 { return list }
                 throw Unreachable()
             }
         }
-        try? await Task.sleep(for: .milliseconds(650))
+        // Waits for a few failed queries rather than counting them in a fixed time, which a loaded machine
+        // could squeeze to one.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while calls.times.count < 4, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
         task.cancel()
         await task.value
-        // One query, then one per interval: never one failed query straight after another.
-        #expect((2...7).contains(calls.count), "\(calls.count) queries")
+        #expect(calls.times.count >= 4, "\(calls.times.count) queries")
+        // One query per interval: never one failed query straight after another. A slow machine only spaces
+        // them further apart.
+        for (earlier, later) in zip(calls.times, calls.times.dropFirst()) {
+            #expect(later - earlier >= .milliseconds(90), "queries \(later - earlier) apart")
+        }
         #expect(cache.snapshot(for: all)?.all.count == entries.count)
     }
 
