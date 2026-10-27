@@ -391,9 +391,17 @@ extension PostgresDatabase {
     /// matches, resolved beforehand: a bound list lets the planner combine the trigram index and the app
     /// index, where a subquery made it scan the whole range).
     static func appendFilters(_ query: RequestQuery, window: TimeWindow, searchApps: [AppID] = [], to sql: inout SQL) {
+        let conditions = filterConditions(query, window: window, searchApps: searchApps, sql: &sql)
+        if !conditions.isEmpty { sql.append(" WHERE " + conditions.joined(separator: " AND ")) }
+    }
+
+    /// The conditions `appendFilters` joins, their values bound in `sql`.
+    static func filterConditions(_ query: RequestQuery, window: TimeWindow, searchApps: [AppID] = [], sql: inout SQL) -> [String] {
         var conditions: [String] = []
         if let device = query.scope.deviceID { conditions.append("r.device_id = \(sql.bind(device))") }
         if let lower = window.lower { conditions.append("r.started_at >= \(sql.bind(lower))") }
+        // A start read back from a row, compared exactly (`bindInstant`), so that row itself is listed.
+        if let until = query.until { conditions.append("r.started_at <= \(sql.bindInstant(until))") }
         if let app = query.appID { conditions.append("r.app_id = \(sql.bind(app))") }
         if let policy = query.policy { conditions.append("r.policy = \(sql.bind(policy))") }
         switch query.status {
@@ -419,7 +427,7 @@ extension PostgresDatabase {
             if !searchApps.isEmpty { arms.append("r.app_id = ANY(\(sql.bind(searchApps))::uuid[])") }
             conditions.append("(" + arms.joined(separator: " OR ") + ")")
         }
-        if !conditions.isEmpty { sql.append(" WHERE " + conditions.joined(separator: " AND ")) }
+        return conditions
     }
 
     /// A host as `requests.host` stores it: lowercased, an IPv6 literal without brackets.
@@ -456,10 +464,28 @@ extension PostgresDatabase {
         return RequestPage(rows: records, totalCount: max(count, Int64(query.offset + records.count)), elapsed: start.duration(to: clock.now))
     }
 
+    func request(id: Int64) async throws -> RequestRecord? {
+        try await rows("SELECT \(unescaped: Self.requestSelect) FROM requests r WHERE r.id = \(id)").first.map(Self.decodeRequest)
+    }
+
+    /// Walks up from the request in History's order, `(started_at, id)`: the plain bound on `started_at` lets the index of
+    /// a host or an IP (or of the start time) begin at the request, and the limit ends the walk.
+    func newerRequestStarts(than request: RequestRecord, matching query: RequestQuery, limit: Int) async throws -> [Date] {
+        guard let rowID = request.rowID, limit > 0 else { return [] }
+        let apps = try await searchApps(for: query)
+        var sql = SQL("SELECT r.started_at FROM requests r, (SELECT started_at, id FROM requests WHERE id = ")
+        sql.append(sql.bind(rowID) + ") t")
+        let conditions = Self.filterConditions(query, window: TimeWindow(query), searchApps: apps, sql: &sql)
+            + ["r.started_at >= t.started_at", "(r.started_at, r.id) > (t.started_at, t.id)"]
+        sql.append(" WHERE " + conditions.joined(separator: " AND "))
+        sql.append(" ORDER BY r.started_at, r.id LIMIT \(sql.bind(limit))")
+        return try await rows(sql.query, statementTimeout: Self.longReadTimeout).map { try PostgresRowReader($0)("started_at", as: Date.self) }
+    }
+
     private static let exactCountCap: Int64 = 100_000
 
     private func totalCount(for query: RequestQuery, window: TimeWindow, searchApps: [AppID]) async throws -> Int64 {
-        let unfiltered = window.lower == nil && query.appID == nil && query.policy == nil && query.status == .any
+        let unfiltered = window.lower == nil && query.until == nil && query.appID == nil && query.policy == nil && query.status == .any
             && query.host == nil && query.remoteIP == nil && !query.endedWithError && query.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if unfiltered {
             switch query.scope {
@@ -498,11 +524,12 @@ extension PostgresDatabase {
         return Int64(first.plan.rows)
     }
 
-    /// `buckets` equal slices from the range's lower bound (the oldest matching request for "All time") to now.
+    /// `buckets` equal slices from the range's lower bound (the oldest matching request for "All time") to now, or to the
+    /// query's `until`.
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram {
         let now = Date.now
         var window = TimeWindow(query, now: now)
-        let end = now
+        let end = query.until.map { min($0, now) } ?? now
         guard buckets > 0 else { return Histogram(start: end, end: end, counts: []) }
         let apps = try await searchApps(for: query)
 

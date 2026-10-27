@@ -45,6 +45,9 @@ struct RequestQuery: Hashable, Sendable {
     /// Only requests whose connection ended with an error (`RequestEndReason`), whatever their `status`: Surge
     /// marks resets and broken pipes completed.
     var endedWithError = false
+    /// Only requests that started at or before this time, nil = up to now: History opened on one request deep in its
+    /// host's history starts a little above it (`RequestReveal`).
+    var until: Date? = nil
     var limit: Int = 500
     var offset: Int = 0
 }

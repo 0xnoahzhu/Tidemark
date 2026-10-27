@@ -716,6 +716,61 @@ struct DatabaseLiveTests {
         }
     }
 
+    /// An alert's request read by its row, and History opened a little above it: the starts of the newer requests that
+    /// match, nearest first, ordered as History orders them (a request that started at the same moment by its row), and a
+    /// page that ends at the last of them still lists the request.
+    @Test func oneStoredRequestAndTheRequestsAboveIt() async throws {
+        try await withTestDatabase { db in
+            let mac = Fixture.device("MacBook Pro")
+            try await db.upsertDevice(mac)
+            let app = Fixture.app("Claude", path: "/Applications/Claude.app")
+            try await db.insertApp(app)
+            // Starts with microseconds, which only an exact comparison keeps.
+            let start = Fixture.now.addingTimeInterval(-600.000_123)
+            var rows: [RequestRecord] = []
+            for index in 0..<12 {
+                var row = Fixture.request(device: mac.id, id: Int64(index), host: index.isMultiple(of: 4) ? "api.github.com" : "a.claude.ai")
+                row.startedAt = start.addingTimeInterval(Double(index) * 10)
+                row.appID = index == 7 ? nil : app.id
+                rows.append(row)
+            }
+            let ids = try await db.upsertRequests(rows)
+            var twin = Fixture.request(device: mac.id, id: 100, host: "a.claude.ai")
+            twin.startedAt = rows[1].startedAt
+            twin.appID = app.id
+            let twinID = try #require(try await db.upsertRequests([twin])[twin.key])
+
+            let rowID = try #require(ids[rows[1].key])
+            #expect(twinID > rowID)
+            let stored = try #require(try await db.request(id: rowID))
+            #expect(stored.key == rows[1].key && stored.rowID == rowID && stored.host == "a.claude.ai" && stored.appID == app.id)
+            #expect(try await db.request(id: twinID + 1_000) == nil)
+
+            // Claude's requests to a.claude.ai above row 1: its twin (a later row), then 2, 3, 5, 6, 9, 10, 11.
+            let query = RequestQuery(range: .all, appID: app.id, host: "a.claude.ai")
+            let newer = try await db.newerRequestStarts(than: stored, matching: query, limit: 4)
+            #expect(newer.count == 4)
+            #expect(newer == newer.sorted())
+            #expect(Fixture.close(newer[0], rows[1].startedAt) && Fixture.close(newer[3], rows[5].startedAt))
+            #expect(try await db.newerRequestStarts(than: stored, matching: query, limit: 50).count == 8)
+            let twinRow = try #require(try await db.request(id: twinID))
+            #expect(try await db.newerRequestStarts(than: twinRow, matching: query, limit: 50).count == 7)
+            let newestID = try #require(ids[rows[11].key])
+            let newest = try #require(try await db.request(id: newestID))
+            #expect(try await db.newerRequestStarts(than: newest, matching: query, limit: 50).isEmpty)
+
+            // History up to the fourth start lists the request below the three above it, and the twin.
+            var anchored = query
+            anchored.until = newer[3]
+            let page = try await db.queryRequests(anchored)
+            #expect(page.rows.map(\.key.surgeID) == [5, 3, 2, 100, 1])
+            #expect(page.totalCount == 5)
+            let histogram = try await db.histogram(anchored, buckets: 4)
+            #expect(histogram.counts.reduce(0, +) == 5)
+            #expect(Fixture.close(histogram.end, newer[3]))
+        }
+    }
+
     @Test func requestsWrittenByOtherMacs() async throws {
         try await withTestDatabase { db in
             let mac = Fixture.device("MacBook Pro")

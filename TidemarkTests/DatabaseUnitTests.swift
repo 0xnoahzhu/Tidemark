@@ -174,6 +174,14 @@ struct DatabaseUnitTests {
         #expect(filters(RequestQuery(range: .all, remoteIP: "api2.cursor.sh")) == "SELECT 1 FROM requests r WHERE false")
     }
 
+    /// History opened on one request ends at a start read back from a row, which must compare exactly to list that row.
+    @Test func filtersUpToAStartReadBack() {
+        var sql = PostgresDatabase.SQL("SELECT 1 FROM requests r")
+        let query = RequestQuery(range: .all, host: "a.claude.ai", until: Date(timeIntervalSince1970: 1_761_300_000.000_123))
+        PostgresDatabase.appendFilters(query, window: .init(lower: nil), to: &sql)
+        #expect(sql.text == "SELECT 1 FROM requests r WHERE r.started_at <= to_timestamp($1::float8) AND r.host = $2")
+    }
+
     @Test func poolsCarrySessionLimits() {
         let main = Dictionary(uniqueKeysWithValues: PostgresDatabase.SessionLimits.main.parameters)
         let writer = Dictionary(uniqueKeysWithValues: PostgresDatabase.SessionLimits.writer.parameters)

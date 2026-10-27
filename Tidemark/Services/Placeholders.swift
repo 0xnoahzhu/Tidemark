@@ -30,6 +30,8 @@ struct OfflineDatabase: TidemarkDatabase {
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram {
         Histogram(start: .now, end: .now, counts: Array(repeating: 0, count: buckets))
     }
+    func request(id: Int64) async throws -> RequestRecord? { throw DatabaseError.notConfigured }
+    func newerRequestStarts(than request: RequestRecord, matching query: RequestQuery, limit: Int) async throws -> [Date] { [] }
     func requestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] { [] }
     func requestWritePosition() async throws -> RequestWriteCursor { throw DatabaseError.notConfigured }
     func distinctPolicies(since: Date?) async throws -> [String] { [] }

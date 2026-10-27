@@ -667,6 +667,30 @@ struct RequestsHostHistoryTests {
         #expect(try await byIP.queryRequests(RequestQuery(range: .all, remoteIP: "104.18.19.125", endedWithError: true)).totalCount == 1)
     }
 
+    /// One request by its row, the starts of the requests History lists above it, and History up to one of them.
+    @Test func theDemoDatabaseReadsOneRequestAndTheOnesAboveIt() async throws {
+        let start = Date(timeIntervalSince1970: 1_729_750_000)
+        let rows = (1...6).map { M.record(id: Int64($0), host: $0 == 4 ? "api.github.com" : "api2.cursor.sh", startedAt: start.addingTimeInterval(Double($0))) }
+        // Started with request 2; History lists it above 2, by its row.
+        let twin = M.record(id: 7, startedAt: rows[1].startedAt)
+        let database = ShellDemoDatabase(rows: rows + [twin])
+
+        let request = try #require(try await database.request(id: 2))
+        #expect(request.key == rows[1].key)
+        #expect(try await database.request(id: 99) == nil)
+        let query = RequestQuery(range: .all, host: "api2.cursor.sh")
+        let newer = try await database.newerRequestStarts(than: request, matching: query, limit: 3)
+        #expect(newer == [rows[1].startedAt, rows[2].startedAt, rows[4].startedAt])
+        #expect(try await database.newerRequestStarts(than: request, matching: query, limit: 10).count == 4)
+
+        var anchored = query
+        anchored.until = newer.last
+        #expect(try await database.queryRequests(anchored).rows.map(\.key.surgeID) == [5, 3, 7, 2, 1])
+        let histogram = try await database.histogram(anchored, buckets: 4)
+        #expect(histogram.end == rows[4].startedAt)
+        #expect(histogram.counts.reduce(0, +) == 5)
+    }
+
     @Test func keepsResultsOnlyForTheSameHostAndEnding() async {
         let history = RequestsHistoryModel()
         var query = RequestQuery(range: .all, host: "api2.cursor.sh")

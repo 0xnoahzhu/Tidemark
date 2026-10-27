@@ -58,7 +58,7 @@ Tidemark opens a 6-connection pool for reads and a 2-connection writer pool (`Ti
 | Work | Statement | Lock | Idle in transaction |
 |---|---|---|---|
 | Reads, settings (`Tidemark`) | 30 s | 10 s | 60 s |
-| Reads over a long history: History pages, totals and histogram, the policy list, an app's counters and process tree, the backfill preview | 5 min (`SET LOCAL` in its own transaction) | 10 s | 60 s |
+| Reads over a long history: History pages, totals and histogram, the policy list, the requests above an alert's request, an app's counters and process tree, the backfill preview | 5 min (`SET LOCAL` in its own transaction) | 10 s | 60 s |
 | Maintenance: backfill, deleting an app | 10 min (`SET LOCAL`) | 10 s | 60 s |
 | Merging devices: every transaction of a merge | 10 min (`SET LOCAL`) | 1 s (`SET LOCAL`, below capture's; the transaction is tried again) | 60 s |
 | Capture writes (`Tidemark writer`) | 15 s | 5 s | 15 s |
@@ -195,6 +195,13 @@ them by host and time, always on its own Mac (`device_id`; each Mac has its own 
 `relatedRecords(of:)` also finds a request's first-contact alert (`alerts.request_id`), its site probe
 (`probe_session_id`), the current egress check of its Mac nearest its start and the latest change of the current
 egress at or before its start (`egress_checks` are kept for 30 days, `egress_changes` for good).
+
+An alert's Show Request reads the alert's request by its row (`request(id:)`, `alerts.request_id`, the primary key),
+then walks up from it in History's order, `(started_at, id)`, through the filters History opens with (its host or IP
+and its app), a couple of hundred rows at most (`newerRequestStarts`): `requests_host_started_idx` or
+`requests_remote_ip_started_idx` serves the walk from the request's start. When the walk reaches its limit, History
+opens up to the last start it read (`RequestQuery.until`, `started_at <= …` bound with `to_timestamp`, so a start read
+back compares exactly), which puts the request on History's first page, however deep in its host's history it sits.
 
 ### Processes per app
 

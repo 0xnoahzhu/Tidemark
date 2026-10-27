@@ -1259,6 +1259,8 @@ struct RequestsStubDatabase: TidemarkDatabase {
 
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage { try await self.query(query) }
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram { try await self.buckets(query, buckets) }
+    func request(id: Int64) async throws -> RequestRecord? { nil }
+    func newerRequestStarts(than request: RequestRecord, matching query: RequestQuery, limit: Int) async throws -> [Date] { [] }
 
     func connect() async throws {}
     func migrate() async throws -> Int { 0 }

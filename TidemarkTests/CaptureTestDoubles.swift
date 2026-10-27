@@ -494,6 +494,13 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     }
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage { RequestPage(rows: [], totalCount: 0, elapsed: .zero) }
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram { Histogram(start: .now, end: .now, counts: []) }
+    func request(id: Int64) async throws -> RequestRecord? {
+        try check()
+        guard let key = rowIDs.first(where: { $0.value == id })?.key, var row = rows[key] else { return nil }
+        row.rowID = id
+        return row
+    }
+    func newerRequestStarts(than request: RequestRecord, matching query: RequestQuery, limit: Int) async throws -> [Date] { [] }
     func requestsWritten(after cursor: RequestWriteCursor, excluding: DeviceID?, limit: Int) async throws -> [RequestRecord] {
         try check()
         writtenCursors.append(cursor)

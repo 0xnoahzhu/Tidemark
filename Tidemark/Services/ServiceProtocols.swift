@@ -152,6 +152,13 @@ protocol TidemarkDatabase: Sendable {
     @discardableResult func upsertRequests(_ rows: [RequestRecord]) async throws -> [RequestKey: Int64]
     func queryRequests(_ query: RequestQuery) async throws -> RequestPage
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram
+    /// The request stored in row `id` of `requests` (an alert's `requestRowID`), nil when no row has that ID any more.
+    /// One read by primary key.
+    func request(id: Int64) async throws -> RequestRecord?
+    /// When the requests matching `query` (its paging ignored) that History lists right above `request` started, nearest
+    /// first, at most `limit`. Fewer than `limit` say how far down the request sits; with `limit` of them, a page that
+    /// starts at the last (`RequestQuery.until`) shows the request below that many newer ones. `request` is a stored row.
+    func newerRequestStarts(than request: RequestRecord, matching query: RequestQuery, limit: Int) async throws -> [Date]
     /// Rows inserted or updated by devices other than `excluding` strictly after `cursor` in the server's write
     /// order `(updated_at, id)`, oldest first, at most `limit` (live view for other Macs). Page by passing the
     /// last row's position (`RequestWriteCursor(_:)`) until a page comes back shorter than `limit`; a row

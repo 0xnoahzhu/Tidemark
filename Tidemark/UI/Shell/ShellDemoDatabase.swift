@@ -41,6 +41,7 @@ struct ShellDemoDatabase: TidemarkDatabase {
         return rows.filter { r in
             guard query.scope.includes(r.deviceID) else { return false }
             if let lower, r.startedAt < lower { return false }
+            if let until = query.until, r.startedAt > until { return false }
             if let app = query.appID, r.appID != app { return false }
             if let policy = query.policy, r.finalPolicy != policy { return false }
             switch query.status {
@@ -70,15 +71,28 @@ struct ShellDemoDatabase: TidemarkDatabase {
     func histogram(_ query: RequestQuery, buckets: Int) async throws -> Histogram {
         let now = Date.now
         let all = matching(query, now: now)
-        let start = query.range.lowerBound(now: now) ?? all.last?.startedAt ?? now.addingTimeInterval(-3600)
-        let end = now
+        let end = query.until.map { min($0, now) } ?? now
+        let start = query.range.lowerBound(now: now) ?? all.last?.startedAt ?? end.addingTimeInterval(-3600)
         let width = max(end.timeIntervalSince(start), 1) / Double(max(buckets, 1))
         var counts = Array(repeating: Int64(0), count: buckets)
         for r in all {
-            let index = Int(r.startedAt.timeIntervalSince(start) / width)
-            if index >= 0, index < buckets { counts[index] += 1 }
+            // A request at the very end (`until`) counts in the last bucket, as in PostgreSQL.
+            let index = min(Int(r.startedAt.timeIntervalSince(start) / width), buckets - 1)
+            if index >= 0 { counts[index] += 1 }
         }
         return Histogram(start: start, end: end, counts: counts)
+    }
+
+    func request(id: Int64) async throws -> RequestRecord? {
+        rows.first { $0.rowID == id }
+    }
+
+    func newerRequestStarts(than request: RequestRecord, matching query: RequestQuery, limit: Int) async throws -> [Date] {
+        // `rows` is newest first by `(started_at, id)`, so the newer ones come before the request, the nearest last.
+        let newer = matching(query).prefix { row in
+            row.startedAt != request.startedAt ? row.startedAt > request.startedAt : (row.rowID ?? 0) > (request.rowID ?? 0)
+        }
+        return Array(newer.reversed().prefix(max(0, limit)).map(\.startedAt))
     }
 
     func distinctPolicies(since: Date?) async throws -> [String] {
