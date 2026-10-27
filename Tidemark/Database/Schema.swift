@@ -127,8 +127,8 @@ enum Schema {
         key: ["kind", "value", "device_id", "source_path"],
         start: ["", "", "00000000-0000-0000-0000-000000000000", ""],
         resume: """
-            SELECT kind, value, device_id::text AS device_id, source_path FROM app_host_sources WHERE backfilled
-            ORDER BY kind DESC, value DESC, device_id DESC, source_path DESC LIMIT 1
+            SELECT a.kind, a.value, a.device_id::text AS device_id, a.source_path FROM app_host_sources a WHERE a.backfilled
+            ORDER BY a.kind DESC, a.value DESC, a.device_id DESC, a.source_path DESC LIMIT 1
             """,
         batch: """
             WITH batch AS (
