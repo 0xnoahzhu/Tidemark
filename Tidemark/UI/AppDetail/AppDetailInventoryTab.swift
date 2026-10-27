@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 /// search or a NEW mark changed.
 struct AppDetailInventoryTab: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var app: MonitoredApp
     /// Whose hosts are listed: the sidebar's Mac, or every Mac when the app is not on that one.
     var scope: DeviceScope
@@ -21,8 +22,12 @@ struct AppDetailInventoryTab: View {
     var cache: AppDetailCache
 
     @State private var content = Content()
-    /// Where the IP pane is scrolled to, set only to take it to its top.
-    @State private var ipsPosition = ScrollPosition()
+    /// Where each pane is scrolled to, set only for a moment: to take a pane to the front of its list with a selected row
+    /// that moves there, or the IP pane to its top when its filter changes (`AppDetailPaneScroll`).
+    @State private var domainsPosition = ScrollPosition(idType: AppDetailInventoryRowID.self)
+    @State private var ipsPosition = ScrollPosition(idType: AppDetailInventoryRowID.self)
+    @State private var domainsScroll = AppDetailPaneScroll()
+    @State private var ipsScroll = AppDetailPaneScroll()
     @State private var exportDocument: AnalyzeCSVDocument?
     @State private var isExporting = false
     @State private var exportError: (any Error)?
@@ -224,14 +229,16 @@ struct AppDetailInventoryTab: View {
                 // always-visible scroller takes room.
                 LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                     Section {
-                        ForEach(summary.groups) { group in
-                            siteRow(group, showsFirstSeen: showsFirstSeen)
-                            ForEach(group.hosts) { host in
+                        // One row each, so a site, a domain and its processes keep their identity as they move.
+                        ForEach(summary.domainRows(opening: selected)) { row in
+                            switch row {
+                            case .site(let group):
+                                siteRow(group, showsFirstSeen: showsFirstSeen)
+                            case .domain(let host):
                                 AppDetailDomainRow(requests: requestsLink, host: host, selected: selected == host.value, showsFirstSeen: showsFirstSeen)
-                                if selected == host.value {
-                                    // The processes' tree glyphs under the domain's name.
-                                    processList(.domain, host: host.value, showsFirstSeen: showsFirstSeen, indent: 26.px)
-                                }
+                            case .processes(let domain):
+                                // The processes' tree glyphs under the domain's name.
+                                processList(.domain, host: domain, showsFirstSeen: showsFirstSeen, indent: 26.px)
                             }
                         }
                     } header: {
@@ -244,12 +251,15 @@ struct AppDetailInventoryTab: View {
                         .background(Theme.bg)
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.bottom, 10.px)
                 // A process list opens and closes at once rather than sliding the rows below it: that animation lays out
                 // every row of the pane in each of its frames, at twice the work of a frame on a page without the lists.
-                // The rows animate their own highlight.
-                .transaction { $0.animation = nil }
+                // Only a reorder moves rows, briefly (`show`). The rows animate their own highlight.
+                .transaction { if !$0.reordersAppInventory { $0.animation = nil } }
             }
+            .scrollPosition($domainsPosition)
+            .onScrollTargetVisibilityChange(idType: AppDetailInventoryRowID.self, threshold: 0.5) { domainsScroll.visible = Set($0) }
         }
     }
 
@@ -310,14 +320,6 @@ struct AppDetailInventoryTab: View {
         let nav = model.nav
         let selected = summary.selectedHost(nav.appSelectedHost)
         let selectedIP = summary.selectedIP(nav.appSelectedIP, usedBy: selected)
-        // An IP's row, and the processes that reached it under it when it is selected.
-        @ViewBuilder func ip(_ ip: AppHost) -> some View {
-            AppDetailIPRow(requests: requestsLink, ip: ip, selected: selectedIP == ip.value)
-            if selectedIP == ip.value {
-                processList(.ip, host: ip.value, showsFirstSeen: showsProcessFirstSeen, indent: 12.px)
-                    .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
-            }
-        }
         return VStack(spacing: 0) {
             ipsHeader(selected: selected)
                 .padding(.horizontal, 16.px)
@@ -326,26 +328,22 @@ struct AppDetailInventoryTab: View {
             ScrollView {
                 LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                     Section {
-                        if let selected {
-                            // Only the IPs the selected domain resolved to, whichever group they are in; an IP also
-                            // reached by IP alone has its BY IP badge.
-                            let ips = summary.ips(usedBy: selected)
-                            ForEach(ips) { ip($0) }
-                            if ips.isEmpty {
-                                ipNote(summary.hasIPs(selected) ? tr("None of its IPs match the search.", "AppDetail")
+                        // With a domain selected only the IPs it resolved to, whichever group they are in; an IP also
+                        // reached by IP alone has its BY IP badge. One row each, like the Domains pane's.
+                        ForEach(summary.ipRows(filter: nav.appIPFilter, domain: selected, opening: selectedIP)) { row in
+                            switch row {
+                            case .section(let group, let count):
+                                ipGroupHeader(group, count: count)
+                            case .nothingDirect:
+                                ipNote(tr("Nothing reached by IP alone.", "AppDetail"))
+                            case .noIPs:
+                                ipNote(selected.map(summary.hasIPs) == true ? tr("None of its IPs match the search.", "AppDetail")
                                     : tr("No IP on record for this domain.", "AppDetail"))
-                            }
-                        } else {
-                            if nav.appIPFilter != .resolved {
-                                ipGroupHeader(tr("Direct", "AppDetail"), count: summary.directIPs.count,
-                                              note: tr("reached by IP, no hostname", "AppDetail"))
-                                ForEach(summary.directIPs) { ip($0) }
-                                if summary.directIPs.isEmpty { ipNote(tr("Nothing reached by IP alone.", "AppDetail")) }
-                            }
-                            if nav.appIPFilter != .direct {
-                                ipGroupHeader(tr("Resolved from domains", "AppDetail"), count: summary.resolvedIPs.count,
-                                              note: tr("the domains on the left resolved to these", "AppDetail"))
-                                ForEach(summary.resolvedIPs) { ip($0) }
+                            case .ip(let ip):
+                                AppDetailIPRow(requests: requestsLink, ip: ip, selected: selectedIP == ip.value)
+                            case .processes(let ip):
+                                processList(.ip, host: ip, showsFirstSeen: showsProcessFirstSeen, indent: 12.px)
+                                    .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
                             }
                         }
                     } header: {
@@ -357,10 +355,12 @@ struct AppDetailInventoryTab: View {
                         .background(Theme.bg)
                     }
                 }
-                // Like the Domains pane's, without sliding rows; the rows animate their own highlight.
-                .transaction { $0.animation = nil }
+                .scrollTargetLayout()
+                // Like the Domains pane's: only a reorder moves rows; the rows animate their own highlight.
+                .transaction { if !$0.reordersAppInventory { $0.animation = nil } }
             }
             .scrollPosition($ipsPosition)
+            .onScrollTargetVisibilityChange(idType: AppDetailInventoryRowID.self, threshold: 0.5) { ipsScroll.visible = Set($0) }
         }
     }
 
@@ -416,10 +416,46 @@ struct AppDetailInventoryTab: View {
             model.nav.appSelectedIP = nil
         }
         ipsPosition.scrollTo(edge: .top)
+        letGo(ips: true)
+    }
+
+    /// Before the rows reorder to `next`: a pane whose selected row on screen moves to the front of its list goes there
+    /// first, in the layout it has, where the place is exact (`AppDetailPaneScroll`), and keeps its position through
+    /// the reorder; the other panes' positions are emptied, so SwiftUI keeps their rows on screen (or the top) where
+    /// they are.
+    private func positionPanes(for next: AppDetailInventorySummary) {
+        func position(_ target: AppDetailInventorySummary.ScrollTarget?) -> ScrollPosition {
+            var position = ScrollPosition(idType: AppDetailInventoryRowID.self)
+            switch target {
+            case .top: position.scrollTo(edge: .top)
+            case .row(let id): position.scrollTo(id: id, anchor: .top)
+            case nil: break
+            }
+            return position
+        }
+        let domain = summary.selectedHost(model.nav.appSelectedHost)
+        let ip = summary.selectedIP(model.nav.appSelectedIP, usedBy: domain)
+        let domainsTarget = domain.flatMap {
+            domainsScroll.visible.contains(.host(.domain, $0)) ? next.domainsTarget(keeping: $0, from: summary) : nil
+        }
+        let ipsTarget = ip.flatMap {
+            ipsScroll.visible.contains(.host(.ip, $0))
+                ? next.ipsTarget(keeping: $0, domain: domain, filter: model.nav.appIPFilter, from: summary) : nil
+        }
+        domainsPosition = position(domainsTarget)
+        ipsPosition = position(ipsTarget)
+        letGo(domains: domainsTarget != nil, ips: ipsTarget != nil)
+    }
+
+    /// Empties the scroll position of the panes it names once they have taken it in, unless it was set again meanwhile:
+    /// a position that kept a row or an edge would hold its pane there through later updates.
+    private func letGo(domains: Bool = false, ips: Bool = false) {
+        let domainsMove = domains ? domainsScroll.move() : nil, ipsMove = ips ? ipsScroll.move() : nil
+        guard domainsMove != nil || ipsMove != nil else { return }
         Task {
-            // Then the position lets go: one that kept its edge would take the pane back to its top on a later update.
-            try? await Task.sleep(for: .milliseconds(100))
-            ipsPosition = ScrollPosition()
+            try? await Task.sleep(for: .milliseconds(500))
+            if let domainsMove, domainsScroll.isLatest(domainsMove) { domainsPosition = ScrollPosition(idType: AppDetailInventoryRowID.self) }
+            if let ipsMove, ipsScroll.isLatest(ipsMove) { ipsPosition = ScrollPosition(idType: AppDetailInventoryRowID.self) }
         }
     }
 
@@ -433,9 +469,13 @@ struct AppDetailInventoryTab: View {
             .padding(.vertical, 10.px)
     }
 
-    private func ipGroupHeader(_ title: String, count: Int, note: String) -> some View {
+    /// The header of the Direct (`.direct`) or Resolved from domains (`.resolved`) group.
+    private func ipGroupHeader(_ group: Navigation.IPFilter, count: Int) -> some View {
+        let direct = group == .direct
+        let title = direct ? tr("Direct", "AppDetail") : tr("Resolved from domains", "AppDetail")
+        let note = direct ? tr("reached by IP, no hostname", "AppDetail") : tr("the domains on the left resolved to these", "AppDetail")
         // In a narrow pane the note shortens; the title and the count stay on one line.
-        HStack(alignment: .firstTextBaseline, spacing: 7.px) {
+        return HStack(alignment: .firstTextBaseline, spacing: 7.px) {
             Text(title).foregroundStyle(Theme.ink).fixedSize()
             Text(verbatim: String(count)).fontWeight(.medium).foregroundStyle(Theme.ink3).fixedSize()
             Text(note).fontWeight(.medium).foregroundStyle(Theme.ink3).lineLimit(1)
@@ -466,6 +506,7 @@ struct AppDetailInventoryTab: View {
             }
         }
         while !Task.isCancelled {
+            let read = Date.now
             do {
                 let fresh = try await model.database.appHosts(key.appID, scope: key.scope)
                 if Task.isCancelled { return }
@@ -475,12 +516,34 @@ struct AppDetailInventoryTab: View {
                 // Keep the last list; the sidebar footer reports database problems.
             }
             if content.key != key { content.key = key }
-            try? await Task.sleep(for: .seconds(10))
+            await waitForNextRead(after: read, of: key)
         }
     }
 
+    /// Waits 10 s, or less once the app made a request since `read` (`AppDetailInventoryActivity`): then for as long as
+    /// the batch that also moves its domain's and IP's last seen takes to be written (Settings › Database's interval, and
+    /// a second for the IP to resolve), so the site of a domain that got a request moves to the top a few seconds later.
+    /// However many requests the app makes meanwhile, one read follows.
+    private func waitForNextRead(after read: Date, of key: AppDetailCache.Key) async {
+        let live = model.live
+        let settle = Duration.seconds(model.preferences.batchInterval + 1)
+        let requested = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                try? await Task.sleep(for: .seconds(10))
+                return false
+            }
+            group.addTask { await AppDetailInventoryActivity.request(of: key, after: read, in: live) }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        if requested { try? await Task.sleep(for: settle) }
+    }
+
     /// Shows hosts just read. Nothing changes when they are the ones shown and the summary is still current (its
-    /// NEW marks expire with time); otherwise the summary is computed off the main actor.
+    /// NEW marks expire with time); otherwise the summary is computed off the main actor. Rows that move slide to their
+    /// place (at once with Reduce Motion) while the rows on screen stay where they are, and a selected row on screen that
+    /// moves to the front of its list takes its pane there (`AppDetailPaneScroll`).
     private func show(_ fresh: [AppHost], for key: AppDetailCache.Key) async {
         let same = content.key == key && fresh == content.hosts
         if same, content.summary.isCurrent(search: model.nav.appInventorySearch, at: .now) { return }
@@ -489,6 +552,13 @@ struct AppDetailInventoryTab: View {
             let summary = await AppDetailInventorySummary.make(hosts: fresh, search: search, classifier: model.classifier)
             // Typed meanwhile: summarize again for the new search.
             guard !Task.isCancelled, search == model.nav.appInventorySearch else { continue }
+            let reorders = content.key == key && !content.summary.hasSameOrder(as: summary)
+            if reorders {
+                positionPanes(for: summary)
+                // The panes take their positions in before the rows move.
+                try? await Task.sleep(for: .milliseconds(20))
+                guard !Task.isCancelled, search == model.nav.appInventorySearch else { continue }
+            }
             var next = content
             if !same || next.key != key {
                 next.hosts = fresh
@@ -496,7 +566,13 @@ struct AppDetailInventoryTab: View {
             }
             next.key = key
             next.summary = summary
-            content = next
+            if reorders {
+                var transaction = Transaction(animation: reduceMotion ? nil : .easeOut(duration: 0.2))
+                transaction.reordersAppInventory = true
+                withTransaction(transaction) { content = next }
+            } else {
+                content = next
+            }
             cache.setInventory(AppDetailCache.Inventory(hosts: fresh, summary: summary), for: key)
             return
         }
@@ -516,8 +592,11 @@ struct AppDetailInventoryTab: View {
         }
     }
 
+    /// Every host, whatever the search, in the tab's order.
     private func export() {
-        exportDocument = AnalyzeCSVDocument(text: AnalyzeCSV.appHosts(content.hosts))
+        let classifier = model.classifier
+        let hosts = AppDetailInventorySummary.ordered(content.hosts, site: { classifier.site(for: $0) })
+        exportDocument = AnalyzeCSVDocument(text: AnalyzeCSV.appHosts(hosts))
         isExporting = true
     }
 }
@@ -788,13 +867,15 @@ struct AppDetailInventorySummary: Sendable {
     var ipCount = 0
     var directIPCount = 0
     var newCount = 0
-    /// Site groups matching the search, new sites first, then by requests.
+    /// Site groups matching the search, each with its domains the search keeps, the latest activity first (`byActivity`):
+    /// a domain that gets a request takes its site back to the top.
     var groups: [SiteGroup] = []
+    /// IPs matching the search, the latest activity first.
     var directIPs: [AppHost] = []
     var resolvedIPs: [AppHost] = []
     /// The search the groups and IPs were filtered by.
     private(set) var search = ""
-    /// When the first of the hosts' NEW marks runs out; the order and `newCount` change then.
+    /// When the first of the hosts' NEW marks runs out; `newCount` and the NEW badges change then.
     private(set) var expires: Date?
     private var domainValues: Set<String> = []
     /// Every IP of the app, with the domains that resolved to it.
@@ -809,7 +890,7 @@ struct AppDetailInventorySummary: Sendable {
         self.search = search
         expires = hosts.lazy.filter { $0.isNew(now: now) }.map { $0.firstSeen.addingTimeInterval(24 * 3600) }.min()
         let domains = hosts.filter { $0.kind == .domain }
-        let ips = hosts.filter { $0.kind == .ip }
+        let ips = hosts.filter { $0.kind == .ip }.sorted(by: Self.byActivity)
         domainValues = Set(domains.map(\.value))
         ipDomains = Dictionary(ips.map { ($0.value, $0.hosts) }, uniquingKeysWith: { first, _ in first })
         domainCount = domains.count
@@ -822,33 +903,22 @@ struct AppDetailInventorySummary: Sendable {
         for domain in domains { bySite[domain.site ?? site(domain.value), default: []].append(domain) }
         siteCount = bySite.count
 
-        let order: (AppHost, AppHost) -> Bool = { a, b in
-            let newA = a.isNew(now: now), newB = b.isNew(now: now)
-            if newA != newB { return newA }
-            if a.requestCount != b.requestCount { return a.requestCount > b.requestCount }
-            return a.value < b.value
-        }
         groups = bySite.compactMap { site, members in
             let visible = query.isEmpty ? members : members.filter { $0.value.lowercased().contains(query) }
             guard !visible.isEmpty else { return nil }
-            return SiteGroup(site: site, hosts: visible.sorted(by: order),
+            return SiteGroup(site: site, hosts: visible.sorted(by: Self.byActivity),
                              firstSeen: members.map(\.firstSeen).min() ?? now,
                              lastSeen: members.map(\.lastSeen).max() ?? now,
                              requests: members.reduce(0) { $0 + $1.requestCount },
                              isNewSite: members.allSatisfy { $0.isNew(now: now) })
         }
-        .sorted { a, b in
-            if a.isNewSite != b.isNewSite { return a.isNewSite }
-            if a.requests != b.requests { return a.requests > b.requests }
-            return a.site < b.site
-        }
+        .sorted(by: Self.byActivity)
 
         let visibleIPs = ips.filter { ip in
             query.isEmpty || ip.value.lowercased().contains(query)
                 || (ip.geo?.display.lowercased().contains(query) ?? false)
                 || ip.hosts.contains { $0.lowercased().contains(query) }
         }
-        .sorted(by: order)
         directIPs = visibleIPs.filter(\.isDirect)
         resolvedIPs = visibleIPs.filter { !$0.isDirect }
         for ip in visibleIPs {
@@ -860,6 +930,31 @@ struct AppDetailInventorySummary: Sendable {
     @concurrent
     static func make(hosts: [AppHost], search: String, now: Date = .now, classifier: any SiteClassifying) async -> AppDetailInventorySummary {
         AppDetailInventorySummary(hosts: hosts, search: search, now: now, site: { classifier.site(for: $0) })
+    }
+
+    /// The latest activity first: the later last seen, then the name, so hosts seen at the same moment keep one order.
+    static func byActivity(_ a: AppHost, _ b: AppHost) -> Bool {
+        a.lastSeen != b.lastSeen ? a.lastSeen > b.lastSeen : a.value < b.value
+    }
+
+    /// The site whose latest domain was seen last first (its row's Last seen), then by name.
+    static func byActivity(_ a: SiteGroup, _ b: SiteGroup) -> Bool {
+        a.lastSeen != b.lastSeen ? a.lastSeen > b.lastSeen : a.site < b.site
+    }
+
+    /// Every host of `hosts` in the tab's order, whatever the search: the domains site by site, then the IPs reached by
+    /// IP alone, then those resolved from domains. Export CSV writes them so.
+    static func ordered(_ hosts: [AppHost], site: (String) -> String) -> [AppHost] {
+        let summary = AppDetailInventorySummary(hosts: hosts, search: "", site: site)
+        return summary.groups.flatMap(\.hosts) + summary.directIPs + summary.resolvedIPs
+    }
+
+    /// Whether `other` lists the same rows in the same order, whatever their dates and counts.
+    func hasSameOrder(as other: AppDetailInventorySummary) -> Bool {
+        groups.map(\.site) == other.groups.map(\.site)
+            && groups.flatMap(\.hosts).map(\.value) == other.groups.flatMap(\.hosts).map(\.value)
+            && directIPs.map(\.value) == other.directIPs.map(\.value)
+            && resolvedIPs.map(\.value) == other.resolvedIPs.map(\.value)
     }
 
     /// Whether this summary still describes its hosts for `search` at `now` (no NEW mark has run out since).

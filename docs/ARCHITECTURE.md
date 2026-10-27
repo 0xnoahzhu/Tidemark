@@ -420,6 +420,27 @@ all", which deselects the domain and lists every IP again with the switch's choi
 pane to its top, and a selected IP the filter leaves out is deselected, so "Show all" doesn't bring its processes back.
 The search applies to both panes as before; a domain whose IPs it all hides, or that has none on record, says so.
 
+Both panes list the latest activity first: sites by the last seen of their latest domain, the domains of a site and the
+IPs of each group (or of the selected domain) by their own last seen, then by name, so a domain that gets a request
+takes its site back to the top. NEW marks and NEW SITE badges don't order anything, and Export CSV writes every host,
+whatever the search, in this order (`AppDetailInventorySummary.ordered`). The tab reads `appHosts` (one app's rows,
+through the `(app_id, first_seen)` index, sorted in Swift) every 10 s, and sooner once the app's newest request in the
+live stream started after the last read (`AppDetailInventoryActivity`, which looks only at the stream's rows down to the
+app's newest as the engine updates it): then after the write batch interval and a second more, the time the batch that
+also advances its domain's and IP's `last_seen` takes to be written, so a site moves to the top a few seconds after its
+request, and one read follows however many requests. Every row is one element with a stable identity
+(`AppDetailInventoryRowID`: a site, a domain or IP, the processes under a selected one, a group header), so a reorder
+slides the rows that move for 0.2 s (at once with Reduce Motion; only the update marked `reordersAppInventory` keeps
+its animation, a process list still opens at once) and a selection and its process list move with their row. SwiftUI
+keeps the rows on screen where they are when rows above them change, and a pane at its top at its top. A selected row
+on screen that moves to the front of its list itself (its domain, another domain of its site, or the IP got a request)
+would leave the screen upwards, so its pane goes there just before the rows move, where the place is still exact, and
+the row slides into view (`AppDetailPaneScroll`): the Domains pane to its top, the IP pane to its top or, below the
+Direct group, to the start of the Resolved from domains group. A pane's scroll position
+is set only for such a move or for the filter's scroll to the top, and is emptied before every reorder and again half a
+second after a move: a position that kept a row or an edge, or the row SwiftUI writes into it as the user scrolls,
+would hold the pane on it through later updates.
+
 Selecting a domain or an IP in an app's Domains & IPs tab (a click on its row; a notification's View selects the new
 domain or IP) lists under it every process that reached it, like the children of the process tree (`hostProcesses`): the
 app's `app_host_sources` rows of that address, with the `host_sources` rows that name the app for what Macs with earlier

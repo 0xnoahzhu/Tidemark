@@ -55,7 +55,7 @@ import Testing
         #expect(summary.search == "git")
         #expect(summary.isCurrent(search: "git", at: now.addingTimeInterval(3599)))
         #expect(!summary.isCurrent(search: "gi", at: now))
-        // api.github.com stops being new an hour later, which reorders the site and changes the count.
+        // api.github.com stops being new an hour later, which changes the count and its badge.
         #expect(!summary.isCurrent(search: "git", at: now.addingTimeInterval(3600)))
         // Nothing new: current until the search changes.
         let old = AppDetailInventorySummary(hosts: [hosts[1]], search: "", now: now, site: { $0 })

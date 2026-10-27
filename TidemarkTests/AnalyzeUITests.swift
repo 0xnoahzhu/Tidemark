@@ -6,10 +6,10 @@ import Testing
 
 // Tests for the Analyze pages (monitored app, Domains & IPs, Site Probe, Egress IP).
 
-private func host(_ value: String, kind: HostKind = .domain, site: String? = nil, ageHours: Double = 48, requests: Int64 = 1,
-                  direct: Bool = false, hosts: [String] = [], now: Date) -> AppHost {
+private func host(_ value: String, kind: HostKind = .domain, site: String? = nil, ageHours: Double = 48, seenMinutesAgo: Double = 0,
+                  requests: Int64 = 1, direct: Bool = false, hosts: [String] = [], now: Date) -> AppHost {
     AppHost(appID: UUID(), kind: kind, value: value, site: site,
-            firstSeen: now.addingTimeInterval(-ageHours * 3600), lastSeen: now, requestCount: requests,
+            firstSeen: now.addingTimeInterval(-ageHours * 3600), lastSeen: now.addingTimeInterval(-seenMinutesAgo * 60), requestCount: requests,
             processName: nil, policy: nil, geo: nil, isDirect: direct, hosts: hosts)
 }
 
@@ -86,31 +86,194 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
 }
 
 @Suite @MainActor struct AppDetailInventorySummaryTests {
-    @Test func groupsDomainsBySiteWithNewSitesFirst() {
+    /// The site whose latest domain was seen last comes first, new or not, then each site's domains by when they were
+    /// last seen and, seen at the same moment, by name; NEW marks and counts don't order anything.
+    @Test func ordersSitesAndDomainsByTheirLatestRequest() {
         let now = Date()
         let hosts = [
-            host("api2.cursor.sh", requests: 900, now: now),
-            host("api3.cursor.sh", ageHours: 3, requests: 50, now: now),
-            host("raw.githubusercontent.com", ageHours: 1, requests: 2, now: now),
-            host("objects.githubusercontent.com", ageHours: 5, requests: 40, now: now),
+            host("api2.cursor.sh", seenMinutesAgo: 30, requests: 900, now: now),
+            host("api3.cursor.sh", ageHours: 3, seenMinutesAgo: 1, requests: 50, now: now),
+            host("repo42.cursor.sh", seenMinutesAgo: 30, requests: 2, now: now),
+            host("raw.githubusercontent.com", ageHours: 1, seenMinutesAgo: 5, requests: 2, now: now),
+            host("objects.githubusercontent.com", ageHours: 5, seenMinutesAgo: 10, requests: 40, now: now),
+            host("registry.npmjs.org", seenMinutesAgo: 1, now: now),
             host("104.18.19.125", kind: .ip, requests: 10, hosts: ["api2.cursor.sh"], now: now),
             host("149.154.175.60", kind: .ip, ageHours: 2, direct: true, now: now),
         ]
         let summary = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
-        #expect(summary.domainCount == 4)
-        #expect(summary.siteCount == 2)
+        #expect(summary.domainCount == 6)
+        #expect(summary.siteCount == 3)
         #expect(summary.ipCount == 2)
         #expect(summary.directIPCount == 1)
         #expect(summary.newCount == 4)
-        #expect(summary.groups.map(\.site) == ["githubusercontent.com", "cursor.sh"])
-        #expect(summary.groups[0].isNewSite)
-        #expect(!summary.groups[1].isNewSite)
-        // New hosts first inside a site, then by requests.
-        #expect(summary.groups[1].hosts.map(\.value) == ["api3.cursor.sh", "api2.cursor.sh"])
-        #expect(summary.groups[0].requests == 42)
+        // cursor.sh and npmjs.org were both last seen a minute ago: by name. The new site comes after them.
+        #expect(summary.groups.map(\.site) == ["cursor.sh", "npmjs.org", "githubusercontent.com"])
+        #expect(summary.groups[2].isNewSite)
+        #expect(!summary.groups[0].isNewSite)
+        #expect(summary.groups[0].lastSeen == now.addingTimeInterval(-60))
+        #expect(summary.groups[0].hosts.map(\.value) == ["api3.cursor.sh", "api2.cursor.sh", "repo42.cursor.sh"])
+        #expect(summary.groups[2].hosts.map(\.value) == ["raw.githubusercontent.com", "objects.githubusercontent.com"])
+        #expect(summary.groups[2].requests == 42)
         #expect(summary.directIPs.map(\.value) == ["149.154.175.60"])
         #expect(summary.resolvedIPs.map(\.value) == ["104.18.19.125"])
-        #expect(summary.headline.contains("4") && summary.headline.contains("1"))
+        #expect(summary.headline.contains("6") && summary.headline.contains("1"))
+    }
+
+    /// A request to a domain far down takes its site back to the top, and its IP to the top of its group.
+    @Test func aNewRequestTakesItsSiteBackToTheTop() {
+        let now = Date()
+        var hosts = [
+            host("api2.cursor.sh", seenMinutesAgo: 1, now: now),
+            host("api.github.com", seenMinutesAgo: 20, now: now),
+            host("github.com", seenMinutesAgo: 30, now: now),
+            host("api.notion.com", seenMinutesAgo: 40, now: now),
+            host("104.18.19.125", kind: .ip, seenMinutesAgo: 1, hosts: ["api2.cursor.sh"], now: now),
+            host("140.82.112.5", kind: .ip, seenMinutesAgo: 20, hosts: ["api.github.com", "github.com"], now: now),
+            host("104.18.22.110", kind: .ip, seenMinutesAgo: 40, hosts: ["api.notion.com"], now: now),
+        ]
+        let before = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(before.groups.map(\.site) == ["cursor.sh", "github.com", "notion.com"])
+        #expect(before.resolvedIPs.map(\.value) == ["104.18.19.125", "140.82.112.5", "104.18.22.110"])
+        hosts[2].lastSeen = now
+        hosts[5].lastSeen = now
+        let after = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(after.groups.map(\.site) == ["github.com", "cursor.sh", "notion.com"])
+        #expect(after.groups[0].hosts.map(\.value) == ["github.com", "api.github.com"])
+        #expect(after.resolvedIPs.map(\.value) == ["140.82.112.5", "104.18.19.125", "104.18.22.110"])
+        #expect(!after.hasSameOrder(as: before))
+        // Later requests to the hosts on top move nothing.
+        hosts[0].lastSeen = now.addingTimeInterval(-10)
+        #expect(AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite).hasSameOrder(as: after))
+        // A domain's IPs follow the same order.
+        hosts[6].hosts.append("github.com")
+        hosts[6].lastSeen = now.addingTimeInterval(-5)
+        let shared = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(shared.ips(usedBy: "github.com").map(\.value) == ["140.82.112.5", "104.18.22.110"])
+    }
+
+    /// Rows keep their identity across a reorder, so a selected domain and IP stay selected, with their processes under
+    /// them wherever they move.
+    @Test func aSelectionMovesWithItsRowAcrossAReorder() {
+        let now = Date()
+        var hosts = [
+            host("api2.cursor.sh", seenMinutesAgo: 1, now: now),
+            host("api.github.com", seenMinutesAgo: 20, now: now),
+            host("104.18.19.125", kind: .ip, seenMinutesAgo: 1, hosts: ["api2.cursor.sh"], now: now),
+            host("140.82.112.5", kind: .ip, seenMinutesAgo: 20, hosts: ["api.github.com"], now: now),
+            host("149.154.175.60", kind: .ip, seenMinutesAgo: 30, direct: true, now: now),
+        ]
+        let before = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(before.domainRows(opening: "api.github.com").map(\.id) == [
+            .site("cursor.sh"), .host(.domain, "api2.cursor.sh"),
+            .site("github.com"), .host(.domain, "api.github.com"), .processes(.domain, "api.github.com"),
+        ])
+        hosts[1].lastSeen = now
+        hosts[3].lastSeen = now
+        let after = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(after.selectedHost("api.github.com") == "api.github.com")
+        #expect(after.selectedIP("140.82.112.5") == "140.82.112.5")
+        #expect(after.domainRows(opening: "api.github.com").map(\.id) == [
+            .site("github.com"), .host(.domain, "api.github.com"), .processes(.domain, "api.github.com"),
+            .site("cursor.sh"), .host(.domain, "api2.cursor.sh"),
+        ])
+        #expect(after.ipRows(filter: .all, domain: nil, opening: "140.82.112.5").map(\.id) == [
+            .section(.direct), .host(.ip, "149.154.175.60"),
+            .section(.resolved), .host(.ip, "140.82.112.5"), .processes(.ip, "140.82.112.5"), .host(.ip, "104.18.19.125"),
+        ])
+        // Filtered to a domain: its IPs alone, no group headers; a domain without one says so.
+        #expect(after.ipRows(filter: .direct, domain: "api.github.com", opening: nil).map(\.id) == [.host(.ip, "140.82.112.5")])
+        #expect(after.ipRows(filter: .all, domain: "gone.example.com", opening: nil).map(\.id) == [.note])
+        #expect(after.ipRows(filter: .resolved, domain: nil, opening: nil).map(\.id) == [
+            .section(.resolved), .host(.ip, "140.82.112.5"), .host(.ip, "104.18.19.125"),
+        ])
+        #expect(AppDetailInventorySummary().ipRows(filter: .direct, domain: nil, opening: nil).map(\.id) == [.section(.direct), .note])
+    }
+
+    /// A selected row that moves to the front of its list takes its pane there with it, since that move takes it above
+    /// the rows on screen; any other reorder leaves the pane where SwiftUI keeps the rows on screen.
+    @Test func aSelectedRowMovingToTheFrontTakesItsPaneThere() {
+        let now = Date()
+        var hosts = [
+            host("api2.cursor.sh", seenMinutesAgo: 1, now: now),
+            host("api.github.com", seenMinutesAgo: 20, now: now),
+            host("github.com", seenMinutesAgo: 30, now: now),
+            host("api.notion.com", seenMinutesAgo: 40, now: now),
+            host("104.18.19.125", kind: .ip, seenMinutesAgo: 1, hosts: ["api2.cursor.sh"], now: now),
+            host("140.82.112.5", kind: .ip, seenMinutesAgo: 20, hosts: ["api.github.com", "github.com"], now: now),
+            host("140.82.112.6", kind: .ip, seenMinutesAgo: 25, hosts: ["github.com"], now: now),
+            host("149.154.175.60", kind: .ip, seenMinutesAgo: 30, direct: true, now: now),
+            host("91.108.56.130", kind: .ip, seenMinutesAgo: 35, direct: true, now: now),
+        ]
+        let before = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        hosts[2].lastSeen = now
+        hosts[6].lastSeen = now
+        let after = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        // github.com's site moved to the top: so does a pane showing either of its domains.
+        #expect(after.domainsTarget(keeping: "github.com", from: before) == .top)
+        #expect(after.domainsTarget(keeping: "api.github.com", from: before) == .top)
+        #expect(after.domainsTarget(keeping: "api2.cursor.sh", from: before) == nil)
+        #expect(after.domainsTarget(keeping: nil, from: before) == nil)
+        #expect(after.domainsTarget(keeping: "github.com", from: after) == nil, "already on top")
+        // The IP moved to the front of the Resolved group, below the Direct one: its last row goes to the top edge.
+        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: nil, filter: .all, from: before) == .row(.host(.ip, "91.108.56.130")))
+        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: nil, filter: .resolved, from: before) == .top)
+        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: nil, filter: .direct, from: before) == nil)
+        #expect(after.ipsTarget(keeping: "140.82.112.6", domain: "github.com", filter: .all, from: before) == .top)
+        #expect(after.ipsTarget(keeping: "140.82.112.5", domain: nil, filter: .all, from: before) == nil)
+        hosts[8].lastSeen = now
+        let direct = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(direct.ipsTarget(keeping: "91.108.56.130", domain: nil, filter: .all, from: after) == .top)
+    }
+
+    /// Export CSV writes every host, whatever the search, in the tab's order.
+    @Test func exportsInTheTabsOrder() {
+        let now = Date()
+        let hosts = [
+            host("api.notion.com", seenMinutesAgo: 40, now: now),
+            host("140.82.112.5", kind: .ip, seenMinutesAgo: 20, hosts: ["api.github.com"], now: now),
+            host("api.github.com", seenMinutesAgo: 20, now: now),
+            host("149.154.175.60", kind: .ip, seenMinutesAgo: 30, direct: true, now: now),
+            host("github.com", seenMinutesAgo: 1, now: now),
+            host("104.18.22.110", kind: .ip, seenMinutesAgo: 1, hosts: ["api.notion.com"], now: now),
+        ]
+        let ordered = AppDetailInventorySummary.ordered(hosts, site: naiveSite)
+        #expect(ordered.map(\.value) == ["github.com", "api.github.com", "api.notion.com", "149.154.175.60", "104.18.22.110", "140.82.112.5"])
+        let lines = AnalyzeCSV.appHosts(ordered, now: now).components(separatedBy: "\r\n")
+        #expect(lines.dropFirst().prefix(6).map { $0.components(separatedBy: ",")[1] } == ordered.map(\.value))
+    }
+
+    /// The tab reads its hosts again once the app's newest request in the live stream started after the last read; the
+    /// Mac scope applies.
+    @Test func followsTheAppsLatestRequestInTheLiveStream() {
+        let cursor = UIMainFixtures.cursor.id
+        let start = Date(timeIntervalSince1970: 1_729_750_000)
+        let rows = [
+            UIMainFixtures.record(id: 3, host: "api.github.com", device: UIMainFixtures.otherMac, appID: cursor, startedAt: start.addingTimeInterval(30)),
+            UIMainFixtures.record(id: 2, host: "registry.npmjs.org", startedAt: start.addingTimeInterval(20)),
+            UIMainFixtures.record(id: 1, appID: cursor, startedAt: start.addingTimeInterval(10)),
+        ]
+        #expect(AppDetailInventoryActivity.latestRequest(of: cursor, scope: .all, in: rows) == start.addingTimeInterval(30))
+        #expect(AppDetailInventoryActivity.latestRequest(of: cursor, scope: .device(UIMainFixtures.thisMac), in: rows)
+            == start.addingTimeInterval(10))
+        #expect(AppDetailInventoryActivity.latestRequest(of: UUID(), scope: .all, in: rows) == nil)
+    }
+
+    @Test func aLiveRequestOfTheAppEndsTheWait() async {
+        let live = LiveState()
+        let key = AppDetailCache.Key(appID: UIMainFixtures.cursor.id, scope: .all)
+        let read = Date.now
+        live.rows = [UIMainFixtures.record(id: 1, appID: key.appID, startedAt: read.addingTimeInterval(-5))]
+        let waiting = Task { await AppDetailInventoryActivity.request(of: key, after: read, in: live) }
+        try? await Task.sleep(for: .milliseconds(50))
+        // Another app's request, then one of the app that started before the read, change nothing.
+        live.upsert([UIMainFixtures.record(id: 2, startedAt: read.addingTimeInterval(1))])
+        try? await Task.sleep(for: .milliseconds(50))
+        live.upsert([UIMainFixtures.record(id: 3, appID: key.appID, startedAt: read.addingTimeInterval(1))])
+        #expect(await waiting.value)
+        // A cancelled wait ends without one.
+        let cancelled = Task { await AppDetailInventoryActivity.request(of: key, after: .distantFuture, in: live) }
+        cancelled.cancel()
+        #expect(await cancelled.value == false)
     }
 
     @Test func searchFiltersRowsButNotCounts() {
@@ -135,9 +298,9 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         let hosts = [
             host("api2.cursor.sh", now: now),
             host("api3.cursor.sh", now: now),
-            host("104.18.19.125", kind: .ip, requests: 10, hosts: ["api2.cursor.sh"], now: now),
-            host("104.18.18.125", kind: .ip, hosts: ["api3.cursor.sh"], now: now),
-            host("104.18.17.125", kind: .ip, requests: 4, direct: true, hosts: ["api2.cursor.sh", "api3.cursor.sh"], now: now),
+            host("104.18.19.125", kind: .ip, seenMinutesAgo: 1, hosts: ["api2.cursor.sh"], now: now),
+            host("104.18.18.125", kind: .ip, seenMinutesAgo: 10, hosts: ["api3.cursor.sh"], now: now),
+            host("104.18.17.125", kind: .ip, seenMinutesAgo: 5, direct: true, hosts: ["api2.cursor.sh", "api3.cursor.sh"], now: now),
             host("149.154.175.60", kind: .ip, direct: true, now: now),
         ]
         let summary = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
