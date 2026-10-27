@@ -949,6 +949,8 @@ struct AppDetailInventorySummary: Sendable {
     private var ipDomains: [String: [String]] = [:]
     /// The IPs matching the search under each domain that resolved to them, in their order.
     private var domainIPs: [String: [AppHost]] = [:]
+    /// The IPs matching the search, the latest activity first, whichever group they are in: the order of each domain's.
+    private var ipOrder: [String] = []
 
     /// No hosts.
     init() {}
@@ -988,6 +990,7 @@ struct AppDetailInventorySummary: Sendable {
         }
         directIPs = visibleIPs.filter(\.isDirect)
         resolvedIPs = visibleIPs.filter { !$0.isDirect }
+        ipOrder = visibleIPs.map(\.value)
         for ip in visibleIPs {
             for domain in Set(ip.hosts) { domainIPs[domain, default: []].append(ip) }
         }
@@ -1016,12 +1019,14 @@ struct AppDetailInventorySummary: Sendable {
         return summary.groups.flatMap(\.hosts) + summary.directIPs + summary.resolvedIPs
     }
 
-    /// Whether `other` lists the same rows in the same order, whatever their dates and counts.
+    /// Whether `other` lists the same rows in the same order, whatever their dates and counts: the IPs of each group,
+    /// and those of a selected domain, which can be in both groups.
     func hasSameOrder(as other: AppDetailInventorySummary) -> Bool {
         groups.map(\.site) == other.groups.map(\.site)
             && groups.flatMap(\.hosts).map(\.value) == other.groups.flatMap(\.hosts).map(\.value)
             && directIPs.map(\.value) == other.directIPs.map(\.value)
             && resolvedIPs.map(\.value) == other.resolvedIPs.map(\.value)
+            && ipOrder == other.ipOrder
     }
 
     /// Whether this summary still describes its hosts for `search` at `now` (no NEW mark has run out since).

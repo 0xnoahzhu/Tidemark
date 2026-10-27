@@ -444,7 +444,9 @@ goes to the front of its list instead, just before the rows move, where the plac
 into view: the Domains pane to its top, the IP pane to its top or, below the Direct group, to the start of the Resolved
 from domains group. A pane's scroll position is set only for a reorder, for the filter's scroll to the top or for an
 alert's View (below), and is emptied half a second later: a position that kept a row or an edge, or the row SwiftUI
-writes into it as the user scrolls, would hold the pane on it through later updates.
+writes into it as the user scrolls, would hold the pane on it through later updates. A reorder is any change of the
+order of the sites, their domains, the IPs of either group or the IPs in one list across the groups, which a selected
+domain's are (`hasSameOrder`).
 
 An alert's View (a Notifications card, an alert in the menu bar panel, or a notification's View, which takes the alert
 the notification names first) opens the app's tab with the alert's domain or IP selected

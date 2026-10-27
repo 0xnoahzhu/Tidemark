@@ -152,6 +152,27 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(shared.ips(usedBy: "github.com").map(\.value) == ["140.82.112.5", "104.18.22.110"])
     }
 
+    /// A domain's IPs can be in both groups: a request to one that changes only their order across the groups is a
+    /// reorder too, so its filtered list slides like the others.
+    @Test func aReorderOfADomainsIPsAcrossTheGroupsIsAReorder() {
+        let now = Date()
+        var hosts = [
+            host("t.me", seenMinutesAgo: 1, now: now),
+            host("149.154.175.60", kind: .ip, seenMinutesAgo: 180, direct: true, hosts: ["t.me"], now: now),
+            host("149.154.167.99", kind: .ip, seenMinutesAgo: 120, hosts: ["t.me"], now: now),
+            host("91.108.56.130", kind: .ip, seenMinutesAgo: 30, direct: true, now: now),
+        ]
+        let before = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(before.ips(usedBy: "t.me").map(\.value) == ["149.154.167.99", "149.154.175.60"])
+        // The direct IP stays behind 91.108.56.130 in its group; the resolved one is alone in its own.
+        hosts[1].lastSeen = now.addingTimeInterval(-45 * 60)
+        let after = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(after.directIPs.map(\.value) == before.directIPs.map(\.value))
+        #expect(after.resolvedIPs.map(\.value) == before.resolvedIPs.map(\.value))
+        #expect(after.ips(usedBy: "t.me").map(\.value) == ["149.154.175.60", "149.154.167.99"])
+        #expect(!after.hasSameOrder(as: before))
+    }
+
     /// Rows keep their identity across a reorder, so a selected domain and IP stay selected, with their processes under
     /// them wherever they move.
     @Test func aSelectionMovesWithItsRowAcrossAReorder() {
