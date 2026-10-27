@@ -225,6 +225,37 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(direct.ipsTarget(keeping: "91.108.56.130", domain: nil, filter: .all, from: after) == .top)
     }
 
+    /// An alert's View brings its domain's row into view in the Domains pane and its IP's in the IP pane as it lists every
+    /// IP, once the tab lists the row: not before a read has it, nor while the switch or a search typed since hides it.
+    @Test func anArrivalTargetsItsRowOnceListed() {
+        let now = Date()
+        let hosts = [
+            host("api2.cursor.sh", seenMinutesAgo: 1, now: now),
+            host("api.github.com", seenMinutesAgo: 20, now: now),
+            host("104.18.19.125", kind: .ip, seenMinutesAgo: 1, hosts: ["api2.cursor.sh"], now: now),
+            host("140.82.112.5", kind: .ip, seenMinutesAgo: 20, hosts: ["api.github.com"], now: now),
+            host("149.154.175.60", kind: .ip, seenMinutesAgo: 30, direct: true, now: now),
+        ]
+        let app = UUID()
+        func arrival(_ kind: HostKind, _ value: String) -> Navigation.HostArrival {
+            Navigation.HostArrival(appID: app, kind: kind, value: value, serial: 1)
+        }
+        let summary = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(summary.row(arriving: arrival(.domain, "api.github.com"), filter: .all) == .host(.domain, "api.github.com"))
+        #expect(summary.row(arriving: arrival(.ip, "140.82.112.5"), filter: .all) == .host(.ip, "140.82.112.5"))
+        #expect(summary.row(arriving: arrival(.ip, "149.154.175.60"), filter: .all) == .host(.ip, "149.154.175.60"))
+        #expect(summary.row(arriving: arrival(.ip, "api.github.com"), filter: .all) == nil, "a domain is no IP row")
+        // Newer than the hosts read: the tab waits for a read that has it.
+        #expect(summary.row(arriving: arrival(.domain, "claude.ai"), filter: .all) == nil)
+        #expect(AppDetailInventorySummary().row(arriving: arrival(.domain, "api.github.com"), filter: .all) == nil)
+        // The switch's other group, or a search, hides it.
+        #expect(summary.row(arriving: arrival(.ip, "140.82.112.5"), filter: .direct) == nil)
+        #expect(summary.row(arriving: arrival(.ip, "149.154.175.60"), filter: .direct) == .host(.ip, "149.154.175.60"))
+        let searched = AppDetailInventorySummary(hosts: hosts, search: "cursor", now: now, site: naiveSite)
+        #expect(searched.row(arriving: arrival(.domain, "api.github.com"), filter: .all) == nil)
+        #expect(searched.row(arriving: arrival(.domain, "api2.cursor.sh"), filter: .all) == .host(.domain, "api2.cursor.sh"))
+    }
+
     /// Export CSV writes every host, whatever the search, in the tab's order.
     @Test func exportsInTheTabsOrder() {
         let now = Date()

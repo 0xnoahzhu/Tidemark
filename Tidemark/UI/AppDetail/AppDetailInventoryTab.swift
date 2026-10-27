@@ -6,7 +6,8 @@ import UniformTypeIdentifiers
 /// listed once, with a search field and CSV export. Selecting a domain lists only the IPs it resolved to, until "Show
 /// all"; selecting a domain or an IP lists under it every process that reached it (`AppDetailHostProcessList`). A row's
 /// count and context menu open the app's requests to that host in History, filtered to the app as the count is
-/// (`AppDetailRequestsLink`).
+/// (`AppDetailRequestsLink`). An alert's View opens the tab on its domain or IP, which the tab scrolls into view once it
+/// lists it (`arrive(at:)`).
 ///
 /// The tab shows what it showed last for the app (`AppDetailCache`) right after its first frame and reads the
 /// database again in the background; the summary is computed off the main actor, and only when the hosts, the
@@ -28,6 +29,10 @@ struct AppDetailInventoryTab: View {
     @State private var ipsPosition = ScrollPosition(idType: AppDetailInventoryRowID.self)
     @State private var domainsScroll = AppDetailPaneScroll()
     @State private var ipsScroll = AppDetailPaneScroll()
+    /// The row an alert's View opened the tab on, marked for a moment once it is in view.
+    @State private var arrived: AppDetailInventoryRowID?
+    /// The serial of the latest arrival the tab took (`Navigation.HostArrival`).
+    @State private var arrivalSerial = 0
     @State private var exportDocument: AnalyzeCSVDocument?
     @State private var isExporting = false
     @State private var exportError: (any Error)?
@@ -63,6 +68,14 @@ struct AppDetailInventoryTab: View {
     static func ipColumns(factor: CGFloat) -> [AnalyzeColumnsLayout.Column] {
         func px(_ value: CGFloat) -> CGFloat { UIScale.length(value, factor: factor) }
         return [.fixed(px(150)), .flexible(weight: 1), .fixed(px(64))]
+    }
+
+    /// What a row an alert's View opened the tab on takes on under its selection's tint for a moment, so the eye finds it.
+    static let arrivalTint = Theme.accent.opacity(0.22)
+
+    /// The arrival's tint comes on quickly and fades back slowly.
+    static func arrivalAnimation(_ arrived: Bool) -> Animation {
+        arrived ? .easeIn(duration: 0.2) : .easeOut(duration: 0.8)
     }
 
     /// How the tab shares a page between its panes.
@@ -158,9 +171,25 @@ struct AppDetailInventoryTab: View {
         .onChange(of: summary.selectedHost(model.nav.appSelectedHost)) { _, domain in
             filterIPs(to: domain)
         }
+        .onChange(of: arrival, initial: true) { _, arrival in
+            if let arrival { arrive(at: arrival) }
+        }
     }
 
     private var summary: AppDetailInventorySummary { content.summary }
+
+    /// An alert's View, for the tab to take once it lists the row.
+    private struct Arrival: Equatable {
+        var serial: Int
+        var row: AppDetailInventoryRowID
+    }
+
+    /// The row the app's pending arrival brings into view, once the tab lists it (`AppDetailInventorySummary.row(arriving:)`).
+    private var arrival: Arrival? {
+        guard let arrival = model.nav.appArrival, arrival.appID == app.id,
+              let row = summary.row(arriving: arrival, filter: model.nav.appIPFilter) else { return nil }
+        return Arrival(serial: arrival.serial, row: row)
+    }
 
     // MARK: Header
 
@@ -235,7 +264,8 @@ struct AppDetailInventoryTab: View {
                             case .site(let group):
                                 siteRow(group, showsFirstSeen: showsFirstSeen)
                             case .domain(let host):
-                                AppDetailDomainRow(requests: requestsLink, host: host, selected: selected == host.value, showsFirstSeen: showsFirstSeen)
+                                AppDetailDomainRow(requests: requestsLink, host: host, selected: selected == host.value, arrived: arrived == row.id,
+                                                   showsFirstSeen: showsFirstSeen)
                             case .processes(let domain):
                                 // The processes' tree glyphs under the domain's name.
                                 processList(.domain, host: domain, showsFirstSeen: showsFirstSeen, indent: 26.px)
@@ -340,7 +370,7 @@ struct AppDetailInventoryTab: View {
                                 ipNote(selected.map(summary.hasIPs) == true ? tr("None of its IPs match the search.", "AppDetail")
                                     : tr("No IP on record for this domain.", "AppDetail"))
                             case .ip(let ip):
-                                AppDetailIPRow(requests: requestsLink, ip: ip, selected: selectedIP == ip.value)
+                                AppDetailIPRow(requests: requestsLink, ip: ip, selected: selectedIP == ip.value, arrived: arrived == row.id)
                             case .processes(let ip):
                                 processList(.ip, host: ip, showsFirstSeen: showsProcessFirstSeen, indent: 12.px)
                                     .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
@@ -445,6 +475,34 @@ struct AppDetailInventoryTab: View {
         domainsPosition = position(domainsTarget)
         ipsPosition = position(ipsTarget)
         letGo(domains: domainsTarget != nil, ips: ipsTarget != nil)
+    }
+
+    /// Takes an alert's View: scrolls its row into view in its pane, a quarter of the way down (or as far as the list
+    /// goes), then, unless Reduce Motion is on, deepens its selection's tint for a moment so the eye finds it. The pane
+    /// goes there a frame later, once the rows the selection opens (its processes, a domain's IPs) are laid out, and
+    /// again a moment later: until a lazy stack has built the rows above one far down, it places it where it estimates
+    /// them to end. The selection already opened its processes, and the IP pane filtered to a domain goes to its top.
+    private func arrive(at arrival: Arrival) {
+        model.nav.appArrival = nil
+        arrivalSerial = arrival.serial
+        let ips = if case .host(.ip, _) = arrival.row { true } else { false }
+        Task {
+            for delay in [16, 150] {
+                try? await Task.sleep(for: .milliseconds(delay))
+                // A later View takes over.
+                guard arrivalSerial == arrival.serial else { break }
+                if ips {
+                    ipsPosition.scrollTo(id: arrival.row, anchor: AppDetailPaneScroll.arrivalAnchor)
+                } else {
+                    domainsPosition.scrollTo(id: arrival.row, anchor: AppDetailPaneScroll.arrivalAnchor)
+                }
+            }
+            letGo(domains: !ips, ips: ips)
+            guard !reduceMotion, arrivalSerial == arrival.serial else { return }
+            arrived = arrival.row
+            try? await Task.sleep(for: .milliseconds(600))
+            if arrived == arrival.row { arrived = nil }
+        }
     }
 
     /// Empties the scroll position of the panes it names once they have taken it in, unless it was set again meanwhile:
@@ -607,6 +665,8 @@ private struct AppDetailDomainRow: View {
     var requests: AppDetailRequestsLink
     var host: AppHost
     var selected: Bool
+    /// An alert's View opened the tab on it a moment ago.
+    var arrived: Bool
     var showsFirstSeen: Bool
 
     var body: some View {
@@ -630,7 +690,9 @@ private struct AppDetailDomainRow: View {
         .padding(.horizontal, 16.px)
         .frame(height: 28.px)
         .background(selected ? Theme.accentTint : .clear)
+        .background(arrived ? AppDetailInventoryTab.arrivalTint : .clear)
         .animation(.easeOut(duration: 0.2), value: selected)
+        .animation(AppDetailInventoryTab.arrivalAnimation(arrived), value: arrived)
         .contentShape(Rectangle())
         .onTapGesture {
             withAnimation(.easeOut(duration: 0.2)) {
@@ -657,6 +719,8 @@ private struct AppDetailIPRow: View {
     var requests: AppDetailRequestsLink
     var ip: AppHost
     var selected: Bool
+    /// An alert's View opened the tab on it a moment ago.
+    var arrived: Bool
 
     var body: some View {
         let hosts = InventoryRequests.hosts(of: ip)
@@ -689,7 +753,9 @@ private struct AppDetailIPRow: View {
         .padding(.horizontal, 16.px)
         .padding(.vertical, 6.px)
         .background(selected ? Theme.accentTint : .clear)
+        .background(arrived ? AppDetailInventoryTab.arrivalTint : .clear)
         .animation(.easeOut(duration: 0.2), value: selected)
+        .animation(AppDetailInventoryTab.arrivalAnimation(arrived), value: arrived)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
         .contentShape(.rect)
         .onTapGesture {

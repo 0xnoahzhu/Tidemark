@@ -13,6 +13,26 @@ struct CaptureNotifierTests {
                   processName: "node", isDirect: direct, requestRowID: nil, createdAt: .now, readAt: nil)
     }
 
+    /// A notification's View selects the alert it names first among those Tidemark has read (a burst's headline), and
+    /// waits for the alerts to be read when it has none of them yet (a notification from before Tidemark launched).
+    @Test func aViewSelectsTheAlertItNamesFirst() async {
+        let alerts = AlertState()
+        let cursor = UUID()
+        alerts.items = [alert(3, app: cursor, scope: .ip, value: "18.97.36.52"), alert(1, app: cursor, scope: .host, value: "claude.ai")]
+        #expect(alerts.first(of: [1, 3])?.value == "claude.ai")
+        #expect(alerts.first(of: [9, 3, 1])?.value == "18.97.36.52", "the first one listed")
+        #expect(alerts.first(of: [9]) == nil && alerts.first(of: []) == nil)
+
+        let waiting = Task { await alerts.listed([7, 8]) }
+        try? await Task.sleep(for: .milliseconds(50))
+        alerts.items.insert(alert(8, app: cursor, scope: .site, value: "api.anthropic.com", site: "anthropic.com"), at: 0)
+        #expect(await waiting.value?.value == "api.anthropic.com")
+        // A cancelled wait ends without one.
+        let cancelled = Task { await alerts.listed([99]) }
+        cancelled.cancel()
+        #expect(await cancelled.value == nil)
+    }
+
     @Test func groupsBurstsPerAppWithinTheWindow() {
         var grouper = CaptureBurstGrouper(window: 30)
         let cursor = UUID()

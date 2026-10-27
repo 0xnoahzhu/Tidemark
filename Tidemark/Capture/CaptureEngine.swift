@@ -753,12 +753,38 @@ final class CaptureEngine {
         if model.alerts.items.count > 500 { model.alerts.items.removeLast(model.alerts.items.count - 500) }
     }
 
-    /// "View" on a notification: the app's Domains & IPs tab, alerts marked read.
+    /// "View" on a notification: the app's Domains & IPs tab on the domain or IP of the alert it names first, as a
+    /// notification card's View opens it, alerts marked read. A notification from before Tidemark launched can name
+    /// alerts it has not read yet: the tab selects that one once they are read (`selectWhenListed`).
     private func openAlerts(appID: AppID, ids: [Int64]) {
-        model.nav.open(.app(appID), tab: .inventory)
+        if let alert = model.alerts.first(of: ids) {
+            model.nav.open(appID, selecting: alert.kind, alert.value)
+        } else {
+            model.nav.open(.app(appID), tab: .inventory)
+            if !ids.isEmpty { Task { await selectWhenListed(ids, of: appID) } }
+        }
         TidemarkIntents.showMainWindow()
         guard !ids.isEmpty else { return }
         Task { await markAlertsRead(ids) }
+    }
+
+    /// Selects the domain or IP of the first of `ids` in the app's Domains & IPs tab once the alerts list has it, unless
+    /// another page, tab, domain or IP was opened meanwhile; gives up after 30 s.
+    private func selectWhenListed(_ ids: [Int64], of appID: AppID) async {
+        let alerts = model.alerts, nav = model.nav
+        let selection = [nav.appSelectedHost, nav.appSelectedIP]
+        let alert = await withTaskGroup(of: AlertItem?.self) { group in
+            group.addTask {
+                try? await Task.sleep(for: .seconds(30))
+                return nil
+            }
+            group.addTask { await alerts.listed(ids) }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+        guard let alert, nav.page == .app(appID), nav.appTab == .inventory, [nav.appSelectedHost, nav.appSelectedIP] == selection else { return }
+        nav.open(appID, selecting: alert.kind, alert.value)
     }
 
     // MARK: Periodic refreshes

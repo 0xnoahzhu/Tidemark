@@ -154,6 +154,39 @@ import Testing
         #expect(nav.appSelectedHost == "courier.push.apple.com" && nav.appSelectedIP == nil)
     }
 
+    /// An alert's View clears what could hide its row in the tab (the search, the Direct / From domains switch, another
+    /// domain's filter) and asks the tab to bring the row into view, again on every View; selecting another domain or IP,
+    /// or another app's page, ends that.
+    @Test func anAlertsViewClearsWhatWouldHideItsRow() throws {
+        let nav = Navigation()
+        let claude = UUID()
+        nav.open(.app(claude), tab: .requests)
+        nav.appInventorySearch = "anthropic"
+        nav.appIPFilter = .direct
+        nav.appSelectedHost = "api.anthropic.com"
+        nav.open(claude, selecting: .ip, "18.97.36.52")
+        #expect(nav.appTab == .inventory && nav.appInventorySearch.isEmpty && nav.appIPFilter == .all)
+        #expect(nav.appSelectedHost == nil && nav.appSelectedIP == "18.97.36.52")
+        let first = try #require(nav.appArrival)
+        #expect(first.appID == claude && first.kind == .ip && first.value == "18.97.36.52")
+
+        nav.appArrival = nil
+        nav.open(claude, selecting: .ip, "18.97.36.52")
+        #expect(nav.appArrival.map(\.serial) == first.serial + 1, "View again brings the row into view again")
+        nav.appSelectedIP = nil
+        #expect(nav.appArrival == nil)
+
+        nav.appIPFilter = .resolved
+        nav.open(claude, selecting: .domain, "claude.ai")
+        #expect(nav.appSelectedHost == "claude.ai" && nav.appSelectedIP == nil && nav.appIPFilter == .all)
+        #expect(nav.appArrival?.kind == .domain)
+        nav.appSelectedHost = "api.anthropic.com"
+        #expect(nav.appArrival == nil)
+        nav.open(claude, selecting: .domain, "claude.ai")
+        nav.page = .app(UUID())
+        #expect(nav.appArrival == nil)
+    }
+
     /// The cache keeps each address's list apart, per app and scope.
     @Test func theCacheKeepsEachAddressApart() {
         let cache = AppDetailCache(hostLimit: 2)

@@ -146,7 +146,8 @@ session):
    `*.mzstatic.com`) alert like any other. Entries stay marked NEW for 24 hours.
 4. Post a macOS notification (UserNotifications), always: there are no notification settings. It reads like
    the design's banner: "Tidemark", then "Raycast reached a new site" and "notion.com · first host
-   api.notion.com · via node", and its one action, "View", opens the app's Domains & IPs. Bursts are grouped:
+   api.notion.com · via node", and its one action, "View", opens the app's Domains & IPs on the domain or IP of the
+   alert it names first (see the app's tab below). Bursts are grouped:
    one notification per app and Mac per 30 s. Alerts written by *other* Macs are polled and posted on this Mac
    too, led by that Mac's name, unless their app is archived (pausing an app's monitoring here only stops this
    Mac's alerts).
@@ -437,9 +438,24 @@ on screen that moves to the front of its list itself (its domain, another domain
 would leave the screen upwards, so its pane goes there just before the rows move, where the place is still exact, and
 the row slides into view (`AppDetailPaneScroll`): the Domains pane to its top, the IP pane to its top or, below the
 Direct group, to the start of the Resolved from domains group. A pane's scroll position
-is set only for such a move or for the filter's scroll to the top, and is emptied before every reorder and again half a
-second after a move: a position that kept a row or an edge, or the row SwiftUI writes into it as the user scrolls,
-would hold the pane on it through later updates.
+is set only for such a move, for the filter's scroll to the top or for an alert's View (below), and is emptied before
+every reorder and again half a second after a move: a position that kept a row or an edge, or the row SwiftUI writes
+into it as the user scrolls, would hold the pane on it through later updates.
+
+An alert's View (a Notifications card, an alert in the menu bar panel, or a notification's View, which takes the alert
+the notification names first) opens the app's tab with the alert's domain or IP selected
+(`Navigation.open(_:selecting:_:)`). It clears what could hide its row: the tab's search, and the switch, set to All (a
+domain lists its own IPs whatever the switch; an IP's arrival deselects the domain). It also leaves the arrival in
+`Navigation.appArrival`, which selecting another domain or IP, or another app's page, ends. Once the tab lists the row
+(`AppDetailInventorySummary.row(arriving:filter:)`: at once, after the read the tab starts with, or after the next read
+when the alert is newer than the last), it scrolls the row's pane to put the row a quarter of the way down, or as far as
+the list goes, with its processes open under it. It does so a frame later, once the rows the selection opens are laid
+out, and again 150 ms later: until a lazy stack has built the rows above a row far down, it places that row where it
+estimates them to end. Then, unless Reduce Motion is on, the row's tint deepens for a moment and fades back to the
+selection's. A View again does all of it again. A notification from before Tidemark launched can name alerts it has not
+read yet: the tab opens with nothing new selected and selects the alert's domain or IP once the alerts are read, unless
+another page, tab or row was opened meanwhile. The sidebar's Mac still scopes the tab: while it shows one Mac, an alert
+another Mac raised for a host only that Mac has reached has no row to bring into view.
 
 Selecting a domain or an IP in an app's Domains & IPs tab (a click on its row; a notification's View selects the new
 domain or IP) lists under it every process that reached it, like the children of the process tree (`hostProcesses`): the

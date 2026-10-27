@@ -128,6 +128,19 @@ extension AppDetailInventorySummary {
         guard filter == .all else { return .top }
         return .row(directIPs.last.map { .host(.ip, $0.value) } ?? .note)
     }
+
+    /// The row the tab brings into view for an alert's View (`Navigation.HostArrival`): the domain in the Domains pane,
+    /// or the IP in the IP pane as it lists every IP, through `filter` (no domain is selected with it). Nil until the tab
+    /// lists the row: its hosts are still being read, the alert is newer than the last read, or a search typed since
+    /// hides it.
+    func row(arriving arrival: Navigation.HostArrival, filter: Navigation.IPFilter) -> AppDetailInventoryRowID? {
+        let id = AppDetailInventoryRowID.host(arrival.kind, arrival.value)
+        let listed = switch arrival.kind {
+        case .domain: groups.contains { $0.hosts.contains { $0.value == arrival.value } }
+        case .ip: ipRows(filter: filter, domain: nil, opening: nil).contains { $0.id == id }
+        }
+        return listed ? id : nil
+    }
 }
 
 /// Keeps an app's Domains & IPs pane on its selected row while the pane's rows reorder.
@@ -156,6 +169,10 @@ final class AppDetailPaneScroll {
     }
 
     func isLatest(_ move: Int) -> Bool { move == moves }
+
+    /// Where a row an alert's View opens the tab on goes in its pane: a quarter of the way down, under the pinned column
+    /// header, with room below it for its processes.
+    static let arrivalAnchor = UnitPoint(x: 0.5, y: 0.25)
 }
 
 /// Marks the update that reorders an app's Domains & IPs rows, the only one whose animation moves the panes' rows.
