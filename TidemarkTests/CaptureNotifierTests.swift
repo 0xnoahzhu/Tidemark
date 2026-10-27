@@ -95,4 +95,22 @@ struct CaptureNotifierTests {
         #expect(meter.history == [0, 0, 4, 2, 0])
         #expect(meter.rate == 1)
     }
+
+    @Test func measuresEachAppsRate() {
+        var meters = CaptureAppRateMeters(window: 2)
+        let cursor = UUID(), raycast = UUID(), docker = UUID()
+        let t0 = Date(timeIntervalSince1970: 1_792_000_000)
+        meters.record([cursor: 3], now: t0)
+        meters.record([cursor: 1, raycast: 2], now: t0.addingTimeInterval(0.5))
+        meters.record([:], now: t0.addingTimeInterval(1.2))
+        // Second t0 closed with 4 from Cursor and 2 from Raycast, averaged over the 2-second window.
+        #expect(meters.rates == [cursor: 2, raycast: 1])
+
+        meters.record([docker: 6], now: t0.addingTimeInterval(1.6))
+        #expect(meters.rates == [cursor: 2, raycast: 1], "Docker's requests count once their second has closed")
+        meters.record([:], now: t0.addingTimeInterval(2.1))
+        #expect(meters.rates == [cursor: 2, raycast: 1, docker: 3], "a new app's meter keeps the same seconds as the others")
+        meters.record([:], now: t0.addingTimeInterval(4.1))
+        #expect(meters.rates.isEmpty, "idle apps drop out")
+    }
 }

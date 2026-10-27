@@ -61,6 +61,7 @@ final class CaptureEngine {
     private var workspaceTokens: [NotificationCenter.ObservationToken] = []
 
     private var rateMeter = CaptureRateMeter()
+    private var appRateMeters = CaptureAppRateMeters()
     private var surgeStartTime: Double?
     private var lastEnvironment: SurgeEnvironment?
     private var observedScope: DeviceScope = .all
@@ -668,6 +669,12 @@ final class CaptureEngine {
         let rate = (rateMeter.rate * 10).rounded() / 10
         if live.rate != rate { live.rate = rate }
         if live.rateHistory != rateMeter.history { live.rateHistory = rateMeter.history }
+        appRateMeters.record(update.newRequestsByApp, now: now)
+        let appRates = appRateMeters.rates.compactMapValues { rate in
+            let rounded = (rate * 10).rounded() / 10
+            return rounded > 0 ? rounded : nil
+        }
+        if live.appRates != appRates { live.appRates = appRates }
 
         let day = Calendar.current.startOfDay(for: now)
         if day != todayStart {

@@ -96,6 +96,7 @@ enum ShellDemoData {
         model.live.totalRows = 1_284_093
         model.live.writtenThisSession = 44
         model.live.rate = 2.2
+        model.live.appRates = [apps[0].id: 1.1, apps[1].id: 0.6, apps[2].id: 0.2, apps[3].id: 0.3]
 
         var rows: [RequestRecord] = []
         for i in 0..<60 {

@@ -19,6 +19,8 @@ final class LiveState {
 
     /// Requests per second over the last ~10 s.
     var rate: Double = 0
+    /// `rate` of each app: the new requests from the app and the processes it launched (apps without any left out).
+    var appRates: [AppID: Double] = [:]
     /// Requests per second, one sample per second, newest last (48 samples).
     var rateHistory: [Double] = Array(repeating: 0, count: 48)
     /// Surge throughput in bytes per second.
