@@ -140,11 +140,13 @@ struct AppDetailRequestsTab: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
     }
 
-    /// Requests per second from this app over the last 10 seconds.
+    /// New requests per second from this app and the processes it launched on this Mac over the last 10 seconds, like
+    /// the sidebar's rate: other Macs' rows reach the live list seconds late, so they are left out.
     private func rate(at now: Date) -> Double {
         guard model.live.recording else { return 0 }
         let since = now.addingTimeInterval(-10)
-        let count = model.live.rows.lazy.filter { $0.appID == app.id && $0.startedAt >= since }.count
+        let thisMac = model.devices.thisDeviceID
+        let count = model.live.rows.lazy.filter { $0.appID == app.id && $0.deviceID == thisMac && $0.startedAt >= since }.count
         return Double(count) / 10
     }
 
