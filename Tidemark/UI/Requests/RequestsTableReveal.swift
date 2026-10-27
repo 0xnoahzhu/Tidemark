@@ -14,39 +14,95 @@ struct RequestsTableReveal: Equatable {
 final class RequestsTableHandle {
     weak var table: NSTableView?
 
-    /// How often the row's place is checked while the page settles.
-    static let tick: Duration = .milliseconds(50)
-    /// Checks that find the table's frame unchanged before the row lights up.
-    static let settledTicks = 4
-    /// Checks in all: the inspector the selection opens takes about half a second to settle into its column, and the
-    /// filters above the table can wrap onto another line after that.
-    static let ticks = 40
+    /// How often the page's layout is checked while it settles.
+    static let tick: Duration = .milliseconds(20)
+    /// Checks in a row, a tenth of a second, that find the table's frame and the row's place unchanged before the row is
+    /// scrolled into view, and again before it lights up: at the end of its slide the inspector holds still for a few
+    /// frames before the page takes its final layout.
+    static let settledTicks = 5
+    /// Checks in all, two and a half seconds: the inspector slides in for about half a second.
+    static let ticks = 125
 
-    /// Scrolls `row` into the middle of the table and makes the table first responder, so its selection is drawn in the
-    /// accent color and the arrow keys move on from it; the row lights up once it has settled, unless Reduce Motion is on.
+    /// The table's frame and the row's place in it, as one check finds them.
+    private struct Layout: Equatable {
+        var frame: NSRect
+        var row: NSRect
+    }
+
+    /// Set by a scroll or click of the reader's over the table, or a key pressed in it, while a row is revealed.
+    private var readerActed = false
+
+    /// Scrolls `row` into the middle of the table once the page has settled and makes the table first responder, so its
+    /// selection is drawn in the accent color and the arrow keys move on from it; the row lights up once it has been
+    /// still for a moment, unless Reduce Motion is on.
     ///
-    /// The selection has just opened the inspector, whose column resizes the table and lays the page out at no height
-    /// on the way (`RequestsTablePlaceKeeper`), and the rows that come into view take their measured height, which moves
-    /// the rows below them. So for two seconds the row is placed again whenever the table's frame or the row's place in
-    /// it has changed (or the table shows nothing). A scroll of the reader's own meanwhile stands.
+    /// The selection may just have opened the inspector, whose column slides in, resizing the table in every frame, lays
+    /// the page out at no height on the way (`RequestsTablePlaceKeeper`) and narrows the filters above the table onto a
+    /// second line at the end. So the row is scrolled once the table's frame and the row's place in it have stopped
+    /// changing, and only again should a later change of the layout take it out of the rows shown. A scroll or click of
+    /// the reader's over the table, or a key pressed in it, ends it, so their own place stands.
     func reveal(row: Int) async {
-        var placed: (frame: NSRect, row: NSRect)?
+        readerActed = false
+        let actions: NSEvent.EventTypeMask = [.scrollWheel, .leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]
+        let monitor = NSEvent.addLocalMonitorForEvents(matching: actions) { [weak self] event in
+            MainActor.assumeIsolated { self?.note(event) }
+            return event
+        }
+        defer { if let monitor { NSEvent.removeMonitor(monitor) } }
+        var last: Layout?
         var steady = 0
+        var placed = false
+        var lit = false
         for _ in 0..<Self.ticks {
             try? await Task.sleep(for: Self.tick)
-            guard !Task.isCancelled, let table, row < table.numberOfRows, let clip = table.enclosingScrollView?.contentView else { return }
-            if let window = table.window, window.firstResponder !== table, steady < Self.settledTicks { window.makeFirstResponder(table) }
-            if placed?.frame != clip.frame || placed?.row != table.rect(ofRow: row) || table.visibleRect.isEmpty {
-                Self.center(row: row, in: table)
-                placed = (clip.frame, table.rect(ofRow: row))
-                if steady < Self.settledTicks { steady = 0 }
-            } else if steady < Self.settledTicks {
-                steady += 1
-                if steady == Self.settledTicks, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                    RequestsRowFlash.flash(row: row, in: table)
-                }
+            guard !Task.isCancelled, !readerActed, let table, row < table.numberOfRows, let clip = table.enclosingScrollView?.contentView else { return }
+            if let window = table.window, window.firstResponder !== table, !lit { window.makeFirstResponder(table) }
+            let now = Layout(frame: clip.frame, row: table.rect(ofRow: row))
+            steady = table.visibleRect.isEmpty || now != last ? 0 : steady + 1
+            last = now
+            if !placed || !Self.shows(row: row, in: table) {
+                guard steady >= Self.settledTicks else { continue }
+                Self.place(row: row, in: table)
+                placed = true
+                steady = 0
+                last = Layout(frame: clip.frame, row: table.rect(ofRow: row))
+            } else if steady >= Self.settledTicks, !lit {
+                lit = true
+                if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { RequestsRowFlash.flash(row: row, in: table) }
             }
         }
+    }
+
+    /// Notes whether `event` is the reader's doing in the table: a scroll or click over it, or a key pressed while it has
+    /// the focus.
+    private func note(_ event: NSEvent) {
+        guard let table, let scroll = table.enclosingScrollView, let window = event.window, window === table.window else { return }
+        if event.type == .keyDown {
+            if window.firstResponder === table { readerActed = true }
+        } else if scroll.bounds.contains(scroll.convert(event.locationInWindow, from: nil)) {
+            readerActed = true
+        }
+    }
+
+    /// Centers `row` (`center`), then again for as long as the rows that came into view move it as they take their measured
+    /// height, all before the table is drawn: rows the table has not shown yet count at its default height until then.
+    static func place(row: Int, in table: NSTableView) {
+        for _ in 0..<4 {
+            let before = table.rect(ofRow: row)
+            center(row: row, in: table)
+            table.enclosingScrollView?.layoutSubtreeIfNeeded()
+            if table.rect(ofRow: row) == before { return }
+        }
+    }
+
+    /// Whether all of `row` is among the rows `table` shows, below its header.
+    static func shows(row: Int, in table: NSTableView) -> Bool {
+        guard let clip = table.enclosingScrollView?.contentView else { return false }
+        var shown = clip.bounds
+        shown.origin.y += clip.contentInsets.top
+        shown.size.height -= clip.contentInsets.top + clip.contentInsets.bottom
+        let rect = clip.documentView.map { table.convert(table.rect(ofRow: row), to: $0) } ?? table.rect(ofRow: row)
+        return shown.contains(rect)
     }
 
     /// Scrolls `table` so that `row` sits in the middle of the rows it shows, below the header, as near as the table's

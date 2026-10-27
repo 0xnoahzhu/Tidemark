@@ -175,12 +175,15 @@ struct RequestsRevealTests {
         }
         RequestsTableHandle.center(row: 200, in: table)
         #expect(abs(table.rect(ofRow: 200).midY - shownMiddle()) < 1)
+        #expect(RequestsTableHandle.shows(row: 200, in: table) && !RequestsTableHandle.shows(row: 0, in: table))
         RequestsTableHandle.center(row: 1, in: table)
         #expect(clip.constrainBoundsRect(clip.bounds).origin == clip.bounds.origin)
         #expect(table.visibleRect.contains(table.rect(ofRow: 1)))
         RequestsTableHandle.center(row: 399, in: table)
         #expect(table.visibleRect.contains(table.rect(ofRow: 399)))
         #expect(shownMiddle() < table.rect(ofRow: 399).minY)
+        RequestsTableHandle.place(row: 120, in: table)
+        #expect(abs(table.rect(ofRow: 120).midY - shownMiddle()) < 1)
     }
 
     /// 400 rows of nothing.

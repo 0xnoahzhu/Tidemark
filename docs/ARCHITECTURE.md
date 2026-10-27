@@ -477,9 +477,12 @@ inspector with its journey, Surge's log and the related records. While the reque
 first contact is its app's oldest request to the host, often thousands of rows down, so when more than 200 newer requests
 match, History ends at the start of the 200th (`newerRequestStarts`, an `Until` chip beside the host's, removable), which
 puts the request on the first page; it reads up to three more pages for one that requests arriving meanwhile pushed down.
-The row lights up once and fades back to the selection, not under Reduce Motion. An alert stored without its request, a
-row no longer stored, a request History does not list in those pages or one that cannot be read leaves History on the
-alert's host or IP with a note that says so.
+The table scrolls once the page's layout has stopped changing (the inspector sliding in, the filters wrapping onto a
+second line), measuring the rows that come into view before it is drawn, so the row moves once; it is placed again only
+if a later change of the layout takes it out of view, and not after the reader scrolled or clicked in the table or
+pressed a key in it (`RequestsTableHandle`). The row lights up once and fades back to the selection, not under Reduce
+Motion. An alert stored without its request, a row no longer stored, a request History does not list in those pages or
+one that cannot be read leaves History on the alert's host or IP with a note that says so.
 
 Selecting a domain or an IP in an app's Domains & IPs tab (a click on its row; a notification's View selects the new
 domain or IP) lists under it every process that reached it, like the children of the process tree (`hostProcesses`): the
