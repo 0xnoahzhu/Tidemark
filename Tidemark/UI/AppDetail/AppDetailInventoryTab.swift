@@ -3,9 +3,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// "Domains & IPs" tab of a monitored app: every domain (grouped by site) and every IP it used, each
-/// listed once, with a search field and CSV export. Selecting a domain highlights the IPs it resolved to; selecting a
-/// domain or an IP lists under it every process that reached it (`AppDetailHostProcessList`). A row's count and context
-/// menu open the app's requests to that host in History, filtered to the app as the count is (`AppDetailRequestsLink`).
+/// listed once, with a search field and CSV export. Selecting a domain lists only the IPs it resolved to, until "Show
+/// all"; selecting a domain or an IP lists under it every process that reached it (`AppDetailHostProcessList`). A row's
+/// count and context menu open the app's requests to that host in History, filtered to the app as the count is
+/// (`AppDetailRequestsLink`).
 ///
 /// The tab shows what it showed last for the app (`AppDetailCache`) right after its first frame and reads the
 /// database again in the background; the summary is computed off the main actor, and only when the hosts, the
@@ -20,6 +21,8 @@ struct AppDetailInventoryTab: View {
     var cache: AppDetailCache
 
     @State private var content = Content()
+    /// Where the IP pane is scrolled to, set only to take it to its top.
+    @State private var ipsPosition = ScrollPosition()
     @State private var exportDocument: AnalyzeCSVDocument?
     @State private var isExporting = false
     @State private var exportError: (any Error)?
@@ -146,6 +149,9 @@ struct AppDetailInventoryTab: View {
         }
         .task(id: search) {
             await follow(search)
+        }
+        .onChange(of: summary.selectedHost(model.nav.appSelectedHost)) { _, domain in
+            filterIPs(to: domain)
         }
     }
 
@@ -301,65 +307,46 @@ struct AppDetailInventoryTab: View {
     // MARK: IPs
 
     private func ipsPane(showsProcessFirstSeen: Bool) -> some View {
-        @Bindable var nav = model.nav
+        let nav = model.nav
         let selected = summary.selectedHost(nav.appSelectedHost)
-        let selectedIP = summary.selectedIP(nav.appSelectedIP)
+        let selectedIP = summary.selectedIP(nav.appSelectedIP, usedBy: selected)
         // An IP's row, and the processes that reached it under it when it is selected.
         @ViewBuilder func ip(_ ip: AppHost) -> some View {
-            ipRow(ip, selected: selected, selectedIP: selectedIP)
+            AppDetailIPRow(requests: requestsLink, ip: ip, selected: selectedIP == ip.value)
             if selectedIP == ip.value {
                 processList(.ip, host: ip.value, showsFirstSeen: showsProcessFirstSeen, indent: 12.px)
                     .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
             }
         }
-        // Like the design's "N of M", the Direct / From domains switch doesn't change the count.
-        let shown = summary.visibleIPCount(selectedHost: selected)
-        let title = HStack(alignment: .firstTextBaseline, spacing: 8.px) {
-            Text(selected.map { trf("IPs used by %@", "AppDetail", $0) } ?? tr("All IPs", "AppDetail"))
-                .font(.design(12.5, .bold))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Text(trf("%1$lld of %2$lld", "AppDetail", shown, summary.ipCount))
-                .font(.design(11.5))
-                .foregroundStyle(Theme.ink3)
-                .fixedSize()
-        }
-        // The counts are those of the list's group headers. A pane too narrow for the switch drops them, then its icons.
-        let filter = DesignSegmentedControl(tr("Show", "AppDetail"), selection: $nav.appIPFilter, segments: [
-            .init(.all, tr("All", "AppDetail"), systemImage: "list.bullet", count: summary.directIPs.count + summary.resolvedIPs.count),
-            .init(.direct, tr("Direct", "AppDetail"), systemImage: "number", count: summary.directIPs.count),
-            .init(.resolved, tr("From domains", "AppDetail"), systemImage: "globe", count: summary.resolvedIPs.count),
-        ])
         return VStack(spacing: 0) {
-            // One row when the pane is wide enough, otherwise the filter moves under the title.
-            AppDetailIPHeaderLayout {
-                title
-                filter
-                showAllButton(selected)
-            }
-            .padding(.horizontal, 16.px)
-            .padding(.top, 10.px)
-            .padding(.bottom, 6.px)
+            ipsHeader(selected: selected)
+                .padding(.horizontal, 16.px)
+                .padding(.top, 10.px)
+                .padding(.bottom, 6.px)
             ScrollView {
                 LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                     Section {
-                        if nav.appIPFilter != .resolved {
-                            ipGroupHeader(tr("Direct", "AppDetail"), count: summary.directIPs.count,
-                                          note: tr("reached by IP, no hostname", "AppDetail"))
-                            ForEach(summary.directIPs) { ip($0) }
-                            if summary.directIPs.isEmpty {
-                                Text(tr("Nothing reached by IP alone.", "AppDetail"))
-                                    .font(.design(11.5))
-                                    .foregroundStyle(Theme.ink3)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 16.px)
-                                    .padding(.vertical, 10.px)
+                        if let selected {
+                            // Only the IPs the selected domain resolved to, whichever group they are in; an IP also
+                            // reached by IP alone has its BY IP badge.
+                            let ips = summary.ips(usedBy: selected)
+                            ForEach(ips) { ip($0) }
+                            if ips.isEmpty {
+                                ipNote(summary.hasIPs(selected) ? tr("None of its IPs match the search.", "AppDetail")
+                                    : tr("No IP on record for this domain.", "AppDetail"))
                             }
-                        }
-                        if nav.appIPFilter != .direct {
-                            ipGroupHeader(tr("Resolved from domains", "AppDetail"), count: summary.resolvedIPs.count,
-                                          note: tr("the domains on the left resolved to these", "AppDetail"))
-                            ForEach(summary.resolvedIPs) { ip($0) }
+                        } else {
+                            if nav.appIPFilter != .resolved {
+                                ipGroupHeader(tr("Direct", "AppDetail"), count: summary.directIPs.count,
+                                              note: tr("reached by IP, no hostname", "AppDetail"))
+                                ForEach(summary.directIPs) { ip($0) }
+                                if summary.directIPs.isEmpty { ipNote(tr("Nothing reached by IP alone.", "AppDetail")) }
+                            }
+                            if nav.appIPFilter != .direct {
+                                ipGroupHeader(tr("Resolved from domains", "AppDetail"), count: summary.resolvedIPs.count,
+                                              note: tr("the domains on the left resolved to these", "AppDetail"))
+                                ForEach(summary.resolvedIPs) { ip($0) }
+                            }
                         }
                     } header: {
                         AnalyzeHeaderRow(columns: Self.ipColumns, height: 26.px, horizontalPadding: 16.px) {
@@ -370,27 +357,80 @@ struct AppDetailInventoryTab: View {
                         .background(Theme.bg)
                     }
                 }
-                // Like the Domains pane's, without sliding rows; the rows animate their own highlight and dimming.
+                // Like the Domains pane's, without sliding rows; the rows animate their own highlight.
                 .transaction { $0.animation = nil }
             }
+            .scrollPosition($ipsPosition)
         }
     }
 
-    private func ipRow(_ ip: AppHost, selected: String?, selectedIP: String?) -> some View {
-        let highlighted = selectedIP == ip.value || (selected.map { ip.hosts.contains($0) } ?? false)
-        return AppDetailIPRow(requests: requestsLink, ip: ip, highlighted: highlighted, dimmed: selected != nil && !highlighted)
-    }
-
+    /// The IP pane's title with how many IPs it lists, then the Direct / From domains switch; with a domain selected,
+    /// "Show all" in the switch's place, which lists every IP again. The domain's IPs are those it resolved to whichever
+    /// group they are in, so the switch keeps its choice for then.
     @ViewBuilder
-    private func showAllButton(_ selected: String?) -> some View {
-        if selected != nil {
-            Button(tr("Show all", "AppDetail")) {
-                withAnimation(.easeOut(duration: 0.2)) { model.nav.appSelectedHost = nil }
-            }
-            .buttonStyle(.link)
-            .font(.design(11.5))
-            .fixedSize()
+    private func ipsHeader(selected: String?) -> some View {
+        @Bindable var nav = model.nav
+        // Like the design's "N of M", the Direct / From domains switch doesn't change the count.
+        let title = HStack(alignment: .firstTextBaseline, spacing: 8.px) {
+            Text(selected.map { trf("IPs used by %@", "AppDetail", $0) } ?? tr("All IPs", "AppDetail"))
+                .font(.design(12.5, .bold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text(trf("%1$lld of %2$lld", "AppDetail", summary.listedIPCount(selectedHost: selected), summary.ipCount))
+                .font(.design(11.5))
+                .foregroundStyle(Theme.ink3)
+                .fixedSize()
         }
+        if selected != nil {
+            // The domain shortens in the middle before "Show all" gives way. As tall as the switch, so where the pane has
+            // room for the title and the switch on one row the list stays put.
+            HStack(alignment: .firstTextBaseline, spacing: 8.px) {
+                title
+                Spacer(minLength: 0)
+                Button(tr("Show all", "AppDetail")) {
+                    withAnimation(.easeOut(duration: 0.2)) { model.nav.appSelectedHost = nil }
+                }
+                .buttonStyle(.link)
+                .font(.design(11.5))
+                .fixedSize()
+            }
+            .frame(minHeight: DesignSegmentedControl<Navigation.IPFilter>.Size.small().height)
+        } else {
+            // One row when the pane is wide enough, otherwise the switch moves under the title. The counts are those of
+            // the list's group headers; a pane too narrow for the switch drops them, then its icons.
+            AppDetailIPHeaderLayout {
+                title
+                DesignSegmentedControl(tr("Show", "AppDetail"), selection: $nav.appIPFilter, segments: [
+                    .init(.all, tr("All", "AppDetail"), systemImage: "list.bullet", count: summary.directIPs.count + summary.resolvedIPs.count),
+                    .init(.direct, tr("Direct", "AppDetail"), systemImage: "number", count: summary.directIPs.count),
+                    .init(.resolved, tr("From domains", "AppDetail"), systemImage: "globe", count: summary.resolvedIPs.count),
+                ])
+            }
+        }
+    }
+
+    /// The IP pane lists another domain's IPs, or every IP again: it goes to its top, and a selected IP it no longer
+    /// lists is no longer selected, so "Show all" doesn't bring its processes back.
+    private func filterIPs(to domain: String?) {
+        if let domain, let ip = model.nav.appSelectedIP, summary.selectedIP(ip) != nil, summary.selectedIP(ip, usedBy: domain) == nil {
+            model.nav.appSelectedIP = nil
+        }
+        ipsPosition.scrollTo(edge: .top)
+        Task {
+            // Then the position lets go: one that kept its edge would take the pane back to its top on a later update.
+            try? await Task.sleep(for: .milliseconds(100))
+            ipsPosition = ScrollPosition()
+        }
+    }
+
+    /// A line in the IP pane where it has no IP to list.
+    private func ipNote(_ text: String) -> some View {
+        Text(text)
+            .font(.design(11.5))
+            .foregroundStyle(Theme.ink3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16.px)
+            .padding(.vertical, 10.px)
     }
 
     private func ipGroupHeader(_ title: String, count: Int, note: String) -> some View {
@@ -527,20 +567,17 @@ private struct AppDetailDomainRow: View {
     }
 }
 
-/// An IP with its network and the domains that resolved to it; dimmed when another domain is selected. A click selects
-/// it, which lists the processes that reached it under it, and another click closes them. The address is not selectable
-/// text, which would take the click on it; the context menu copies it.
+/// An IP with its network and the domains that resolved to it. A click selects it, which lists the processes that
+/// reached it under it, and another click closes them. The address is not selectable text, which would take the click
+/// on it; the context menu copies it.
 ///
-/// It takes its highlight as plain flags rather than the selection, so selecting another domain only redraws the
-/// rows whose state changes.
+/// It takes its highlight as a plain flag rather than the selection, so selecting another IP only redraws the rows
+/// whose state changes.
 private struct AppDetailIPRow: View {
     @Environment(AppModel.self) private var model
     var requests: AppDetailRequestsLink
     var ip: AppHost
-    /// It, or a domain that resolved to it, is selected.
-    var highlighted: Bool
-    /// Another domain is selected.
-    var dimmed: Bool
+    var selected: Bool
 
     var body: some View {
         let hosts = InventoryRequests.hosts(of: ip)
@@ -572,11 +609,9 @@ private struct AppDetailIPRow: View {
         .font(.design(12))
         .padding(.horizontal, 16.px)
         .padding(.vertical, 6.px)
-        .background(highlighted ? Theme.accentTint : .clear)
-        .animation(.easeOut(duration: 0.2), value: highlighted)
+        .background(selected ? Theme.accentTint : .clear)
+        .animation(.easeOut(duration: 0.2), value: selected)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 0.5) }
-        .opacity(dimmed ? 0.35 : 1)
-        .animation(.easeOut(duration: 0.2), value: dimmed)
         .contentShape(.rect)
         .onTapGesture {
             withAnimation(.easeOut(duration: 0.2)) {
@@ -597,11 +632,11 @@ private struct AppDetailIPRow: View {
     }
 }
 
-/// The IP pane's header: the title, the Direct / From domains switch and "Show all" (when a domain is selected)
-/// on one row when they all fit at their ideal widths, otherwise the switch on a row of its own under the title.
-/// It lays out what a `ViewThatFits` of those two arrangements did, with each view built and measured once.
+/// The IP pane's header while it lists every IP: the title and the Direct / From domains switch on one row when both fit
+/// at their ideal widths, otherwise the switch on a row of its own under the title. It lays out what a `ViewThatFits`
+/// of those two arrangements did, with each view built and measured once.
 ///
-/// Subviews: the title, the switch, then "Show all" if present.
+/// Subviews: the title, then the switch.
 private struct AppDetailIPHeaderLayout: Layout {
     private let spacing = 8.px
     private let rowSpacing = 6.px
@@ -635,30 +670,22 @@ private struct AppDetailIPHeaderLayout: Layout {
     private func arrange(width proposed: CGFloat?, subviews: Subviews) -> Arrangement {
         guard subviews.count >= 2 else { return Arrangement(items: [], width: proposed ?? 0, height: 0) }
         let title = subviews[0], filter = subviews[1]
-        let showAll = subviews.count > 2 ? subviews[2] : nil
         let titleWidth = title.sizeThatFits(.unspecified).width
         let filterWidth = filter.sizeThatFits(.unspecified).width
-        let showAllWidth = showAll?.sizeThatFits(.unspecified).width ?? 0
-        let trailing = showAll == nil ? 0 : spacing + showAllWidth
-        // title, a spacer of at least 8, the switch and "Show all", 8 apart.
-        let oneRow = titleWidth + spacing + spacing + spacing + filterWidth + trailing
+        // title, a spacer of at least 8 and the switch, 8 apart.
+        let oneRow = titleWidth + spacing + spacing + spacing + filterWidth
         let width = proposed ?? oneRow
 
         if oneRow <= width {
-            var cells = [Cell(subview: title, x: 0, width: titleWidth),
-                         Cell(subview: filter, x: width - trailing - filterWidth, width: filterWidth)]
-            if let showAll { cells.append(Cell(subview: showAll, x: width - showAllWidth, width: showAllWidth)) }
-            let row = Self.row(cells)
+            let row = Self.row([Cell(subview: title, x: 0, width: titleWidth),
+                                Cell(subview: filter, x: width - filterWidth, width: filterWidth)])
             return Arrangement(items: row.frames, width: width, height: row.height)
         }
-        // The title (cut if needed) and "Show all" on the first row, the switch under them.
-        var cells = [Cell(subview: title, x: 0, width: min(titleWidth, max(0, width - spacing - trailing)))]
-        if let showAll { cells.append(Cell(subview: showAll, x: width - showAllWidth, width: showAllWidth)) }
-        let first = Self.row(cells)
+        // The title (cut if needed) on the first row, the switch under it.
+        let first = Self.row([Cell(subview: title, x: 0, width: min(titleWidth, width))])
         // A pane narrower than the switch gets it without its counts (or icons).
         let filterSize = filter.sizeThatFits(ProposedViewSize(width: min(filterWidth, width), height: nil))
-        var frames = first.frames
-        frames.insert(CGRect(x: 0, y: first.height + rowSpacing, width: filterSize.width, height: filterSize.height), at: 1)
+        let frames = first.frames + [CGRect(x: 0, y: first.height + rowSpacing, width: filterSize.width, height: filterSize.height)]
         return Arrangement(items: frames, width: width, height: first.height + rowSpacing + filterSize.height)
     }
 
@@ -770,7 +797,10 @@ struct AppDetailInventorySummary: Sendable {
     /// When the first of the hosts' NEW marks runs out; the order and `newCount` change then.
     private(set) var expires: Date?
     private var domainValues: Set<String> = []
-    private var ipValues: Set<String> = []
+    /// Every IP of the app, with the domains that resolved to it.
+    private var ipDomains: [String: [String]] = [:]
+    /// The IPs matching the search under each domain that resolved to them, in their order.
+    private var domainIPs: [String: [AppHost]] = [:]
 
     /// No hosts.
     init() {}
@@ -781,7 +811,7 @@ struct AppDetailInventorySummary: Sendable {
         let domains = hosts.filter { $0.kind == .domain }
         let ips = hosts.filter { $0.kind == .ip }
         domainValues = Set(domains.map(\.value))
-        ipValues = Set(ips.map(\.value))
+        ipDomains = Dictionary(ips.map { ($0.value, $0.hosts) }, uniquingKeysWith: { first, _ in first })
         domainCount = domains.count
         ipCount = ips.count
         directIPCount = ips.filter(\.isDirect).count
@@ -821,6 +851,9 @@ struct AppDetailInventorySummary: Sendable {
         .sorted(by: order)
         directIPs = visibleIPs.filter(\.isDirect)
         resolvedIPs = visibleIPs.filter { !$0.isDirect }
+        for ip in visibleIPs {
+            for domain in Set(ip.hosts) { domainIPs[domain, default: []].append(ip) }
+        }
     }
 
     /// Summarizes `hosts` off the caller's actor.
@@ -851,16 +884,29 @@ struct AppDetailInventorySummary: Sendable {
         return host
     }
 
-    /// The selected IP, if it is still one of the app's IPs.
-    func selectedIP(_ ip: String?) -> String? {
-        guard let ip, ipValues.contains(ip) else { return nil }
-        return ip
+    /// The selected IP, if it is still one of the app's IPs and, with `domain` selected, one that domain resolved to: the
+    /// IP pane then lists only those, and a selected IP it filters out is cleared.
+    func selectedIP(_ ip: String?, usedBy domain: String? = nil) -> String? {
+        guard let ip, let domains = ipDomains[ip] else { return nil }
+        guard let domain else { return ip }
+        return domains.contains(domain) ? ip : nil
     }
 
-    /// IPs the search keeps that the host selection doesn't dim (all of them when nothing is selected).
-    func visibleIPCount(selectedHost: String?) -> Int {
-        let listed = directIPs + resolvedIPs
-        guard let selectedHost else { return listed.count }
-        return listed.filter { $0.hosts.contains(selectedHost) }.count
+    /// The IPs `domain` resolved to that the search keeps, the latest activity first: the IP pane's rows while the domain
+    /// is selected.
+    func ips(usedBy domain: String) -> [AppHost] {
+        domainIPs[domain] ?? []
+    }
+
+    /// The IPs the IP pane lists: those the search keeps, only the selected domain's when one is selected. Like the
+    /// design's "N of M", the Direct / From domains switch doesn't change it.
+    func listedIPCount(selectedHost: String?) -> Int {
+        guard let selectedHost else { return directIPs.count + resolvedIPs.count }
+        return ips(usedBy: selectedHost).count
+    }
+
+    /// Whether `domain` resolved to any of the app's IPs, whatever the search.
+    func hasIPs(_ domain: String) -> Bool {
+        ipDomains.values.contains { $0.contains(domain) }
     }
 }

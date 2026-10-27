@@ -412,6 +412,14 @@ so an IP opens `Navigation.openRequests(reaching:)` (`RequestQuery.remoteIP`, an
 is shared) while History keeps the sidebar's Mac, so with one Mac selected there the count's help says that History
 lists only that Mac's requests.
 
+An app's Domains & IPs tab lists its domains grouped by site on the left and its IPs on the right, in a Direct group
+(reached by IP alone) and a Resolved from domains group that the All / Direct / From domains switch picks from. Selecting
+a domain filters the IP pane to the IPs that domain resolved to ("IPs used by api2.cursor.sh 3 of 22"), one list
+whichever group they are in (an IP also reached by IP alone keeps its BY IP badge), so the switch gives way to "Show
+all", which deselects the domain and lists every IP again with the switch's choice. Each change of the filter takes the
+pane to its top, and a selected IP the filter leaves out is deselected, so "Show all" doesn't bring its processes back.
+The search applies to both panes as before; a domain whose IPs it all hides, or that has none on record, says so.
+
 Selecting a domain or an IP in an app's Domains & IPs tab (a click on its row; a notification's View selects the new
 domain or IP) lists under it every process that reached it, like the children of the process tree (`hostProcesses`): the
 app's `app_host_sources` rows of that address, with the `host_sources` rows that name the app for what Macs with earlier
@@ -425,7 +433,7 @@ a process's count says so in its help. A domain and an IP can be open at once. E
 it stays open, closing it cancels the read, an address opened before shows its last list (`AppDetailCache`) in the
 list's first frame, and a read that answers with that list draws nothing again. A list opens and closes at once rather
 than sliding the rows below it, which would lay out every row of the pane in each frame of the animation; the rows
-animate their own highlight and dimming. Another app's page opens with nothing selected, so its tab can show its last
+animate their own highlight. Another app's page opens with nothing selected, so its tab can show its last
 list at once. History has no filter for a process, so a process row's count is no link and its context menu opens the
 app's requests to the address. Capture counts each app's processes apart, so an executable two apps both ran to the same
 address (`/usr/bin/curl`) is listed under each, with that app's requests; Tidemark before schema v5, and a Mac still

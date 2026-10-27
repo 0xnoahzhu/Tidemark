@@ -128,18 +128,50 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         #expect(summary.resolvedIPs.count == 1)
     }
 
-    @Test func selectionHighlightsResolvedIPs() {
+    /// A selected domain filters the IP pane to the IPs it resolved to, in the pane's order and whichever group they are
+    /// in (one also reached by IP alone included); the search still applies.
+    @Test func aSelectedDomainListsOnlyItsIPs() {
+        let now = Date()
+        let hosts = [
+            host("api2.cursor.sh", now: now),
+            host("api3.cursor.sh", now: now),
+            host("104.18.19.125", kind: .ip, requests: 10, hosts: ["api2.cursor.sh"], now: now),
+            host("104.18.18.125", kind: .ip, hosts: ["api3.cursor.sh"], now: now),
+            host("104.18.17.125", kind: .ip, requests: 4, direct: true, hosts: ["api2.cursor.sh", "api3.cursor.sh"], now: now),
+            host("149.154.175.60", kind: .ip, direct: true, now: now),
+        ]
+        let summary = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
+        #expect(summary.selectedHost("api2.cursor.sh") == "api2.cursor.sh")
+        #expect(summary.selectedHost("gone.example.com") == nil)
+        #expect(summary.ips(usedBy: "api2.cursor.sh").map(\.value) == ["104.18.19.125", "104.18.17.125"])
+        #expect(summary.ips(usedBy: "api3.cursor.sh").map(\.value) == ["104.18.17.125", "104.18.18.125"])
+        #expect(summary.ips(usedBy: "gone.example.com").isEmpty)
+        #expect(summary.listedIPCount(selectedHost: "api2.cursor.sh") == 2)
+        #expect(summary.listedIPCount(selectedHost: nil) == 4)
+        #expect(summary.hasIPs("api2.cursor.sh") && !summary.hasIPs("gone.example.com"))
+
+        let searched = AppDetailInventorySummary(hosts: hosts, search: "19.125", now: now, site: naiveSite)
+        #expect(searched.ips(usedBy: "api2.cursor.sh").map(\.value) == ["104.18.19.125"])
+        #expect(searched.ips(usedBy: "api3.cursor.sh").isEmpty)
+        #expect(searched.hasIPs("api3.cursor.sh"), "the search hides its IPs; it has some")
+    }
+
+    /// A selected IP stays selected while the IP pane lists it: an IP of another domain is filtered out with a domain
+    /// selected, and so is no longer selected then.
+    @Test func aSelectedIPTheFilterHidesIsNotKept() {
         let now = Date()
         let hosts = [
             host("api2.cursor.sh", now: now),
             host("104.18.19.125", kind: .ip, hosts: ["api2.cursor.sh"], now: now),
             host("104.18.18.125", kind: .ip, hosts: ["api3.cursor.sh"], now: now),
+            host("149.154.175.60", kind: .ip, direct: true, now: now),
         ]
         let summary = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
-        #expect(summary.selectedHost("api2.cursor.sh") == "api2.cursor.sh")
-        #expect(summary.selectedHost("gone.example.com") == nil)
-        #expect(summary.visibleIPCount(selectedHost: "api2.cursor.sh") == 1)
-        #expect(summary.visibleIPCount(selectedHost: nil) == 2)
+        #expect(summary.selectedIP("104.18.18.125") == "104.18.18.125")
+        #expect(summary.selectedIP("104.18.19.125", usedBy: "api2.cursor.sh") == "104.18.19.125")
+        #expect(summary.selectedIP("104.18.18.125", usedBy: "api2.cursor.sh") == nil)
+        #expect(summary.selectedIP("149.154.175.60", usedBy: "api2.cursor.sh") == nil)
+        #expect(summary.selectedIP("10.0.0.1", usedBy: nil) == nil)
     }
 
     /// Like the design's "x of y", the count covers both groups whichever one the Direct / From domains switch
@@ -153,11 +185,11 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
             host("149.154.175.60", kind: .ip, direct: true, now: now),
         ]
         let summary = AppDetailInventorySummary(hosts: hosts, search: "", now: now, site: naiveSite)
-        #expect(summary.visibleIPCount(selectedHost: nil) == 3)
-        #expect(summary.visibleIPCount(selectedHost: "api2.cursor.sh") == 1)
+        #expect(summary.listedIPCount(selectedHost: nil) == 3)
+        #expect(summary.listedIPCount(selectedHost: "api2.cursor.sh") == 1)
         #expect(summary.ipCount == 3, "the total stays every IP")
         let searched = AppDetailInventorySummary(hosts: hosts, search: "104.18", now: now, site: naiveSite)
-        #expect(searched.visibleIPCount(selectedHost: nil) == 2)
+        #expect(searched.listedIPCount(selectedHost: nil) == 2)
         #expect(searched.ipCount == 3)
     }
 

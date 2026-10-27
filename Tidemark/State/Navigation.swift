@@ -59,7 +59,8 @@ final class Navigation {
     var appRequestsLive = true
     var appRequestSearch = ""
     var appInventorySearch = ""
-    /// Host selected in the app's domain list; highlights the IPs it resolved to and lists the processes that reached it.
+    /// Host selected in the app's domain list; the IP list then lists only the IPs it resolved to, and the processes that
+    /// reached it are listed under it.
     var appSelectedHost: String?
     /// IP selected in the app's IP list; lists the processes that reached it.
     var appSelectedIP: String?

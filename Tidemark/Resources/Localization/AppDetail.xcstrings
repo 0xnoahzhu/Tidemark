@@ -627,6 +627,17 @@
         }
       }
     },
+    "No IP on record for this domain." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个域名还没有记录到 IP。"
+          }
+        }
+      }
+    },
     "No hostname · connected by IP" : {
       "localizations" : {
         "zh-Hans" : {
@@ -674,6 +685,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有符合条件的 %@ 历史请求。"
+          }
+        }
+      }
+    },
+    "None of its IPs match the search." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的 IP 都不符合搜索。"
           }
         }
       }
