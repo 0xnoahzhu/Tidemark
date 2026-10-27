@@ -32,8 +32,15 @@ enum Fmt {
         return String(format: "%.2f GB", v / 1024 / 1024 / 1024)
     }
 
-    /// `2.3/s`
-    static func rate(_ perSecond: Double) -> String { String(format: "%.1f/s", perSecond) }
+    /// `2.3 req/s` (`2.3 个请求/秒`), in the UI language.
+    @MainActor
+    static func rate(_ perSecond: Double) -> String { trf("%@ req/s", "Common", String(format: "%.1f", perSecond)) }
+
+    /// `2.3 requests per second`: `rate` as VoiceOver reads it.
+    @MainActor
+    static func spokenRate(_ perSecond: Double) -> String {
+        trf("%@ requests per second", "Common", String(format: "%.1f", perSecond))
+    }
 
     /// `1.2 MB/s`
     static func speed(_ bytesPerSecond: Int64) -> String { bytes(bytesPerSecond) + "/s" }

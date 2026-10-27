@@ -617,6 +617,16 @@
         }
       }
     },
+    "New requests per second from %@ and the processes it launched on this Mac, averaged over the last 10 seconds. Shows 0 while recording is paused." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 Mac 上 %@ 及其启动的进程每秒的新请求数，取最近 10 秒的平均值。暂停记录时显示 0。"
+          }
+        }
+      }
+    },
     "No hostname · connected by IP" : {
       "localizations" : {
         "zh-Hans" : {

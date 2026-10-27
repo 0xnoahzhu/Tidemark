@@ -118,10 +118,17 @@ struct AppDetailRequestsTab: View {
             if model.live.recording {
                 StatusDot(color: Theme.recording, size: 8.px, pulsing: !reduceMotion && !reducedResources)
             }
+            let rateHelp = trf("New requests per second from %@ and the processes it launched on this Mac, averaged over the last 10 seconds. Shows 0 while recording is paused.",
+                               "AppDetail", app.name)
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text(Fmt.rate(rate(at: context.date)))
+                let rate = rate(at: context.date)
+                Text(Fmt.rate(rate))
                     .font(Theme.mono(12, weight: .semibold))
                     .foregroundStyle(Theme.ink)
+                    // On one line in a narrow window (`0.7 个请求/秒` would wrap): the description after it shortens.
+                    .fixedSize()
+                    .accessibilityLabel(Fmt.spokenRate(rate))
+                    .help(rateHelp)
             }
             Text(trf("from %@ and everything it launched", "AppDetail", app.name))
                 .font(.design(12))

@@ -27,7 +27,10 @@ struct MenuBarPanel: View {
             header
             HStack(spacing: 8.px) {
                 MenuBarStatTile(title: tr("Today", "MenuBar"), value: Fmt.count(model.live.todayCount))
-                MenuBarStatTile(title: tr("Right now", "MenuBar"), value: Fmt.rate(model.live.rate))
+                // 0 while paused, like the sidebar's Requests row.
+                let rate = model.live.recording ? model.live.rate : 0
+                MenuBarStatTile(title: tr("Right now", "MenuBar"), value: Fmt.rate(rate), spokenValue: Fmt.spokenRate(rate))
+                    .help(Self.rateHelp)
             }
             egressRow
             latest
@@ -57,11 +60,13 @@ struct MenuBarPanel: View {
             VStack(alignment: .leading, spacing: 1.px) {
                 Text(verbatim: "Tidemark")
                     .font(.design(13, .bold))
-                Text(statusLine)
+                Text(statusLine())
                     .font(.design(11.5))
                     .foregroundStyle(Theme.ink2)
                     .lineLimit(1)
                     .contentTransition(.numericText())
+                    .accessibilityLabel(statusLine(spoken: true))
+                    .help(statusShowsRate ? Self.rateHelp : "")
             }
             Spacer(minLength: 8.px)
             Toggle(isOn: recordingBinding) {
@@ -77,16 +82,28 @@ struct MenuBarPanel: View {
         }
     }
 
-    private var statusLine: String {
+    /// The header's state, ending with the request rate while recording (in words for VoiceOver when `spoken`).
+    private func statusLine(spoken: Bool = false) -> String {
         guard model.live.recording else { return tr("Paused", "MenuBar") }
         switch model.live.surge {
         case .connected, .paused:
-            return trf("Recording · %@", "MenuBar", Fmt.rate(model.live.rate))
+            let rate = spoken ? Fmt.spokenRate(model.live.rate) : Fmt.rate(model.live.rate)
+            return trf("Recording · %@", "MenuBar", rate)
         case .idle, .connecting:
             return tr("Connecting to Surge…", "MenuBar")
         case .failed:
             return tr("Surge is not connected", "MenuBar")
         }
+    }
+
+    /// The header's state shows the request rate (`Recording · 2.3 req/s`).
+    private var statusShowsRate: Bool {
+        model.live.recording && (model.live.surge.isHealthy || model.live.surge == .paused)
+    }
+
+    /// What the request rate measures, in the tooltips of the `Right now` tile and the header's state.
+    private static var rateHelp: String {
+        tr("New requests per second on this Mac, averaged over the last 10 seconds. Shows 0 while recording is paused.", "MenuBar")
     }
 
     /// The switch never flips by itself: it asks for confirmation in the main window.
@@ -202,10 +219,12 @@ struct MenuBarPanel: View {
     }
 }
 
-/// `Today 128,513` / `Right now 2.8/s` tile.
+/// `Today 128,513` / `Right now 2.8 req/s` tile.
 private struct MenuBarStatTile: View {
     var title: String
     var value: String
+    /// `value` as VoiceOver reads it, when it differs.
+    var spokenValue: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1.px) {
@@ -218,6 +237,7 @@ private struct MenuBarStatTile: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .contentTransition(.numericText())
+                .accessibilityLabel(spokenValue ?? value)
         }
         .padding(.horizontal, 10.px)
         .padding(.vertical, 9.px)

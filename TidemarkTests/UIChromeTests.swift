@@ -148,6 +148,20 @@ struct UIChromeTests {
         #expect(MenuBarPanel.cornerRadius == 16.px)
     }
 
+    /// The `Right now` tile shows a rate up to 99.9 req/s whole, without scaling it down, in English and in Chinese:
+    /// half of the panel less its 12 px padding and the 8 px between the tiles, less the tile's own 10 px padding.
+    @Test func rateFitsTheRightNowTile() {
+        let room = (MenuBarPanel.width - 2 * 12.px - 8.px) / 2 - 2 * 10.px
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 17.px, weight: .semibold)
+        let saved = Localizer.shared.override
+        defer { Localizer.shared.override = saved }
+        for language in ["en", "zh-Hans"] {
+            Localizer.shared.override = language
+            let width = (Fmt.rate(99.9) as NSString).size(withAttributes: [.font: font]).width
+            #expect(width <= room, "\(language): \(width) > \(room)")
+        }
+    }
+
     /// The egress IP and its policy chip stay inside the room the 320 px panel leaves next to the "Egress"
     /// label, even for a full-length IPv6 address and a long policy name: IPv4 and short IPv6 addresses share
     /// one line with the chip, a full-length IPv6 address moves the chip to a second line.
