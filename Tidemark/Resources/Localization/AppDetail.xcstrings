@@ -627,13 +627,13 @@
         }
       }
     },
-    "No process on record for it." : {
+    "No process listed: those that reached it have since done so for another app, which lists them." : {
       "extractionState" : "manual",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "没有记录到访问它的进程。"
+            "value" : "没有列出进程：访问过它的进程后来又为另一个应用访问了它，列在那个应用下。"
           }
         }
       }
@@ -1057,6 +1057,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Surge 会给出每个请求的进程和它的父进程。Tidemark 沿着这条链往上找，直到找到被监控的 App，所以下面所有进程的请求都归到 %@，已经退出的进程也算。进程 ID 会被复用，所以每个进程都和它的启动时间一起保存。"
+          }
+        }
+      }
+    },
+    "The count covers every Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此数字涵盖所有 Mac。"
           }
         }
       }

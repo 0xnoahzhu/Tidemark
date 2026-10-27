@@ -416,16 +416,17 @@ domain or IP) lists under it every process that reached it, like the children of
 app's `host_sources` rows of that address, read through the table's primary key, merged by executable path across Macs
 (their requests added up, the earliest first seen and the latest last seen, the Macs named when there are several). What
 first reached the address in the last 24 hours comes first, marked NEW, then the busiest. With one Mac in the sidebar
-the list keeps the processes that Mac reported, with every Mac's counts and dates as the address's own row has them. A
-domain and an IP can be open at once. Each list keeps its own state (`AppDetailHostProcesses`), so none ever shows
-another address's rows: it is read as the list opens and every 10 s while it stays open, closing it cancels the read, an
-address opened before shows its last list (`AppDetailCache`) in the list's first frame, and a read that answers with
-that list draws nothing again. A list opens and closes at once rather than sliding the rows below it, which would lay
-out every row of the pane in each frame of the animation; the rows animate their own highlight and dimming. Another
-app's page opens with nothing selected, so its tab can show its last list at once. History has no filter for a process,
-so a process row's count is no link and its context menu opens the app's requests to the address. `host_sources` keeps
-one row per Mac and executable whatever the app, so an executable two apps both ran to the same address
-(`/usr/bin/curl`) is listed under the app that used it last, with both apps' requests.
+the list keeps the processes that Mac reported, with every Mac's counts and dates as the address's own row has them, and
+a process's count says so in its help. A domain and an IP can be open at once. Each list keeps its own state
+(`AppDetailHostProcesses`), so none ever shows another address's rows: it is read as the list opens and every 10 s while
+it stays open, closing it cancels the read, an address opened before shows its last list (`AppDetailCache`) in the
+list's first frame, and a read that answers with that list draws nothing again. A list opens and closes at once rather
+than sliding the rows below it, which would lay out every row of the pane in each frame of the animation; the rows
+animate their own highlight and dimming. Another app's page opens with nothing selected, so its tab can show its last
+list at once. History has no filter for a process, so a process row's count is no link and its context menu opens the
+app's requests to the address. `host_sources` keeps one row per Mac and executable whatever the app, so an executable
+two apps both ran to the same address (`/usr/bin/curl`) is listed under the app that used it last, with both apps'
+requests; an address whose every process went that way says so instead of listing none.
 
 The Domains & IPs page draws its table itself, as the native inset table looks and behaves (header and separators,
 rounded alternate rows continued below the last one, each row one VoiceOver element naming its columns), in one

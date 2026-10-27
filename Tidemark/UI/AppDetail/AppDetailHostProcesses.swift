@@ -84,11 +84,14 @@ struct AppDetailHostProcessList: View {
             caption(shown)
             if let list = shown.processes {
                 if list.isEmpty {
-                    note(Text(tr("No process on record for it.", "AppDetail")))
+                    // The address is the app's, so its processes have reached it for another app since: `host_sources`
+                    // keeps a row per Mac and executable, under the app that used it last.
+                    let reason = tr("No process listed: those that reached it have since done so for another app, which lists them.", "AppDetail")
+                    note(Text(reason).lineLimit(2).help(reason))
                 }
                 ForEach(list) { process in
                     AppDetailHostProcessRow(process: process, app: app, macs: macs(of: process), showsFirstSeen: showsFirstSeen,
-                                            indent: indent, host: key.value, open: openRequests)
+                                            indent: indent, host: key.value, oneMac: key.scope.deviceID != nil, open: openRequests)
                 }
             } else if let failure = shown.failure {
                 note(HStack(spacing: 8.px) {
@@ -175,9 +178,10 @@ struct AppDetailMacBadge: Identifiable, Equatable {
 }
 
 /// One process under a selected domain or IP: its tile, name and path, when it first and last reached the address, its
-/// requests and, when it ran on several Macs, their badges. It takes plain values, so an update elsewhere on the page
-/// leaves it alone. Its context menu opens the app's requests to the address in History (History has no filter for a
-/// process) and copies the path.
+/// requests and, when it ran on several Macs, their badges. Its dates and count are every Mac's, like the address's, also
+/// when the list keeps one Mac's processes. It takes plain values, so an update elsewhere on the page leaves it alone. Its
+/// context menu opens the app's requests to the address in History (History has no filter for a process) and copies the
+/// path.
 struct AppDetailHostProcessRow: View {
     var process: HostProcess
     var app: MonitoredApp
@@ -185,6 +189,8 @@ struct AppDetailHostProcessRow: View {
     var showsFirstSeen: Bool
     var indent: CGFloat
     var host: String
+    /// The list keeps the processes of the sidebar's Mac.
+    var oneMac: Bool
     var open: (String) -> Void
 
     /// The executable's whole path, the home folder as `~`: where it lives is what tells two processes of the same name
@@ -240,6 +246,7 @@ struct AppDetailHostProcessRow: View {
                 .foregroundStyle(Theme.ink2)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+                .help(oneMac ? tr("The count covers every Mac.", "AppDetail") : "")
         }
         .font(.design(12))
         .padding(.horizontal, 16.px)
