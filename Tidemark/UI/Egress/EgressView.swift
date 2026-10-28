@@ -21,8 +21,6 @@ struct EgressView: View {
             .padding(.top, 18.px)
             .padding(.bottom, 22.px)
         }
-        // Cards scroll out under the toolbar's hard edge, as on the other pages, not visibly under the title.
-        .scrollEdgeEffectStyle(.hard, for: .top)
         .background(Theme.bg3)
         .pageToolbar(tr("Egress IP", "Egress"), subtitle: tr("What the outside world sees, for each policy", "Egress")) {
             ToolbarItem(placement: .primaryAction) {

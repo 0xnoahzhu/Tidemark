@@ -144,33 +144,39 @@ extension View {
         leading: Leading,
         items: Items
     ) -> some View {
-        navigationTitle(title)
-            .navigationSubtitle(subtitle)
-            .toolbar(removing: .title)
-            .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    let metrics = PageTitle.Metrics()
-                    HStack(spacing: 10.px) {
-                        leading
-                        // In a narrow window the title gives way before the page's items, as the system's did: the
-                        // subtitle shortens first, then the title, down to room for a page's name and the start of
-                        // its subtitle. Below that the toolbar moves items to its overflow menu.
-                        PageTitle(title: title, subtitle: subtitle, monospacedSubtitle: monospacedSubtitle, metrics: metrics)
-                            .frame(minWidth: UIScale.length(PageTitle.minimumWidth, factor: metrics.factor), alignment: .leading)
-                    }
-                    .padding(.leading, inset.px)
-                    .padding(.trailing, 2.px)
-                    .toolbarItemCompressible()
+        VStack(spacing: 0) {
+            // The design's line under the page header. Laid out above the page, it also keeps a scroll view at the top
+            // of the page from reaching under the toolbar, where its content would show through the toolbar.
+            Rectangle().fill(Theme.line).frame(height: 0.5)
+            self
+        }
+        .navigationTitle(title)
+        .navigationSubtitle(subtitle)
+        .toolbar(removing: .title)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                let metrics = PageTitle.Metrics()
+                HStack(spacing: 10.px) {
+                    leading
+                    // In a narrow window the title gives way before the page's items, as the system's did: the
+                    // subtitle shortens first, then the title, down to room for a page's name and the start of
+                    // its subtitle. Below that the toolbar moves items to its overflow menu.
+                    PageTitle(title: title, subtitle: subtitle, monospacedSubtitle: monospacedSubtitle, metrics: metrics)
+                        .frame(minWidth: UIScale.length(PageTitle.minimumWidth, factor: metrics.factor), alignment: .leading)
                 }
-                // Text on the toolbar itself, as the system's title, rather than in a glass bubble.
-                .sharedBackgroundVisibility(.hidden)
-
-                // What the system's title took: the room between the title and the page's items. It has to be in the
-                // same toolbar as the items; on its own the items would follow the title.
-                ToolbarSpacer(.flexible)
-
-                items
+                .padding(.leading, inset.px)
+                .padding(.trailing, 2.px)
+                .toolbarItemCompressible()
             }
+            // Text on the toolbar itself, as the system's title, rather than in a glass bubble.
+            .sharedBackgroundVisibility(.hidden)
+
+            // What the system's title took: the room between the title and the page's items. It has to be in the
+            // same toolbar as the items; on its own the items would follow the title.
+            ToolbarSpacer(.flexible)
+
+            items
+        }
     }
 }
 
