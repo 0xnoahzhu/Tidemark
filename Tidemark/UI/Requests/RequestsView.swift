@@ -24,6 +24,9 @@ struct RequestsView: View {
         // minimum once the inspector opens, and AppKit then aborts after resizing the columns back and forth. The
         // content asks for none; the table scrolls horizontally instead.
         .frame(minWidth: 0, maxWidth: .infinity)
+        // Inside the inspector's split view rather than above it, where the split view would blur the top of both
+        // columns under its own band.
+        .pageTopLine()
         .inspector(isPresented: Binding(
             get: { nav.selectedRequest != nil },
             set: { if !$0 { nav.selectedRequest = nil } }
@@ -34,9 +37,10 @@ struct RequestsView: View {
             RequestsInspectorFill {
                 RequestsInspectorHost()
             }
+            .pageTopLine()
             .inspectorColumnWidth(min: 280.px, ideal: 316.px, max: 440.px)
         }
-        .pageToolbar(tr("Requests", "Requests"), subtitle: tr("Every request Surge sees, kept in PostgreSQL", "Requests")) {
+        .pageToolbar(tr("Requests", "Requests"), subtitle: tr("Every request Surge sees, kept in PostgreSQL", "Requests"), topLine: false) {
             RequestsToolbar(model: model)
         }
         .onChange(of: nav.requestsLive) {

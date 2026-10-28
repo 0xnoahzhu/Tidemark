@@ -114,14 +114,18 @@ extension View {
     /// The page's toolbar: its title and subtitle at the leading end, drawn by the page at the design's size in
     /// place of the system's title, and `items` at the trailing end. The window keeps the title and subtitle as its
     /// own, which the Window menu, Mission Control and VoiceOver read.
+    ///
+    /// The page is laid out below `pageTopLine()`, unless `topLine` is false for a page that draws the line itself.
     func pageToolbar<Items: ToolbarContent>(
         _ title: String,
         subtitle: String,
         monospacedSubtitle: Bool = false,
+        topLine: Bool = true,
         @ToolbarContentBuilder items: () -> Items
     ) -> some View {
         // Where the system drew its title.
-        pageToolbar(title, subtitle: subtitle, monospacedSubtitle: monospacedSubtitle, inset: 11.5, leading: EmptyView(), items: items())
+        pageToolbar(title, subtitle: subtitle, monospacedSubtitle: monospacedSubtitle, inset: 11.5, topLine: topLine, leading: EmptyView(),
+                    items: items())
     }
 
     /// `pageToolbar(_:subtitle:items:)` with `leading` (an app's tile) before the title.
@@ -132,7 +136,16 @@ extension View {
         @ViewBuilder leading: () -> Leading,
         @ToolbarContentBuilder items: () -> Items
     ) -> some View {
-        pageToolbar(title, subtitle: subtitle, monospacedSubtitle: monospacedSubtitle, inset: 2, leading: leading(), items: items())
+        pageToolbar(title, subtitle: subtitle, monospacedSubtitle: monospacedSubtitle, inset: 2, topLine: true, leading: leading(), items: items())
+    }
+
+    /// The design's line under the page header, above the view. Laid out above a scroll view at the top of a page, it
+    /// also keeps the scroll view from reaching under the toolbar, where its content would show through the toolbar.
+    func pageTopLine() -> some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Theme.line).frame(height: 0.5)
+            self
+        }
     }
 
     /// The page toolbar with the title block `inset` px from the toolbar's leading items.
@@ -141,14 +154,12 @@ extension View {
         subtitle: String,
         monospacedSubtitle: Bool,
         inset: CGFloat,
+        topLine: Bool,
         leading: Leading,
         items: Items
     ) -> some View {
-        VStack(spacing: 0) {
-            // The design's line under the page header. Laid out above the page, it also keeps a scroll view at the top
-            // of the page from reaching under the toolbar, where its content would show through the toolbar.
-            Rectangle().fill(Theme.line).frame(height: 0.5)
-            self
+        Group {
+            if topLine { pageTopLine() } else { self }
         }
         .navigationTitle(title)
         .navigationSubtitle(subtitle)
