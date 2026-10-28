@@ -180,6 +180,8 @@ private struct InventoryList: View {
 
     @State private var position = ScrollPosition(edge: .top)
     @State private var scrolled = InventoryScrollGeometry()
+    /// How far the list is pulled down past its top (`pinnedHeaderScrollView`).
+    @State private var pull: CGFloat = 0
     /// The columns' widths once they differ from those a new table gives them at the list's width (after the window
     /// was resized or a divider dragged, or in a window too narrow for every column); nil until then.
     @State private var widths: InventoryColumnWidths?
@@ -210,6 +212,7 @@ private struct InventoryList: View {
                             (tr("Seen by", "Inventory"), .leading),
                             (tr("Requests", "Inventory"), .trailing),
                         ], resize: resize)
+                        .pinnedHeaderHoldsTop(pull)
                     }
                 } else {
                     Section {
@@ -226,6 +229,7 @@ private struct InventoryList: View {
                             (tr("Last seen", "Inventory"), .leading),
                             (tr("Requests", "Inventory"), .trailing),
                         ], resize: resize)
+                        .pinnedHeaderHoldsTop(pull)
                     }
                 }
             }
@@ -233,7 +237,7 @@ private struct InventoryList: View {
             .containerRelativeFrame(.horizontal) { visible, _ in max(visible - scrollerWidth, tableWidth) }
         }
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-        .scrollIndicatorsBelowHeader(InventoryTableMetrics.headerHeight)
+        .pinnedHeaderScrollView(height: InventoryTableMetrics.headerHeight, pull: $pull)
         .scrollPosition($position)
         .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { _, geometry in
             scrolled.geometry = geometry

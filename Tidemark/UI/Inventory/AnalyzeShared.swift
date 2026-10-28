@@ -132,10 +132,21 @@ struct AnalyzeHeaderRow<Content: View>: View {
 }
 
 extension View {
-    /// Starts a scroll view's scroller below the column header of `height` pinned at its top, as a native table's
-    /// scroller starts below its header, rather than level with the header's titles.
-    func scrollIndicatorsBelowHeader(_ height: CGFloat) -> some View {
+    /// For a scroll view with a column header of `height` pinned at its top, behaving as a native table does with its
+    /// header: the scroller starts below the header rather than level with its titles, and `pull` follows how far the
+    /// list is pulled down past its top as it bounces (0 otherwise), by which the header holds its place
+    /// (`pinnedHeaderHoldsTop(_:)`) rather than following the rows down.
+    func pinnedHeaderScrollView(height: CGFloat, pull: Binding<CGFloat>) -> some View {
         contentMargins(.top, height, for: .scrollIndicators)
+            .onScrollGeometryChange(for: CGFloat.self, of: { max(0, -($0.contentOffset.y + $0.contentInsets.top)) }) { _, new in
+                pull.wrappedValue = new
+            }
+    }
+
+    /// Keeps a pinned column header at the top of its scroll view while the list is pulled down by `pull`
+    /// (`pinnedHeaderScrollView(height:pull:)`).
+    func pinnedHeaderHoldsTop(_ pull: CGFloat) -> some View {
+        offset(y: -pull)
     }
 }
 
