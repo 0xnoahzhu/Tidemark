@@ -374,7 +374,9 @@ private struct ProbeSessionsColumn: View {
         // Leading, so the header stays 16 px in when the column has no sessions yet.
         .frame(width: SiteProbeLayout.current.sessionsWidth, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Theme.bg2)
+        // The page's background, set off from the sidebar beside it, as an app page's lists are, and from the probe by
+        // the line between them.
+        .background(Theme.bg)
     }
 
     private func row(_ session: ProbeSession) -> some View {
