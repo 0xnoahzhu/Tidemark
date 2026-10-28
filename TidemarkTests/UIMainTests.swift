@@ -622,7 +622,8 @@ struct RequestsTableRowHeightTests {
         #expect(!RequestsTableHeaderAnchor.needsHeight(table))
     }
 
-    /// Rows scrolling under the header do not show through it: its clip view draws the list's background.
+    /// Rows scrolling under the header do not show through it: its clip view draws the page's background, as the table
+    /// and its scroll view do.
     @Test func headerHasASolidBackground() throws {
         let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         table.addTableColumn(NSTableColumn(identifier: .init("time")))
@@ -632,7 +633,24 @@ struct RequestsTableRowHeightTests {
         #expect(clip !== scroll.contentView)
         RequestsTableHeaderAnchor.fillBackground(of: table)
         #expect(clip.drawsBackground)
-        #expect(clip.backgroundColor == .controlBackgroundColor)
+        #expect(clip.backgroundColor == Theme.pageBackground)
+        #expect(table.backgroundColor == Theme.pageBackground)
+        #expect(scroll.drawsBackground && scroll.backgroundColor == Theme.pageBackground)
+    }
+
+    /// The corner above a vertical scroller is covered once, and the cover follows the corner as it moves.
+    @Test func cornerIsCoveredWhereverItIs() throws {
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let corner = NSView(frame: NSRect(x: 382, y: 0, width: 18, height: 28))
+        scroll.addSubview(corner)
+        RequestsTableCornerFill.cover(corner, in: scroll)
+        RequestsTableCornerFill.cover(corner, in: scroll)
+        let fills = scroll.subviews.compactMap { $0 as? RequestsTableCornerFill }
+        #expect(fills.count == 1)
+        #expect(scroll.subviews.last === fills.first)
+        #expect(fills.first?.frame == corner.frame)
+        corner.frame = NSRect(x: 380, y: 0, width: 20, height: 32)
+        #expect(fills.first?.frame == corner.frame)
     }
 
     /// As the inspector opens, SwiftUI lays the page out at no height a few times, and AppKit's table, seeing none of

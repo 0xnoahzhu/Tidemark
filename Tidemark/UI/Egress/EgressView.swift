@@ -21,7 +21,7 @@ struct EgressView: View {
             .padding(.top, 18.px)
             .padding(.bottom, 22.px)
         }
-        .background(Theme.bg3)
+        .background(Theme.bg)
         .pageToolbar(tr("Egress IP", "Egress"), subtitle: tr("What the outside world sees, for each policy", "Egress")) {
             ToolbarItem(placement: .primaryAction) {
                 Button(egress.isChecking ? tr("Checking…", "Egress") : tr("Check All", "Egress")) {

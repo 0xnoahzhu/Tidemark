@@ -24,6 +24,8 @@ struct RequestsView: View {
         // minimum once the inspector opens, and AppKit then aborts after resizing the columns back and forth. The
         // content asks for none; the table scrolls horizontally instead.
         .frame(minWidth: 0, maxWidth: .infinity)
+        // Every page's background, around the table as in it (`RequestsTableHeaderStyle`), rather than the window's.
+        .background(Theme.bg)
         // Inside the inspector's split view rather than above it, where the split view would blur the top of both
         // columns under its own band.
         .pageTopLine()
@@ -37,6 +39,8 @@ struct RequestsView: View {
             RequestsInspectorFill {
                 RequestsInspectorHost()
             }
+            // The page's background, as beside it, rather than the window's tinted one.
+            .background(Theme.bg)
             .pageTopLine()
             .inspectorColumnWidth(min: 280.px, ideal: 316.px, max: 440.px)
         }

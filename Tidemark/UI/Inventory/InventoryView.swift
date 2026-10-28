@@ -359,7 +359,7 @@ private enum InventoryTableMetrics {
     static let stripeTrailingInset = 8.5.px
     static let stripeRadius = 6.px
 
-    static let background = Color(nsColor: .controlBackgroundColor)
+    static let background = Theme.bg
     static let headerText = Color(nsColor: .headerTextColor)
     static let stripe = Color(nsColor: NSColor.alternatingContentBackgroundColors[1])
     static let headerSeparator = Color.dynamic(light: .black(0.1), dark: .white(0.16))

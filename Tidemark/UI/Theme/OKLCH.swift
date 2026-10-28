@@ -45,13 +45,18 @@ extension Color {
 
     /// A color that resolves differently in light and dark appearance.
     static func dynamic(light: NSColor, dark: NSColor) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .vibrantDark, .accessibilityHighContrastDarkAqua]) != nil ? dark : light
-        })
+        Color(nsColor: .dynamic(light: light, dark: dark))
     }
 }
 
 extension NSColor {
+    /// A color that resolves differently in light and dark appearance.
+    static func dynamic(light: NSColor, dark: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .vibrantDark, .accessibilityHighContrastDarkAqua]) != nil ? dark : light
+        }
+    }
+
     convenience init(hex: UInt32, alpha: Double = 1) {
         self.init(srgbRed: Double((hex >> 16) & 0xff) / 255,
                   green: Double((hex >> 8) & 0xff) / 255,

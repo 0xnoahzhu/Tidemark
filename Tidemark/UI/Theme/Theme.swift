@@ -5,7 +5,10 @@ import SwiftUI
 /// Every token adapts to the effective appearance.
 enum Theme {
     // Surfaces
-    static let bg = Color.dynamic(light: NSColor(hex: 0xffffff), dark: NSColor(hex: 0x1f1f21))
+    /// Every page's background, as an app's page has it.
+    static let bg = Color(nsColor: pageBackground)
+    /// `bg` for AppKit views.
+    static let pageBackground = NSColor.dynamic(light: NSColor(hex: 0xffffff), dark: NSColor(hex: 0x1f1f21))
     static let bg2 = Color.dynamic(light: NSColor(hex: 0xf3f3f6), dark: NSColor(hex: 0x29292c))
     static let bg3 = Color.dynamic(light: NSColor(hex: 0xf5f5f7), dark: NSColor(hex: 0x19191b))
     static let card = Color.dynamic(light: NSColor(hex: 0xffffff), dark: NSColor(hex: 0x262629))

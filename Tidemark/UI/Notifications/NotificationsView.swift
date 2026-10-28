@@ -30,7 +30,7 @@ struct NotificationsView: View {
             .padding(.bottom, 20.px)
             .animation(.smooth(duration: 0.25), value: items.map(\.id))
         }
-        .background(Theme.bg3)
+        .background(Theme.bg)
         .overlay {
             if items.isEmpty {
                 Text(tr("Nothing here. New domains and IPs show up the first time they're seen.", "Notifications"))
