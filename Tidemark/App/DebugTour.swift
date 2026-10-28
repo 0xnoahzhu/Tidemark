@@ -19,7 +19,7 @@ enum DebugTour {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         Task(name: "debug-tour") {
             await run(model, directory: url)
-            AppDelegate.requestQuit()
+            AppDelegate.requestQuit(confirmed: true)
         }
     }
 

@@ -55,6 +55,17 @@ struct UIChromeTests {
         return total
     }
 
+    // MARK: Quitting
+
+    /// Quitting asks first, except when the system logs out, restarts or shuts down.
+    @Test func quitsWithoutAskingOnlyWhenTheSystemQuits() {
+        #expect(!AppDelegate.isSystemQuit(reason: nil))
+        #expect(!AppDelegate.isSystemQuit(reason: OSType(kAEQuitApplication)))
+        for reason in [kAELogOut, kAEReallyLogOut, kAEShowRestartDialog, kAEShowShutdownDialog, kAERestart, kAEShutDown] {
+            #expect(AppDelegate.isSystemQuit(reason: OSType(reason)))
+        }
+    }
+
     // MARK: Dock
 
     /// Tidemark is in the Dock while an ordinary window is on screen or minimized into the Dock; the menu bar
