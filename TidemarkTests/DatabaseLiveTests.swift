@@ -1267,8 +1267,8 @@ struct DatabaseLiveTests {
                 let read = PostgresRowReader(row)
                 let app = try read("app_id", as: UUID.self) == cursor.id ? "Cursor" : "Raycast"
                 let device = try read("device_id", as: UUID.self) == new.id ? "new" : "old"
-                let first = Int(Fixture.now.timeIntervalSince(try read("first_seen", as: Date.self)))
-                let last = Int(Fixture.now.timeIntervalSince(try read("last_seen", as: Date.self)))
+                let first = Self.age(try read("first_seen", as: Date.self))
+                let last = Self.age(try read("last_seen", as: Date.self))
                 let origin = try read("backfilled", as: Bool.self) ? "copy" : "recorded"
                 return "\(app) \(try read("value", as: String.self)) \(device) \(try read("source_title", as: String.self)) "
                     + "\(try read("request_count", as: Int64.self)) \(first)-\(last) \(origin)"
