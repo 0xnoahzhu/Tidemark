@@ -30,7 +30,8 @@ struct NotificationsView: View {
             .padding(.bottom, 20.px)
             .animation(.smooth(duration: 0.25), value: items.map(\.id))
         }
-        .scrollEdgeEffectStyle(.soft, for: .top)
+        // Cards scroll out under the toolbar's hard edge, as the Requests table does, not visibly under the title.
+        .scrollEdgeEffectStyle(.hard, for: .top)
         .background(Theme.bg3)
         .overlay {
             if items.isEmpty {
