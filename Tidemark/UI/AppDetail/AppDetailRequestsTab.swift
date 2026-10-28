@@ -28,7 +28,7 @@ struct AppDetailRequestsTab: View {
     /// Bumped once fresh rows have aged out, so their tint fades even when nothing new arrives.
     @State private var freshTick = 0
     /// How far the list is pulled down past its top (`pinnedHeaderScrollView`).
-    @State private var pull: CGFloat = 0
+    @State private var pull = ScrollPull()
 
     /// Policy grows like the global table's (up to 200 px), so a chip such as `AI › AT&T-RackNerd-Hysteria2` is
     /// whole at the default window width and only shortens when the window is narrow. At the narrowest window, beside
@@ -89,7 +89,7 @@ struct AppDetailRequestsTab: View {
                         }
                     }
                 }
-                .pinnedHeaderScrollView(height: Self.headerHeight, pull: $pull)
+                .pinnedHeaderScrollView(height: Self.headerHeight, pull: pull)
             }
         }
         .task(id: HistoryKey(appID: app.id, live: live, search: nav.appRequestSearch, scope: scope)) {

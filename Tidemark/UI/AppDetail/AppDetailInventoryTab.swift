@@ -31,8 +31,8 @@ struct AppDetailInventoryTab: View {
     @State private var domainsScroll = AppDetailPaneScroll()
     @State private var ipsScroll = AppDetailPaneScroll()
     /// How far each pane's list is pulled down past its top (`pinnedHeaderScrollView`).
-    @State private var domainsPull: CGFloat = 0
-    @State private var ipsPull: CGFloat = 0
+    @State private var domainsPull = ScrollPull()
+    @State private var ipsPull = ScrollPull()
     /// The row an alert's View opened the tab on, marked for a moment once it is in view.
     @State private var arrived: AppDetailInventoryRowID?
     /// The serial of the latest arrival the tab took (`Navigation.HostArrival`).
@@ -301,7 +301,7 @@ struct AppDetailInventoryTab: View {
                 // Only a reorder moves rows, briefly (`show`). The rows animate their own highlight.
                 .transaction { if !$0.reordersAppInventory { $0.animation = nil } }
             }
-            .pinnedHeaderScrollView(height: Self.headerHeight, pull: $domainsPull)
+            .pinnedHeaderScrollView(height: Self.headerHeight, pull: domainsPull)
             .scrollPosition($domainsPosition)
             .onScrollTargetVisibilityChange(idType: AppDetailInventoryRowID.self, threshold: 0.5) { domainsScroll.visible = Set($0) }
             .onScrollGeometryChange(for: CGRect.self, of: \.visibleRect) { domainsScroll.visibleRect = $1 }
@@ -411,7 +411,7 @@ struct AppDetailInventoryTab: View {
                 // Like the Domains pane's: only a reorder moves rows; the rows animate their own highlight.
                 .transaction { if !$0.reordersAppInventory { $0.animation = nil } }
             }
-            .pinnedHeaderScrollView(height: Self.headerHeight, pull: $ipsPull)
+            .pinnedHeaderScrollView(height: Self.headerHeight, pull: ipsPull)
             .scrollPosition($ipsPosition)
             .onScrollTargetVisibilityChange(idType: AppDetailInventoryRowID.self, threshold: 0.5) { ipsScroll.visible = Set($0) }
             .onScrollGeometryChange(for: CGRect.self, of: \.visibleRect) { ipsScroll.visibleRect = $1 }

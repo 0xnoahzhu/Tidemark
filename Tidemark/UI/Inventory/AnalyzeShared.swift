@@ -131,22 +131,41 @@ struct AnalyzeHeaderRow<Content: View>: View {
     }
 }
 
+/// How far a list is pulled down past its top as it bounces, 0 otherwise (`pinnedHeaderScrollView(height:pull:)`).
+///
+/// Only the pinned header reads it (`pinnedHeaderHoldsTop(_:)`), so following the pull redraws the header alone. A list
+/// redrawn on every frame of the pull would not bounce: one whose scroll position is at its top edge goes back there.
+@MainActor
+@Observable
+final class ScrollPull {
+    var distance: CGFloat = 0
+}
+
 extension View {
     /// For a scroll view with a column header of `height` pinned at its top, behaving as a native table does with its
-    /// header: the scroller starts below the header rather than level with its titles, and `pull` follows how far the
-    /// list is pulled down past its top as it bounces (0 otherwise), by which the header holds its place
-    /// (`pinnedHeaderHoldsTop(_:)`) rather than following the rows down.
-    func pinnedHeaderScrollView(height: CGFloat, pull: Binding<CGFloat>) -> some View {
+    /// header: the scroller starts below the header rather than level with its titles, and `pull` follows the list
+    /// as it is pulled down past its top, by which the header holds its place (`pinnedHeaderHoldsTop(_:)`) rather
+    /// than following the rows down.
+    func pinnedHeaderScrollView(height: CGFloat, pull: ScrollPull) -> some View {
         contentMargins(.top, height, for: .scrollIndicators)
             .onScrollGeometryChange(for: CGFloat.self, of: { max(0, -($0.contentOffset.y + $0.contentInsets.top)) }) { _, new in
-                pull.wrappedValue = new
+                pull.distance = new
             }
     }
 
-    /// Keeps a pinned column header at the top of its scroll view while the list is pulled down by `pull`
+    /// Keeps a pinned column header at the top of its scroll view while the list is pulled down
     /// (`pinnedHeaderScrollView(height:pull:)`).
-    func pinnedHeaderHoldsTop(_ pull: CGFloat) -> some View {
-        offset(y: -pull)
+    func pinnedHeaderHoldsTop(_ pull: ScrollPull) -> some View {
+        modifier(PinnedHeaderHold(pull: pull))
+    }
+}
+
+/// Reads the pull itself, so only the header follows it.
+private struct PinnedHeaderHold: ViewModifier {
+    var pull: ScrollPull
+
+    func body(content: Content) -> some View {
+        content.offset(y: -pull.distance)
     }
 }
 
