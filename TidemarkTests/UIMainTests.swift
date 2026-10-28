@@ -560,8 +560,8 @@ struct RequestsTableRowHeightTests {
         }
     }
 
-    /// The first row's cell gives its table's header the design's height wherever AppKit's differs, and only that
-    /// cell holds the view that does it.
+    /// The first row's cell gives its table's header the design's height wherever AppKit's differs, and a solid
+    /// background, and only that cell holds the view that does it.
     @Test func firstRowGivesTheHeaderTheDesignsHeight() async throws {
         let rows = (1...20).map { F.record(id: $0) }
         let host = NSHostingView(rootView: HeaderAnchorTable(rows: []))
@@ -578,14 +578,17 @@ struct RequestsTableRowHeightTests {
         header.frame.size.height = RequestsTable.headerHeight - 6
 
         host.rootView = HeaderAnchorTable(rows: rows)
-        try await Self.waitUntil { host.layoutSubtreeIfNeeded(); return header.frame.height == RequestsTable.headerHeight }
+        try await Self.waitUntil {
+            host.layoutSubtreeIfNeeded()
+            return header.frame.height == RequestsTable.headerHeight && RequestsTableHeaderAnchor.headerClip(of: table)?.drawsBackground == true
+        }
         #expect(table.numberOfRows == rows.count)
         #expect(header.frame.height == RequestsTable.headerHeight)
         #expect(Self.count(RequestsTableHeaderAnchor.self, in: table) == 1)
-        #expect(RequestsTableHeaderHeight.isNeeded == (RequestsTable.headerHeight != NSTableHeaderView().frame.height))
+        #expect(RequestsTableHeaderAnchor.headerClip(of: table)?.drawsBackground == true)
     }
 
-    /// A table whose first row holds the header's anchor, as the request table's does where its header needs it.
+    /// A table whose first row holds the header's anchor, as the request table's does.
     private struct HeaderAnchorTable: View {
         var rows: [RequestRecord]
 
@@ -594,7 +597,7 @@ struct RequestsTableRowHeightTests {
                 TableColumn("Host") { (record: RequestRecord) in
                     Text(record.host)
                         .background {
-                            if record.key == rows.first?.key { RequestsTableHeaderHeight() }
+                            if record.key == rows.first?.key { RequestsTableHeaderStyle() }
                         }
                 }
             }
@@ -617,6 +620,19 @@ struct RequestsTableRowHeightTests {
         RequestsTableHeaderAnchor.setHeight(of: table)
         #expect(header.frame.height == RequestsTable.headerHeight)
         #expect(!RequestsTableHeaderAnchor.needsHeight(table))
+    }
+
+    /// Rows scrolling under the header do not show through it: its clip view draws the list's background.
+    @Test func headerHasASolidBackground() throws {
+        let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        table.addTableColumn(NSTableColumn(identifier: .init("time")))
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        scroll.documentView = table
+        let clip = try #require(RequestsTableHeaderAnchor.headerClip(of: table))
+        #expect(clip !== scroll.contentView)
+        RequestsTableHeaderAnchor.fillBackground(of: table)
+        #expect(clip.drawsBackground)
+        #expect(clip.backgroundColor == .controlBackgroundColor)
     }
 
     /// As the inspector opens, SwiftUI lays the page out at no height a few times, and AppKit's table, seeing none of

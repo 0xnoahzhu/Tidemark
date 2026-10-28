@@ -28,7 +28,8 @@ struct RequestsLiveView: View {
         let now = Date.now
         VStack(spacing: 0) {
             RequestsTable(model: model, rows: rows, selection: $nav.selectedRequest, timeStyle: .clock, now: now)
-                .scrollEdgeEffectStyle(.hard, for: .top)
+                // The solid header covers the rows scrolling under it; the edge effect would dim the row just below it.
+                .scrollEdgeEffectHidden(true, for: .top)
                 .overlay {
                     if rows.isEmpty { RequestsLiveEmptyState(streamIsEmpty: stream.isEmpty) }
                 }

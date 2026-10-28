@@ -75,7 +75,8 @@ struct RequestsHistoryView: View {
             ) {
                 Task { await history.loadMore(database: model.database) }
             }
-            .scrollEdgeEffectStyle(.hard, for: .top)
+            // The solid header covers the rows scrolling under it; the edge effect would dim the row just below it.
+            .scrollEdgeEffectHidden(true, for: .top)
             .overlay {
                 if key.waiting {
                     RequestsRevealFinding()

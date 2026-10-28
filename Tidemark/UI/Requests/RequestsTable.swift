@@ -54,7 +54,7 @@ struct RequestsTable: View {
     static let rowHeight = 28.px
     /// What NSTableView's inset style adds to a row's cells.
     static let rowPadding: CGFloat = 8
-    /// The header's height, as tall as a row (`RequestsTableHeaderHeight`).
+    /// The header's height, as tall as a row (`RequestsTableHeaderStyle`).
     static let headerHeight = 28.px
 
     var body: some View {
@@ -88,11 +88,11 @@ struct RequestsTable: View {
                         RequestsRowTint(key: record.key, isFresh: isFresh(record), isSelected: record.key == selectedKey)
                     }
                     // One cell reaches its table for what `Table` has no API for, the first row's, which every table
-                    // loads: it keeps the rows' place, hands the table to `handle` and, where needed, sets the header's
-                    // height.
+                    // loads: it keeps the rows' place, hands the table to `handle` and gives the header the design's
+                    // height and a solid background.
                     if record.key == rows.first?.key {
                         RequestsTablePlace(handle: handle)
-                        if RequestsTableHeaderHeight.isNeeded { RequestsTableHeaderHeight() }
+                        RequestsTableHeaderStyle()
                     }
                 }
                 .onAppear {
