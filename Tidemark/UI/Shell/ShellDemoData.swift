@@ -8,7 +8,8 @@ import SwiftUI
 /// Launch a Debug build with `-TidemarkUIDemo YES` to fill the observable state with the prototype's
 /// Macs, apps, requests and alerts, an in-memory History database and a slow synthetic request stream.
 /// Nothing is written anywhere. Optional launch arguments:
-/// * `-TidemarkUIDemoPage notifications|history|inspector` opens that page;
+/// * `-TidemarkUIDemoPage notifications|history|inspector|inventory|probe|egress|app` opens that page (`app`: the
+///   first demo app's Domains & IPs tab);
 /// * `-TidemarkUIDemoStill YES` stops the synthetic stream;
 /// * `-TidemarkUIDemoSnapshot <file.png>` writes the main window (and its view tree, as `.txt`) after 3 s.
 @MainActor
@@ -24,6 +25,10 @@ enum ShellDemoData {
         install(into: model)
         switch defaults.string(forKey: "TidemarkUIDemoPage") {
         case "notifications": model.nav.open(.notifications)
+        case "inventory": model.nav.open(.inventory)
+        case "probe": model.nav.open(.probe)
+        case "egress": model.nav.open(.egress)
+        case "app": if let app = model.catalog.apps.first { model.nav.open(.app(app.id), tab: .inventory) }
         case "history": model.nav.requestsLive = false
         case "inspector":
             Task {

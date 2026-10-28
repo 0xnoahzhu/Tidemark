@@ -24,9 +24,6 @@ struct MainWindowView: View {
         }
         .modifier(ShellRecordingConfirmation())
         .modifier(AppMonitoringConfirmation())
-        #if DEBUG
-        .task { ShellDemoData.installIfRequested(into: model) }
-        #endif
     }
 }
 
