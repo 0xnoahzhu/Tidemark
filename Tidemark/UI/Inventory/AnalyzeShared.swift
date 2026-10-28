@@ -131,6 +131,14 @@ struct AnalyzeHeaderRow<Content: View>: View {
     }
 }
 
+extension View {
+    /// Starts a scroll view's scroller below the column header of `height` pinned at its top, as a native table's
+    /// scroller starts below its header, rather than level with the header's titles.
+    func scrollIndicatorsBelowHeader(_ height: CGFloat) -> some View {
+        contentMargins(.top, height, for: .scrollIndicators)
+    }
+}
+
 /// A rounded chip such as `4 new domains in 24 h` or `Rule FINAL`.
 struct AnalyzePill: View {
     enum Style { case new, neutral }

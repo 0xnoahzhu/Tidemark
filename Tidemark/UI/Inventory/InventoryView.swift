@@ -233,6 +233,7 @@ private struct InventoryList: View {
             .containerRelativeFrame(.horizontal) { visible, _ in max(visible - scrollerWidth, tableWidth) }
         }
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .scrollIndicatorsBelowHeader(InventoryTableMetrics.headerHeight)
         .scrollPosition($position)
         .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { _, geometry in
             scrolled.geometry = geometry

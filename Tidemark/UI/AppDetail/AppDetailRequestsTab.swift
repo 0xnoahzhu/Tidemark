@@ -32,6 +32,8 @@ struct AppDetailRequestsTab: View {
     /// whole at the default window width and only shortens when the window is narrow. At the narrowest window, beside
     /// an always-visible scroller, every column is still at least its minimum.
     static let columns = columns(factor: UIScale.factor)
+    /// The column header's height (`AnalyzeHeaderRow`'s).
+    static let headerHeight = 28.px
     /// The method before each host (`HTTPS`, `CONNECT`): the design's 40 px and the 2 px more a seven-letter method
     /// needs, which the design lets run into the gap.
     static let methodWidth = methodWidth(factor: UIScale.factor)
@@ -85,6 +87,7 @@ struct AppDetailRequestsTab: View {
                         }
                     }
                 }
+                .scrollIndicatorsBelowHeader(Self.headerHeight)
             }
         }
         .task(id: HistoryKey(appID: app.id, live: live, search: nav.appRequestSearch, scope: scope)) {
@@ -100,7 +103,7 @@ struct AppDetailRequestsTab: View {
     }
 
     private var header: some View {
-        AnalyzeHeaderRow(columns: Self.columns) {
+        AnalyzeHeaderRow(columns: Self.columns, height: Self.headerHeight) {
             Text(tr("Time", "AppDetail"))
             Text(tr("Process", "AppDetail"))
             Text(tr("Host", "AppDetail"))

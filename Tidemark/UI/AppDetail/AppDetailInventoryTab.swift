@@ -42,6 +42,8 @@ struct AppDetailInventoryTab: View {
     /// The Domains pane's columns without First seen, for a narrow page.
     static let narrowDomainColumns = domainColumns(factor: UIScale.factor, showsFirstSeen: false)
     static let ipColumns = ipColumns(factor: UIScale.factor)
+    /// The height of each pane's column header.
+    static let headerHeight = 26.px
 
     /// The width of a pane less its names at `factor`: its fixed columns, the spaces between its columns, its 16 px
     /// margins and the scroller.
@@ -278,7 +280,7 @@ struct AppDetailInventoryTab: View {
                             }
                         }
                     } header: {
-                        AnalyzeHeaderRow(columns: Self.domainColumns(showsFirstSeen: showsFirstSeen), height: 26.px, horizontalPadding: 16.px) {
+                        AnalyzeHeaderRow(columns: Self.domainColumns(showsFirstSeen: showsFirstSeen), height: Self.headerHeight, horizontalPadding: 16.px) {
                             Text(tr("Site · host", "AppDetail"))
                             if showsFirstSeen { Text(tr("First seen", "AppDetail")) }
                             Text(tr("Last seen", "AppDetail"))
@@ -295,6 +297,7 @@ struct AppDetailInventoryTab: View {
                 // Only a reorder moves rows, briefly (`show`). The rows animate their own highlight.
                 .transaction { if !$0.reordersAppInventory { $0.animation = nil } }
             }
+            .scrollIndicatorsBelowHeader(Self.headerHeight)
             .scrollPosition($domainsPosition)
             .onScrollTargetVisibilityChange(idType: AppDetailInventoryRowID.self, threshold: 0.5) { domainsScroll.visible = Set($0) }
             .onScrollGeometryChange(for: CGRect.self, of: \.visibleRect) { domainsScroll.visibleRect = $1 }
@@ -390,7 +393,7 @@ struct AppDetailInventoryTab: View {
                             }
                         }
                     } header: {
-                        AnalyzeHeaderRow(columns: Self.ipColumns, height: 26.px, horizontalPadding: 16.px) {
+                        AnalyzeHeaderRow(columns: Self.ipColumns, height: Self.headerHeight, horizontalPadding: 16.px) {
                             Text(verbatim: "IP")
                             Text(tr("Network · domains", "AppDetail"))
                             Text(tr("Requests", "AppDetail")).frame(maxWidth: .infinity, alignment: .trailing)
@@ -403,6 +406,7 @@ struct AppDetailInventoryTab: View {
                 // Like the Domains pane's: only a reorder moves rows; the rows animate their own highlight.
                 .transaction { if !$0.reordersAppInventory { $0.animation = nil } }
             }
+            .scrollIndicatorsBelowHeader(Self.headerHeight)
             .scrollPosition($ipsPosition)
             .onScrollTargetVisibilityChange(idType: AppDetailInventoryRowID.self, threshold: 0.5) { ipsScroll.visible = Set($0) }
             .onScrollGeometryChange(for: CGRect.self, of: \.visibleRect) { ipsScroll.visibleRect = $1 }
