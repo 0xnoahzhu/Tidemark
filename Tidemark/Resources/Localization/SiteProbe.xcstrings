@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ domains and IPs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的域名与 IP"
+          }
+        }
+      }
+    },
     "%lld IP" : {
       "localizations" : {
         "zh-Hans" : {
@@ -231,6 +241,16 @@
         }
       }
     },
+    "Export CSV" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出 CSV"
+          }
+        }
+      }
+    },
     "Forward" : {
       "localizations" : {
         "zh-Hans" : {
@@ -417,6 +437,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "同站点"
+          }
+        }
+      }
+    },
+    "Save every domain and IP of this probe as a CSV file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把这次探测的所有域名和 IP 存成 CSV 文件"
           }
         }
       }

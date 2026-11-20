@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 /// Site Probe page: sessions list, URL bar, browser preview and host waterfall.
@@ -15,6 +16,10 @@ struct SiteProbeView: View {
     @Environment(\.systemPrefersReducedResourceUsage) private var reducedResources
 
     @State private var startError: (any Error)?
+    @State private var exportDocument: AnalyzeCSVDocument?
+    @State private var exportName = ""
+    @State private var isExporting = false
+    @State private var exportError: (any Error)?
     @FocusState private var urlFocused: Bool
 
     private var web: ProbeWebSession { .shared }
@@ -48,11 +53,25 @@ struct SiteProbeView: View {
         .background(Theme.bg)
         .pageToolbar(tr("Site Probe", "SiteProbe"), subtitle: tr("Open a URL in an isolated browser and record every host it touches", "SiteProbe")) {
             ToolbarItem(placement: .primaryAction) {
+                Button(tr("Export CSV", "SiteProbe"), action: export)
+                    .disabled(exportableSession == nil)
+                    .help(tr("Save every domain and IP of this probe as a CSV file", "SiteProbe"))
+            }
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItem(placement: .primaryAction) {
                 Button(tr("New Probe", "SiteProbe")) { newProbe() }
                     .disabled(model.probe.isRunning || web.isBusy)
             }
         }
+        .fileExporter(isPresented: $isExporting, document: exportDocument, contentType: .commaSeparatedText,
+                      defaultFilename: exportName,
+                      onCompletion: { result in
+                          if case .failure(let error) = result { exportError = error }
+                      })
         .alert(error: $startError) {
+            Button(tr("OK", "SiteProbe")) {}
+        }
+        .alert(error: $exportError) {
             Button(tr("OK", "SiteProbe")) {}
         }
         .onAppear {
@@ -282,6 +301,20 @@ struct SiteProbeView: View {
 
     private func stop() {
         Task { await web.stop(model: model) }
+    }
+
+    /// The selected probe once it has ended and reached a host: a running probe is still collecting them.
+    private var exportableSession: ProbeSession? {
+        guard let session = model.probe.selected, model.probe.running?.id != session.id, !session.hosts.isEmpty else { return nil }
+        return session
+    }
+
+    private func export() {
+        guard let session = exportableSession else { return }
+        let classifier = model.classifier
+        exportDocument = AnalyzeCSVDocument(text: AnalyzeCSV.probeHosts(session, site: { classifier.site(for: $0) }))
+        exportName = trf("%@ domains and IPs", "SiteProbe", session.host)
+        isExporting = true
     }
 
     private func newProbe() {

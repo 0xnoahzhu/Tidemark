@@ -84,6 +84,42 @@ private func naiveSite(_ host: String) -> String { NaiveSiteClassifier().site(fo
         let ip = lines[2].components(separatedBy: ",")
         #expect(ip[0] == "ip" && ip[7] == "yes")
     }
+
+    /// A probe exports in an app's order with its root domain: the domains site by site (the site seen last first),
+    /// then the IPs reached by IP alone, then those resolved from domains, which span the domains behind them.
+    @Test func exportsProbeHostsSiteBySite() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        func host(_ name: String, _ firstAt: TimeInterval, _ lastAt: TimeInterval, requests: Int = 1, ips: [String] = [], step: Int = 0) -> ProbeHost {
+            ProbeHost(host: name, firstAt: firstAt, lastAt: lastAt, requestCount: requests, ips: ips, step: step)
+        }
+        let session = ProbeSession(
+            id: UUID(), deviceID: DeviceID(), url: "https://www.github.com", host: "www.github.com", mode: .desktop,
+            startedAt: start, endedAt: start.addingTimeInterval(30),
+            steps: [ProbeStep(at: 0, label: "Page load"), ProbeStep(at: 10, label: "Click · Open a repo, now")],
+            hosts: [
+                host("www.github.com", 0, 4, requests: 9, ips: ["140.82.112.3"]),
+                host("api.github.com", 1, 20, requests: 5, ips: ["140.82.112.3", "140.82.112.6"], step: 1),
+                host("cdn.jsdelivr.net", 2, 12, ips: ["151.101.1.229"]),
+                host("fonts.jsdelivr.net", 3, 12, ips: ["151.101.1.229"]),
+                host("9.9.9.9", 5, 6, requests: 2),
+            ])
+        let lines = AnalyzeCSV.probeHosts(session, site: naiveSite).components(separatedBy: "\r\n")
+        #expect(lines[0] == "kind,value,site,same_site,step,first_seen,last_seen,requests,by_ip_only,resolved_from")
+        let values = lines.dropFirst().filter { !$0.isEmpty }.map { $0.components(separatedBy: ",")[1] }
+        #expect(values == ["api.github.com", "www.github.com", "cdn.jsdelivr.net", "fonts.jsdelivr.net", "9.9.9.9",
+                           "140.82.112.3", "140.82.112.6", "151.101.1.229"])
+        #expect(lines[1] == "domain,api.github.com,github.com,yes,\"Click · Open a repo, now\",\(stamp(start, 1)),\(stamp(start, 20)),5,no,")
+        #expect(lines[3].hasPrefix("domain,cdn.jsdelivr.net,jsdelivr.net,no,Page load,"))
+        #expect(lines[5] == "ip,9.9.9.9,,no,Page load,\(stamp(start, 5)),\(stamp(start, 6)),2,yes,")
+        #expect(lines[6] == "ip,140.82.112.3,,yes,Page load,\(stamp(start, 0)),\(stamp(start, 20)),,no,api.github.com www.github.com")
+        #expect(lines[7].hasPrefix("ip,140.82.112.6,,yes,\"Click · Open a repo, now\","))
+        #expect(lines[8].hasSuffix(",,no,cdn.jsdelivr.net fonts.jsdelivr.net"))
+        #expect(lines[8].contains(",no,Page load,"))
+    }
+
+    private func stamp(_ start: Date, _ offset: TimeInterval) -> String {
+        start.addingTimeInterval(offset).formatted(.iso8601)
+    }
 }
 
 @Suite @MainActor struct AppDetailInventorySummaryTests {

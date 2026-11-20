@@ -358,6 +358,84 @@ enum AnalyzeCSV {
         return make(header: header, rows: rows)
     }
 
+    /// One row per domain or IP a site probe reached, in a monitored app's export order: the domains site by site (the
+    /// site seen last first, each site's domains by when they were last seen, then by name), then the IPs reached by
+    /// IP alone, then those resolved from domains, each by when it was last seen.
+    ///
+    /// `site` is a domain's registrable domain, empty for an IP, as in the app export. `same_site` says whether the row
+    /// belongs to the probed URL's site (an IP resolved from domains: whether one of them does), as the waterfall's
+    /// accent bars do. `step` is the step that first reached the row. A resolved IP's dates span the domains that
+    /// resolved to it; its request count is unknown and left empty.
+    static func probeHosts(_ session: ProbeSession, site: (String) -> String) -> String {
+        let header = ["kind", "value", "site", "same_site", "step", "first_seen", "last_seen", "requests", "by_ip_only", "resolved_from"]
+        let probedSite = site(session.host)
+        let lastStep = session.steps.count - 1
+        func stepLabel(_ index: Int) -> String {
+            lastStep < 0 ? "Page load" : session.steps[min(max(0, index), lastStep)].label
+        }
+        func date(_ offset: TimeInterval) -> String { timestamp(session.startedAt.addingTimeInterval(offset)) }
+        func yes(_ flag: Bool) -> String { flag ? "yes" : "no" }
+
+        struct Entry {
+            var value: String
+            var firstAt: TimeInterval
+            var lastAt: TimeInterval
+            var requests: Int?
+            var step: Int
+            var domains: [String] = []
+        }
+        func byActivity(_ a: Entry, _ b: Entry) -> Bool {
+            a.lastAt != b.lastAt ? a.lastAt > b.lastAt : a.value < b.value
+        }
+
+        var bySite: [String: [Entry]] = [:]
+        var direct: [String: Entry] = [:]
+        var resolved: [String: Entry] = [:]
+        for host in session.hosts {
+            let entry = Entry(value: host.host, firstAt: host.firstAt, lastAt: max(host.lastAt, host.firstAt),
+                              requests: host.requestCount, step: host.step)
+            if HostName.isIPAddress(host.host) {
+                direct[host.host] = entry
+                continue
+            }
+            bySite[site(host.host), default: []].append(entry)
+            for ip in Set(host.ips) {
+                var ipEntry = resolved[ip] ?? Entry(value: ip, firstAt: entry.firstAt, lastAt: entry.lastAt, step: entry.step)
+                if entry.firstAt < ipEntry.firstAt { ipEntry.firstAt = entry.firstAt; ipEntry.step = entry.step }
+                ipEntry.lastAt = max(ipEntry.lastAt, entry.lastAt)
+                ipEntry.domains.append(host.host)
+                resolved[ip] = ipEntry
+            }
+        }
+
+        let siteLastAt: [String: TimeInterval] = bySite.mapValues { hosts in hosts.map(\.lastAt).max() ?? 0 }
+        let sites = bySite.keys.sorted { a, b in
+            let lastA = siteLastAt[a] ?? 0, lastB = siteLastAt[b] ?? 0
+            return lastA != lastB ? lastA > lastB : a < b
+        }
+        var rows: [[String]] = []
+        for groupSite in sites {
+            for entry in (bySite[groupSite] ?? []).sorted(by: byActivity) {
+                rows.append([HostKind.domain.rawValue, entry.value, groupSite, yes(groupSite == probedSite),
+                             stepLabel(entry.step), date(entry.firstAt), date(entry.lastAt), String(entry.requests ?? 0),
+                             "no", ""])
+            }
+        }
+        for entry in direct.values.sorted(by: byActivity) {
+            let domains = resolved[entry.value]?.domains.sorted() ?? []
+            rows.append([HostKind.ip.rawValue, entry.value, "", yes(site(entry.value) == probedSite),
+                         stepLabel(entry.step), date(entry.firstAt), date(entry.lastAt), String(entry.requests ?? 0),
+                         "yes", domains.joined(separator: " ")])
+        }
+        for entry in resolved.values.filter({ direct[$0.value] == nil }).sorted(by: byActivity) {
+            let domains = entry.domains.sorted()
+            rows.append([HostKind.ip.rawValue, entry.value, "", yes(domains.contains { site($0) == probedSite }),
+                         stepLabel(entry.step), date(entry.firstAt), date(entry.lastAt), "",
+                         "no", domains.joined(separator: " ")])
+        }
+        return make(header: header, rows: rows)
+    }
+
     private static func timestamp(_ date: Date) -> String {
         date.formatted(.iso8601)
     }
