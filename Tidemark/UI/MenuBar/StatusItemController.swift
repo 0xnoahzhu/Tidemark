@@ -92,6 +92,10 @@ final class StatusItemController: NSObject {
 
     /// The borderless panel and its glass. The SwiftUI content, installed by `installContent()`, lays the
     /// design's panel color over the glass.
+    ///
+    /// The glass sits in a view clipped to the panel's corner radius. The window server derives a borderless
+    /// window's shadow from what the window draws, and the glass alone fills the whole rectangle there, so
+    /// without the clip the shadow has square corners under the rounded glass.
     private func makePanel() -> MenuBarPanelWindow {
         let glass = NSGlassEffectView()
         glass.style = .regular
@@ -99,8 +103,17 @@ final class StatusItemController: NSObject {
         glass.effectIsInteractive = true
         glassView = glass
 
+        let shape = NSView()
+        shape.wantsLayer = true
+        shape.layer?.cornerRadius = MenuBarPanel.cornerRadius
+        shape.layer?.cornerCurve = .continuous
+        shape.layer?.masksToBounds = true
+        glass.frame = shape.bounds
+        glass.autoresizingMask = [.width, .height]
+        shape.addSubview(glass)
+
         let panel = MenuBarPanelWindow(contentRect: NSRect(x: 0, y: 0, width: MenuBarPanel.width, height: 300))
-        panel.contentView = glass
+        panel.contentView = shape
         panel.onCancel = { [weak self] in self?.dismiss() }
         panel.delegate = self
         return panel
