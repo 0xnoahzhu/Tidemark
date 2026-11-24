@@ -1,7 +1,8 @@
 # Releasing
 
-A release is published by pushing a version tag. `.github/workflows/release.yml` runs on a self-hosted Mac runner and
-publishes two files to the GitHub release, nothing else:
+A release is published by pushing a version tag. `.github/workflows/release.yml` runs on GitHub's hosted `xcode-27`
+image (macOS 27, Xcode 27; a fresh virtual machine every run, free for a public repository) and publishes two files
+to the GitHub release, nothing else:
 
 * `Tidemark-<version>.dmg`: signed with Developer ID, notarized and stapled. People install from it, and Sparkle
   downloads it to update the app.
@@ -9,8 +10,11 @@ publishes two files to the GitHub release, nothing else:
 
 The app reads `https://github.com/0xnoahzhu/Tidemark/releases/latest/download/appcast.xml` (`SPARKLE_FEED_URL`), which
 GitHub serves from the newest published release. It checks once a day, and from Tidemark › Check for Updates…. Only
-Release builds whose `SPARKLE_PUBLIC_ED_KEY` is set update themselves. The debug symbols stay on the runner, in
-`~/TidemarkReleases/<version>/`.
+Release builds whose `SPARKLE_PUBLIC_ED_KEY` is set update themselves. The debug symbols are kept as the run's
+`Tidemark-v<version>-dSYM` artifact for 90 days.
+
+No self-hosted runner: the repository is public, and a pull request can bring its own workflow, which would run on
+that machine.
 
 ## Making a release
 
@@ -27,35 +31,43 @@ The release notes list the `feat` and `fix` commits since the previous `chore(re
 (`scripts/release-notes.sh`), unless `docs/releases/<version>.md` is written by hand. Its `# ` line is the
 release's title.
 
-## One-time setup of the runner Mac
+`scripts/release.sh` also runs locally with the Developer ID certificate in the login keychain; it notarizes when
+`TIDEMARK_NOTARY_PROFILE` names a `notarytool store-credentials` profile, and otherwise leaves the DMG unnotarized.
 
-Everything secret stays in the runner's login keychain; the repository holds no secrets.
+## One-time setup
 
-1. **Xcode 27** at `/Applications/Xcode.app`, then `xcodebuild -runFirstLaunch`. Install
-   [uv](https://docs.astral.sh/uv/) and [gh](https://cli.github.com).
-2. **Developer ID certificate.** On the Mac that has it, export "Developer ID Application: … (7939U549K7)" with its
-   private key from Keychain Access as a `.p12`, and import it into the runner's login keychain. Check with
-   `security find-identity -v -p codesigning`.
-3. **Notarization.** Create an App Store Connect API key (Users and Access › Integrations, role Developer) or use an
-   app-specific password, and store it as a keychain profile:
+The secrets live in the repository's `release` environment, which only the release workflow uses and only a `v*` tag
+may deploy to. The certificate and the App Store Connect API key are the same ones Folio uses.
+
+1. **The environment**, limited to `v*` tags:
 
    ```bash
-   xcrun notarytool store-credentials tidemark-notary --key AuthKey_XXXX.p8 --key-id XXXX --issuer <issuer-id>
+   gh api -X PUT repos/0xnoahzhu/Tidemark/environments/release \
+     -F 'deployment_branch_policy[protected_branches]=false' -F 'deployment_branch_policy[custom_branch_policies]=true'
+   gh api -X POST repos/0xnoahzhu/Tidemark/environments/release/deployment-branch-policies -f name='v*' -f type=tag
    ```
 
-   Another name works too: set it as the repository variable `NOTARY_PROFILE`.
-4. **Sparkle key.** Build once so SwiftPM fetches Sparkle, then generate the EdDSA key pair into the login keychain:
+2. **Signing and notarization secrets.** `CSC_LINK` is the Developer ID Application certificate with its private key
+   (a `.p12` exported from Keychain Access), base64-encoded:
+
+   ```bash
+   base64 -i DeveloperID.p12 | gh secret set CSC_LINK --env release --repo 0xnoahzhu/Tidemark
+   gh secret set CSC_KEY_PASSWORD --env release --repo 0xnoahzhu/Tidemark
+   gh secret set APPLE_API_KEY --env release --repo 0xnoahzhu/Tidemark < AuthKey_XXXXXXXXXX.p8
+   gh secret set APPLE_API_KEY_ID --env release --repo 0xnoahzhu/Tidemark --body XXXXXXXXXX
+   gh secret set APPLE_API_ISSUER --env release --repo 0xnoahzhu/Tidemark --body <issuer-id>
+   ```
+
+3. **The Sparkle key.** Generate the EdDSA key pair into your login keychain (which keeps the private key; without
+   it no installed copy can be updated again), store the private key as a secret, and put the public key in
+   `SPARKLE_PUBLIC_ED_KEY` (Debug and Release):
 
    ```bash
    xcodebuild -resolvePackageDependencies -project Tidemark.xcodeproj -scheme Tidemark -derivedDataPath build/DerivedData
-   build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys
+   build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys --account tidemark
+   build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys --account tidemark -x sparkle.key
+   gh secret set SPARKLE_PRIVATE_KEY --env release --repo 0xnoahzhu/Tidemark < sparkle.key && rm sparkle.key
    ```
 
-   Put the printed public key in `SPARKLE_PUBLIC_ED_KEY` (Debug and Release) and commit it. Back up the private key
-   (`generate_keys -x sparkle-private.key`) somewhere safe: without it no installed copy can be updated again.
-5. **Runner.** In the repository's Settings › Actions › Runners, add a new self-hosted macOS runner and follow its
-   steps; it gets the labels `self-hosted`, `macOS` and `ARM64`. Install it as a service (`./svc.sh install` and
-   `./svc.sh start`) so it runs as a LaunchAgent in the logged-in user's session, where the keychain is unlocked. Turn
-   on automatic login for that user, or the keychain stays locked after a restart.
-6. **Fork safety.** The repository is public: under Settings › Actions › General, require approval for workflows from
-   all outside collaborators. The release workflow runs only on tag pushes, which forks cannot make.
+4. **Pull requests from forks.** Under Settings › Actions › General, require approval for workflows from all outside
+   collaborators.
