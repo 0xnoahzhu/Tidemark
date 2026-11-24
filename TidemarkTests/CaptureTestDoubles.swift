@@ -281,6 +281,7 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     var knownHostsCalls = 0
     /// Returned by `alerts(after:excluding:)` (alerts other Macs wrote).
     var otherMacAlerts: [AlertItem] = []
+    var readElsewhere: [Int64: Date] = [:]
     var chains: [(chain: [ProcessLink], appID: AppID?, deviceID: DeviceID)] = []
     /// Every request row written, in order (spool replays included).
     var writes: [RequestRecord] = []
@@ -326,6 +327,8 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func setAppsDelay(_ delay: Duration) { appsDelay = delay }
     func setApps(_ apps: [MonitoredApp]) { appList = apps }
     func setOtherMacAlerts(_ alerts: [AlertItem]) { otherMacAlerts = alerts }
+    /// Alerts read elsewhere (another Mac), with when.
+    func setReadElsewhere(_ read: [Int64: Date]) { readElsewhere = read }
     func setKnown(_ value: [AppID: Set<String>]) { known = value }
     /// Adds or replaces (by key) a row another Mac wrote.
     func write(_ row: RequestRecord) {
@@ -574,7 +577,13 @@ actor CaptureFakeDatabase: TidemarkDatabase {
     func alerts(after id: Int64, excluding: DeviceID?) async throws -> [AlertItem] {
         otherMacAlerts.filter { $0.id > id && $0.deviceID != excluding }
     }
-    func unreadAlertCount(scope: DeviceScope) async throws -> Int { alertsInserted.filter(\.isUnread).count }
+    func unreadAlertCount(scope: DeviceScope) async throws -> Int {
+        (alertsInserted + otherMacAlerts).filter { $0.isUnread && readElsewhere[$0.id] == nil }.count
+    }
+    func readAlerts(_ ids: [Int64]) async throws -> [Int64: Date] {
+        try check()
+        return readElsewhere.filter { ids.contains($0.key) }
+    }
     func markAlertsRead(_ ids: [Int64]) async throws {}
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws {}
 

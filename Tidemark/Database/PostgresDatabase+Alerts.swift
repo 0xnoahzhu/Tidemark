@@ -139,6 +139,16 @@ extension PostgresDatabase {
         return try await rows(sql.query).first.map { try PostgresRowReader($0)("n", as: Int.self) } ?? 0
     }
 
+    func readAlerts(_ ids: [Int64]) async throws -> [Int64: Date] {
+        guard !ids.isEmpty else { return [:] }
+        var read: [Int64: Date] = [:]
+        for row in try await rows("SELECT id, read_at FROM alerts WHERE id = ANY(\(ids)) AND read_at IS NOT NULL") {
+            let reader = PostgresRowReader(row)
+            read[try reader("id")] = try reader("read_at")
+        }
+        return read
+    }
+
     func markAlertsRead(_ ids: [Int64]) async throws {
         guard !ids.isEmpty else { return }
         try await execute("UPDATE alerts SET read_at = now() WHERE id = ANY(\(ids)) AND read_at IS NULL")

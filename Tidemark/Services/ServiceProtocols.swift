@@ -222,6 +222,8 @@ protocol TidemarkDatabase: Sendable {
     func alerts(filter: AlertFilter, appID: AppID?, scope: DeviceScope, limit: Int) async throws -> [AlertItem]
     func alerts(after id: Int64, excluding: DeviceID?) async throws -> [AlertItem]
     func unreadAlertCount(scope: DeviceScope) async throws -> Int
+    /// When each of `ids` that is read was read, on whichever Mac.
+    func readAlerts(_ ids: [Int64]) async throws -> [Int64: Date]
     func markAlertsRead(_ ids: [Int64]) async throws
     /// Marks every unread alert read, limited to `appID` when given and to the scope's Mac.
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws

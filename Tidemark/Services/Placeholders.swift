@@ -56,6 +56,7 @@ struct OfflineDatabase: TidemarkDatabase {
     func alerts(filter: AlertFilter, appID: AppID?, scope: DeviceScope, limit: Int) async throws -> [AlertItem] { [] }
     func alerts(after id: Int64, excluding: DeviceID?) async throws -> [AlertItem] { [] }
     func unreadAlertCount(scope: DeviceScope) async throws -> Int { 0 }
+    func readAlerts(_ ids: [Int64]) async throws -> [Int64: Date] { [:] }
     func markAlertsRead(_ ids: [Int64]) async throws {}
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws {}
 

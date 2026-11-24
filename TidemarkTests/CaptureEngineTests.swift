@@ -10,6 +10,9 @@ struct CaptureEngineTests {
     let scratch = TestDefaults()
     /// Notifications the engines posted; none reaches Notification Center.
     let notifications = CaptureBox<[UNNotificationRequest]>([])
+    /// What Notification Center holds for the engines, and the notifications they took out of it.
+    let deliveredNotifications = CaptureBox<[CaptureNotifier.Delivered]>([])
+    let withdrawn = CaptureBox<[String]>([])
 
     func makeEngine(database: CaptureFakeDatabase = CaptureFakeDatabase(), surge: CaptureFakeSurge = CaptureFakeSurge()) -> (CaptureEngine, AppModel) {
         let model = AppModel(preferences: Preferences(defaults: scratch.make()))
@@ -20,6 +23,9 @@ struct CaptureEngineTests {
         engine.settingsDatabaseURL = { "postgresql://tide@db-a.invalid/tidemark" }
         let notifications = self.notifications
         engine.notifier.deliver = { notifications.value.append($0) }
+        let deliveredNotifications = self.deliveredNotifications, withdrawn = self.withdrawn
+        engine.notifier.delivered = { deliveredNotifications.value }
+        engine.notifier.withdraw = { withdrawn.value += $0 }
         model.capture = engine
         return (engine, model)
     }
@@ -361,6 +367,43 @@ struct CaptureEngineTests {
         #expect(posted.last.flatMap { CaptureNotifier.route(action: CaptureNotifier.showRequestAction, userInfo: $0.userInfo) }
                 == .showRequest(RequestTarget(rowID: nil, kind: .ip, value: "104.16.98.215", appID: docker.id, deviceID: mini.id), alertIDs: [2]))
         #expect(model.alerts.items.map(\.id) == [2, 1])
+    }
+
+    /// An alert read on another Mac is read here too, and its notification leaves Notification Center, also one older
+    /// than the list; a burst's notification stays until all its alerts are read.
+    @Test func followsAlertsReadOnOtherMacs() async {
+        let database = CaptureFakeDatabase()
+        let (engine, model) = makeEngine(database: database)
+        let cursor = CaptureFixtures.app("Cursor", path: "/Applications/Cursor.app")
+        await database.setApps([cursor])
+        #expect(await engine.connectDatabase())
+        let other = UUID()
+        func alert(_ id: Int64, _ value: String) -> AlertItem {
+            AlertItem(id: id, deviceID: other, appID: cursor.id, kind: .domain, scope: .host, value: value, site: nil, host: value, ip: nil,
+                      geo: nil, processName: "node", isDirect: false, requestRowID: nil, createdAt: .now, readAt: nil)
+        }
+        await database.setOtherMacAlerts([alert(1, "a.example"), alert(2, "b.example"), alert(3, "c.example")])
+        await engine.pollOtherMacAlerts()
+        #expect(model.alerts.unreadCount == 3)
+        deliveredNotifications.value = [
+            .init(identifier: "one", alertIDs: [1]),
+            .init(identifier: "burst", alertIDs: [2, 3]),
+            .init(identifier: "older", alertIDs: [7]),
+            .init(identifier: "foreign", alertIDs: []),
+        ]
+
+        let readAt = Date(timeIntervalSince1970: 1_792_000_000)
+        await database.setReadElsewhere([1: readAt, 2: readAt, 7: readAt])
+        await engine.syncAlertReads()
+        #expect(model.alerts.items.first { $0.id == 1 }?.readAt == readAt)
+        #expect(model.alerts.items.filter(\.isUnread).map(\.id) == [3])
+        #expect(model.alerts.unreadCount == 1)
+        #expect(withdrawn.value == ["one", "older"])
+
+        await database.setReadElsewhere([1: readAt, 2: readAt, 3: readAt, 7: readAt])
+        await engine.syncAlertReads()
+        #expect(model.alerts.unreadCount == 0)
+        #expect(withdrawn.value.contains("burst"))
     }
 
     @Test func describesWriteFailuresInTheUILanguage() {

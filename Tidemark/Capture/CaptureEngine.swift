@@ -611,6 +611,7 @@ final class CaptureEngine {
         every("environment", .seconds(60), delay: .seconds(10)) { await $0.pollEnvironment() }
         every("other-macs-rows", .seconds(2), delay: .seconds(2)) { await $0.pollOtherMacRows() }
         every("other-macs-alerts", .seconds(10), delay: .seconds(10)) { await $0.pollOtherMacAlerts() }
+        every("alert-reads", .seconds(10), delay: .seconds(5)) { await $0.syncAlertReads() }
         every("ping", .seconds(15), delay: .seconds(15)) { await $0.ping() }
         every("stats", .seconds(15), delay: .seconds(15)) { await $0.refreshStats() }
         every("devices", .seconds(30), delay: .seconds(30)) { engine in
@@ -935,6 +936,24 @@ final class CaptureEngine {
         lastAlertID = max(lastAlertID, alerts.map(\.id).max() ?? lastAlertID)
         if alerts.contains(where: { model.catalog.app($0.appID) == nil }) { await refreshSharedState() }
         receive(alerts, fromOtherMac: true)
+    }
+
+    /// Alerts read on any Mac: read in the list, and their notifications taken out of Notification Center, so an alert
+    /// seen on one Mac needs no second look on another. Looks at the listed unread alerts and at the alerts of the
+    /// notifications still delivered (which may be older than the list).
+    func syncAlertReads() async {
+        guard databaseReady else { return }
+        let delivered = await notifier.delivered()
+        let ids = Set(model.alerts.items.filter(\.isUnread).map(\.id) + delivered.flatMap(\.alertIDs))
+        guard !ids.isEmpty, let read = try? await database.readAlerts(ids.sorted()), !read.isEmpty else { return }
+        for index in model.alerts.items.indices where model.alerts.items[index].isUnread {
+            if let readAt = read[model.alerts.items[index].id] { model.alerts.items[index].readAt = readAt }
+        }
+        if let unread = try? await database.unreadAlertCount(scope: .all), unread != model.alerts.unreadCount {
+            model.alerts.unreadCount = unread
+        }
+        let stale = CaptureNotifier.withdrawable(delivered, read: Set(read.keys))
+        if !stale.isEmpty { notifier.withdraw(stale) }
     }
 
     /// Reports whether each app's bundle exists on this Mac (`app_installs`).

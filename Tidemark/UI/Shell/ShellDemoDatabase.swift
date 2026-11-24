@@ -244,6 +244,7 @@ struct ShellDemoDatabase: TidemarkDatabase {
     }
     func alerts(after id: Int64, excluding: DeviceID?) async throws -> [AlertItem] { try await base.alerts(after: id, excluding: excluding) }
     func unreadAlertCount(scope: DeviceScope) async throws -> Int { try await base.unreadAlertCount(scope: scope) }
+    func readAlerts(_ ids: [Int64]) async throws -> [Int64: Date] { try await base.readAlerts(ids) }
     func markAlertsRead(_ ids: [Int64]) async throws { try await base.markAlertsRead(ids) }
     func markAllAlertsRead(appID: AppID?, scope: DeviceScope) async throws { try await base.markAllAlertsRead(appID: appID, scope: scope) }
     func saveProbeSession(_ session: ProbeSession) async throws { try await base.saveProbeSession(session) }

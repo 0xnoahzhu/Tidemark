@@ -154,7 +154,10 @@ extension CaptureEngine: CaptureActions {
             try await database.markAlertsRead(ids)
         } catch {
             Self.log.error("Marking alerts read failed: \(error.localizedDescription, privacy: .public)")
+            return
         }
+        // Their notifications leave this Mac's Notification Center at once; other Macs follow on their next sync.
+        await syncAlertReads()
     }
 
     func markAllAlertsRead(appID: AppID?) async {
@@ -168,7 +171,9 @@ extension CaptureEngine: CaptureActions {
         } catch {
             if appID == nil { model.alerts.unreadCount = 0 }
             Self.log.error("Marking all alerts read failed: \(error.localizedDescription, privacy: .public)")
+            return
         }
+        await syncAlertReads()
     }
 
     // MARK: Devices and database

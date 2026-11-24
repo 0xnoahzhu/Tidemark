@@ -89,6 +89,21 @@ final class CaptureNotifier: NSObject {
     var onShowRequest: ((RequestTarget, [Int64]) -> Void)?
     /// Hands a notification to Notification Center; tests replace it so nothing reaches the screen.
     var deliver: (UNNotificationRequest) -> Void = { UNUserNotificationCenter.current().add($0) }
+    /// Tidemark's notifications still in Notification Center, with the alerts each names; tests replace it.
+    var delivered: () async -> [Delivered] = {
+        await UNUserNotificationCenter.current().deliveredNotifications().map { notification in
+            let request = notification.request
+            return Delivered(identifier: request.identifier, alertIDs: CaptureNotifier.alertIDs(in: request.content.userInfo))
+        }
+    }
+    /// Takes notifications out of Notification Center; tests replace it.
+    var withdraw: ([String]) -> Void = { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: $0) }
+
+    /// A notification in Notification Center and the alerts it names.
+    struct Delivered: Equatable, Sendable {
+        var identifier: String
+        var alertIDs: [Int64]
+    }
 
     private var grouper = CaptureBurstGrouper()
     private var installed = false
@@ -181,12 +196,22 @@ final class CaptureNotifier: NSObject {
         case showRequest(RequestTarget, alertIDs: [Int64])
     }
 
+    /// The alerts a notification names (none for one Tidemark did not post).
+    nonisolated static func alertIDs(in userInfo: [AnyHashable: Any]) -> [Int64] {
+        (userInfo["alertIDs"] as? [NSNumber])?.map(\.int64Value) ?? []
+    }
+
+    /// The notifications to take out of Notification Center once `read` alerts are read: those whose alerts are all read.
+    nonisolated static func withdrawable(_ delivered: [Delivered], read: Set<Int64>) -> [String] {
+        delivered.filter { !$0.alertIDs.isEmpty && $0.alertIDs.allSatisfy(read.contains) }.map(\.identifier)
+    }
+
     /// Where `action` on a notification with `userInfo` leads: nil for a dismissal, or a notification Tidemark did not
     /// post. A notification posted before Show Request existed (the category, and so its actions, are this build's)
     /// names no request: it opens the app's Domains & IPs, as View does.
     nonisolated static func route(action: String, userInfo: [AnyHashable: Any]) -> Route? {
         guard let appID = (userInfo["appID"] as? String).flatMap(UUID.init(uuidString:)) else { return nil }
-        let alertIDs = (userInfo["alertIDs"] as? [NSNumber])?.map(\.int64Value) ?? []
+        let alertIDs = alertIDs(in: userInfo)
         switch action {
         case viewAction, UNNotificationDefaultActionIdentifier:
             return .view(appID, alertIDs: alertIDs)
