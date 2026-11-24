@@ -370,7 +370,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = io.tidemark.Tidemark;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SPARKLE_FEED_URL = "https://github.com/0xnoahzhu/Tidemark/releases/latest/download/appcast.xml";
-				SPARKLE_PUBLIC_ED_KEY = "";
+				SPARKLE_PUBLIC_ED_KEY = "+blCbzHG/lqfwGYySPRcVxJJm49sC6KrGmPD+kTUtjA=";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 			};
 			name = Debug;
@@ -402,7 +402,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = io.tidemark.Tidemark;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SPARKLE_FEED_URL = "https://github.com/0xnoahzhu/Tidemark/releases/latest/download/appcast.xml";
-				SPARKLE_PUBLIC_ED_KEY = "";
+				SPARKLE_PUBLIC_ED_KEY = "+blCbzHG/lqfwGYySPRcVxJJm49sC6KrGmPD+kTUtjA=";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 			};
 			name = Release;
