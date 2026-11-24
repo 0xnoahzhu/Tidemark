@@ -42,6 +42,7 @@ enum AppBootstrap {
 
         engine.start()
         egress.start()
+        AppUpdater.shared.start()
         #if DEBUG
         // After the services above, which would replace the demo's database.
         ShellDemoData.installIfRequested(into: model)

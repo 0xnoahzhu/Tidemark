@@ -27,6 +27,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Set by a quit that needs no confirmation (`requestQuit(confirmed: true)`).
     private static var quitConfirmed = false
 
+    /// Lets the next quit through without the "Quit Tidemark?" dialog: Sparkle quits to install an update.
+    static func confirmNextQuit() { quitConfirmed = true }
+
     /// Quits from a run-loop block rather than from the caller's job. `applicationShouldTerminate` defers
     /// to a main-actor task, which cannot run while `terminate` is nested inside another main-queue job
     /// (for example a `Task` on the main actor), so calling `terminate` directly from there would hang.

@@ -1,11 +1,16 @@
 import AppKit
 import SwiftUI
 
-/// Menu bar commands: File, View (page shortcuts) and Capture.
+/// Menu bar commands: Check for Updates…, File, View (page shortcuts) and Capture.
 struct TidemarkCommands: Commands {
     let model: AppModel
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            if AppUpdater.shared.isAvailable {
+                Button(tr("Check for Updates…", "Commands")) { AppUpdater.shared.checkForUpdates() }
+            }
+        }
         CommandGroup(after: .newItem) {
             CommandsWindowButton(title: tr("New Site Probe", "Commands"), key: "n", modifiers: [.command, .shift]) {
                 Self.newSiteProbe(model)
