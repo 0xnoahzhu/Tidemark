@@ -52,6 +52,8 @@ final class Navigation {
 
     // Notifications page
     var alertFilter: AlertFilter = .all
+    /// The one app whose notifications the page lists, or nil for every app's.
+    var alertApp: AppID?
 
     // Global inventory page
     var inventoryKind: HostKind?

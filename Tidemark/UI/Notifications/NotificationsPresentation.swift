@@ -2,13 +2,21 @@ import Foundation
 
 /// View-independent logic of the Notifications page: filtering, day grouping and card wording.
 enum NotificationsPresentation {
-    /// Alerts matching the design's All / Unread switch, newest first.
-    static func filter(_ items: [AlertItem], by filter: AlertFilter) -> [AlertItem] {
+    /// Alerts matching the design's All / Unread switch and the app menu (nil: every app), newest first.
+    static func filter(_ items: [AlertItem], by filter: AlertFilter, app: AppID? = nil) -> [AlertItem] {
+        let ofApp = app.map { app in items.filter { $0.appID == app } } ?? items
         let matching: [AlertItem] = switch filter {
-        case .all: items
-        case .unread: items.filter(\.isUnread)
+        case .all: ofApp
+        case .unread: ofApp.filter(\.isUnread)
         }
         return matching.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    /// The app menu's apps: the listed ones with notifications, by name. Deleted apps' notifications show only under
+    /// All Apps.
+    static func apps(with items: [AlertItem], in catalog: [MonitoredApp]) -> [MonitoredApp] {
+        let ids = Set(items.map(\.appID))
+        return catalog.filter { ids.contains($0.id) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     /// Splits alerts into TODAY and EARLIER (yesterday and older).

@@ -1428,6 +1428,27 @@ struct NotificationsPresentationTests {
         #expect(NotificationsPresentation.filter(items, by: .unread).map(\.id) == [2, 3])
     }
 
+    @Test func filtersByApp() {
+        var raycast = UIMainFixtures.cursor
+        raycast.id = UUID(uuidString: "00000000-0000-0000-0000-0000000000C2")!
+        raycast.name = "Raycast"
+        var idle = UIMainFixtures.cursor
+        idle.id = UUID(uuidString: "00000000-0000-0000-0000-0000000000C3")!
+        idle.name = "Arc"
+        var other = alert(4, kind: .domain, scope: .site, value: "linear.app", at: .now.addingTimeInterval(-5))
+        other.appID = raycast.id
+        let items = [
+            alert(1, kind: .domain, scope: .host, value: "a.com", read: true, at: .now.addingTimeInterval(-30)),
+            alert(2, kind: .ip, scope: .ip, value: "1.1.1.1", at: .now.addingTimeInterval(-10)),
+            other,
+        ]
+        #expect(NotificationsPresentation.filter(items, by: .all, app: UIMainFixtures.cursor.id).map(\.id) == [2, 1])
+        #expect(NotificationsPresentation.filter(items, by: .unread, app: raycast.id).map(\.id) == [4])
+        #expect(NotificationsPresentation.filter(items, by: .all, app: nil).map(\.id) == [4, 2, 1])
+        // Only apps with notifications, by name.
+        #expect(NotificationsPresentation.apps(with: items, in: [raycast, idle, UIMainFixtures.cursor]).map(\.name) == ["Cursor", "Raycast"])
+    }
+
     @Test func groupsTodayAndEarlier() {
         let now = Date.now
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: now)!

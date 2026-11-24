@@ -496,6 +496,7 @@ struct RequestsInspectorRelated: View {
                 if let alert = related?.alert {
                     link(systemImage: "bell", title: RequestsJourneyLabels.alert(alert), detail: tr("Notifications", "Requests")) {
                         model.nav.alertFilter = .all
+                        model.nav.alertApp = nil
                         model.nav.open(.notifications)
                     }
                 }

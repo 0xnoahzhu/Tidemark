@@ -56,6 +56,28 @@
         }
       }
     },
+    "All Apps" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部 App"
+          }
+        }
+      }
+    },
+    "App" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App"
+          }
+        }
+      }
+    },
     "Deleted app" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -144,6 +166,17 @@
         }
       }
     },
+    "Nothing here from %@. Its new domains and IPs show up the first time they're seen." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有 %@ 的通知。它的新域名和 IP 第一次出现时会显示在这里。"
+          }
+        }
+      }
+    },
     "Nothing here. New domains and IPs show up the first time they're seen." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -195,6 +228,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "查看请求"
+          }
+        }
+      }
+    },
+    "Show the notifications of one app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只显示一个 App 的通知"
           }
         }
       }
