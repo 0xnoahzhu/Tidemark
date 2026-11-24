@@ -1,40 +1,89 @@
 #!/bin/zsh
-# Builds a Release archive of Tidemark and packages it as build/release/Tidemark-<version>.dmg, with the installer
-# window laid out by scripts/dmg (the app, a dashed arrow, the Applications link), next to its debug symbols
-# (Tidemark-<version>.dSYM).
+# Builds a signed Tidemark release into build/release:
+#   Tidemark-<version>.dmg   the installer window (scripts/dmg: the app, a dashed arrow, the Applications link), which
+#                            Sparkle also downloads to update the app
+#   Tidemark-<version>.dSYM  the app's debug symbols (not published)
+#   release.env              VERSION and BUILD, for scripts/appcast.sh
 #
-# Needs Xcode (DEVELOPER_DIR defaults to /Applications/Xcode.app) and uv, which runs dmgbuild. The app is ad-hoc
-# signed: it opens on this Mac, but Gatekeeper blocks it elsewhere until it is opened with right-click › Open.
+# The Release configuration signs with the Developer ID Application certificate of team 7939U549K7, and the archive is
+# exported with scripts/ExportOptions.plist, which signs Sparkle's helpers too. With TIDEMARK_NOTARY_PROFILE naming a
+# `xcrun notarytool store-credentials` keychain profile, the DMG is notarized and stapled; without it the DMG is left
+# unnotarized (a local dry run, which Gatekeeper blocks on other Macs).
+#
+# Needs Xcode (DEVELOPER_DIR defaults to /Applications/Xcode.app) and uv, which runs dmgbuild. No other copy of the app
+# is left behind.
 set -euo pipefail
 
 cd "${0:A:h}/.."
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+team=7939U549K7
+lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 out=build/release
 rm -rf "$out"
 mkdir -p "$out"
+
+identity=$(security find-identity -v -p codesigning | awk -v team="($team)" '/"Developer ID Application: / && index($0, team) { print $2; exit }')
+if [[ -z "$identity" ]]; then
+    echo "No Developer ID Application certificate of team $team in the keychain." >&2
+    exit 1
+fi
 
 echo "Archiving the Release build…"
 xcodebuild archive -project Tidemark.xcodeproj -scheme Tidemark -configuration Release \
     -destination 'generic/platform=macOS' -archivePath "$out/Tidemark.xcarchive" \
     -derivedDataPath build/ReleaseDerivedData > "$out/archive.log"
 
-app="$out/Tidemark.xcarchive/Products/Applications/Tidemark.app"
+echo "Exporting with Developer ID…"
+xcodebuild -exportArchive -archivePath "$out/Tidemark.xcarchive" -exportPath "$out/export" \
+    -exportOptionsPlist scripts/ExportOptions.plist > "$out/export.log"
+
+app="$out/export/Tidemark.app"
 codesign --verify --deep --strict "$app"
+# Read in full first: `grep -q` would stop reading early, and pipefail would count codesign's SIGPIPE as a failure.
+signature=$(codesign -dvv "$app" 2>&1)
+if [[ "$signature" != *"Authority=Developer ID Application: "*"($team)"* ]]; then
+    echo "$app is not signed with Developer ID." >&2
+    exit 1
+fi
 version=$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")
+build=$(plutil -extract CFBundleVersion raw "$app/Contents/Info.plist")
+if [[ -z "$(plutil -extract SUPublicEDKey raw "$app/Contents/Info.plist" 2>/dev/null)" ]]; then
+    echo "warning: SPARKLE_PUBLIC_ED_KEY is empty: this build will not update itself." >&2
+fi
 dmg="$out/Tidemark-$version.dmg"
 
 echo "Packaging $dmg…"
 uv run --quiet --no-project --with dmgbuild==1.6.7 dmgbuild \
     -s scripts/dmg/settings.py -D app="$app" -D background=scripts/dmg/background.tiff \
     "Tidemark $version" "$dmg"
-
+codesign --sign "$identity" --timestamp "$dmg"
 hdiutil verify -quiet "$dmg"
 
-# Keep only the DMG and the app's debug symbols: the archive's copy of the app would linger as one more Tidemark.app.
+if [[ -n "${TIDEMARK_NOTARY_PROFILE:-}" ]]; then
+    echo "Notarizing $dmg…"
+    xcrun notarytool submit "$dmg" --keychain-profile "$TIDEMARK_NOTARY_PROFILE" --wait --output-format json > "$out/notary.json"
+    notary_status=$(plutil -extract status raw "$out/notary.json")
+    if [[ "$notary_status" != "Accepted" ]]; then
+        echo "Notarization ended $notary_status:" >&2
+        xcrun notarytool log "$(plutil -extract id raw "$out/notary.json")" --keychain-profile "$TIDEMARK_NOTARY_PROFILE" >&2 || true
+        exit 1
+    fi
+    xcrun stapler staple "$dmg"
+    spctl --assess --type open --context context:primary-signature --verbose "$dmg"
+else
+    echo "warning: TIDEMARK_NOTARY_PROFILE is not set: the DMG is not notarized." >&2
+fi
+
+# Keep only the DMG and the app's debug symbols: the archive's and the export's copies of the app would linger as more
+# Tidemark.app copies (and in Launch Services).
 mv "$out/Tidemark.xcarchive/dSYMs/Tidemark.app.dSYM" "$out/Tidemark-$version.dSYM"
-rm -rf "$out/Tidemark.xcarchive"
+for copy in "$app" "$out/Tidemark.xcarchive/Products/Applications/Tidemark.app"; do
+    "$lsregister" -u "$copy" 2>/dev/null || true
+done
+rm -rf "$out/Tidemark.xcarchive" "$out/export"
 # The archive's build folder keeps a link to where the app was built before it moved into the archive.
 find build/ReleaseDerivedData -name '*.app' -type l -delete
 
+print "VERSION=$version\nBUILD=$build" > "$out/release.env"
 shasum -a 256 "$dmg"

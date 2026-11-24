@@ -25,10 +25,10 @@ xcodebuild -project Tidemark.xcodeproj -scheme Tidemark -destination 'platform=m
 The project uses synchronized folders: every file under `Tidemark/` and `TidemarkTests/` belongs to its
 target automatically, so adding a file never requires editing the project.
 
-To make a release, run `scripts/release.sh` (needs [uv](https://docs.astral.sh/uv/)). It archives the Release
-build and writes `build/release/Tidemark-<version>.dmg`, whose installer window shows the app, a dashed arrow and
-the Applications folder (`scripts/dmg`: `settings.py` lays out the window for dmgbuild, `background.swift` draws the
-background), and its debug symbols as `Tidemark-<version>.dSYM`; no other copy of the app is left behind. The app
-is ad-hoc signed, so on other Macs it opens with right-click › Open the first time.
+Releases are published to GitHub Releases by pushing a version tag (`v<version>`): a self-hosted Mac runner builds,
+signs with Developer ID, notarizes and uploads the DMG and Sparkle's `appcast.xml`, from which the app updates itself.
+See [docs/RELEASING.md](docs/RELEASING.md). `scripts/release.sh` (needs [uv](https://docs.astral.sh/uv/)) also builds
+the DMG locally: its installer window shows the app, a dashed arrow and the Applications folder (`scripts/dmg`:
+`settings.py` lays out the window for dmgbuild, `background.swift` draws the background).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it works.

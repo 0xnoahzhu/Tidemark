@@ -1,0 +1,80 @@
+# Publishes a release when a version tag (v<MARKETING_VERSION>) on main is pushed: the notarized DMG and Sparkle's
+# appcast.xml, nothing else. Runs on the self-hosted Mac runner, whose login keychain holds the Developer ID
+# certificate, the notarytool profile and the Sparkle EdDSA key (docs/RELEASING.md).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: zsh {0}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      TIDEMARK_NOTARY_PROFILE: ${{ vars.NOTARY_PROFILE || 'tidemark-notary' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check the tag
+        run: |
+          set -euo pipefail
+          tag=$GITHUB_REF_NAME
+          version=$(grep -m1 -o 'MARKETING_VERSION = [^;]*' Tidemark.xcodeproj/project.pbxproj | cut -d' ' -f3)
+          if [[ "$tag" != "v$version" ]]; then
+            echo "::error::Tag $tag does not match MARKETING_VERSION $version"
+            exit 1
+          fi
+          if grep -q 'SPARKLE_PUBLIC_ED_KEY = "";' Tidemark.xcodeproj/project.pbxproj; then
+            echo "::error::SPARKLE_PUBLIC_ED_KEY is empty: the release could not update itself"
+            exit 1
+          fi
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$tag is not on main"
+            exit 1
+          fi
+
+      - name: Build, sign and notarize
+        run: scripts/release.sh
+
+      - name: Write the release notes and appcast
+        run: |
+          set -euo pipefail
+          scripts/release-notes.sh "$GITHUB_REF_NAME" > build/release/notes.md
+          scripts/appcast.sh build/release/notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source build/release/release.env
+          title=$(sed -n '1s/^# //p' build/release/notes.md)
+          sed '1{/^# /d;}' build/release/notes.md | sed '/./,$!d' > build/release/body.md
+          # A draft until both files are up: the app's feed follows the latest published release.
+          gh release create "$GITHUB_REF_NAME" "build/release/Tidemark-$VERSION.dmg" build/release/appcast.xml \
+            --draft --verify-tag --title "$title" --notes-file build/release/body.md
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+
+      - name: Keep the debug symbols on the runner
+        run: |
+          set -euo pipefail
+          source build/release/release.env
+          symbols="$HOME/TidemarkReleases/$VERSION"
+          mkdir -p "$symbols"
+          rm -rf "$symbols/Tidemark-$VERSION.dSYM"
+          mv "build/release/Tidemark-$VERSION.dSYM" "$symbols/"
