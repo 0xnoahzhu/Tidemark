@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Bottom of the sidebar: Surge and PostgreSQL health, and the Settings button.
+/// Bottom of the sidebar: Surge and PostgreSQL health, and the Settings button, with a dot while a new version of
+/// Tidemark is available.
 struct SidebarFooter: View {
     @Environment(AppModel.self) private var model
 
@@ -23,16 +24,32 @@ struct SidebarFooter: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            let newVersion = AppUpdater.shared.newVersion
             SettingsLink {
                 Image(systemName: "gearshape")
                     .font(.design(13, .medium))
                     .foregroundStyle(Theme.inkGlass)
                     .frame(width: 26.px, height: 26.px)
+                    .overlay(alignment: .topTrailing) {
+                        if newVersion != nil {
+                            Circle()
+                                .fill(Theme.accent)
+                                .frame(width: 7.px, height: 7.px)
+                                .offset(x: -3.px, y: 3.px)
+                                .transition(.scale.combined(with: .opacity))
+                        }
+                    }
                     .contentShape(.rect(cornerRadius: 7.px))
             }
             .buttonStyle(.borderless)
-            .help(tr("Settings…", "Sidebar"))
+            // Settings opens on General, where the new version is installed.
+            .simultaneousGesture(TapGesture().onEnded {
+                if newVersion != nil { model.nav.settingsTab = .general }
+            })
+            .animation(.smooth(duration: 0.25), value: newVersion)
+            .help(newVersion.map { trf("Settings… · Tidemark %@ is available", "Sidebar", $0) } ?? tr("Settings…", "Sidebar"))
             .accessibilityLabel(tr("Settings…", "Sidebar"))
+            .accessibilityValue(newVersion.map { trf("Tidemark %@ is available", "Sidebar", $0) } ?? "")
         }
         .padding(.horizontal, 12.px)
         .padding(.vertical, 10.px)

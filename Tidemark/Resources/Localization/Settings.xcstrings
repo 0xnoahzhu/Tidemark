@@ -51,6 +51,26 @@
         }
       }
     },
+    "Check for Updates…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查更新…"
+          }
+        }
+      }
+    },
+    "Checks GitHub once a day and downloads new versions, which install when Tidemark quits." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天检查一次 GitHub 并自动下载新版本，在 Tidemark 退出时安装。"
+          }
+        }
+      }
+    },
     "Choose" : {
       "localizations" : {
         "zh-Hans" : {
@@ -231,6 +251,16 @@
         }
       }
     },
+    "Install and Relaunch" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装并重新打开"
+          }
+        }
+      }
+    },
     "Last write %lld s ago" : {
       "localizations" : {
         "zh-Hans" : {
@@ -351,6 +381,16 @@
         }
       }
     },
+    "Software Update" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "软件更新"
+          }
+        }
+      }
+    },
     "Starts recording right away and monitors every app except archived ones." : {
       "localizations" : {
         "zh-Hans" : {
@@ -411,12 +451,62 @@
         }
       }
     },
+    "This build does not update itself." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个版本不会自动更新。"
+          }
+        }
+      }
+    },
     "Tinted" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "磨砂"
+          }
+        }
+      }
+    },
+    "Update automatically" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动更新"
+          }
+        }
+      }
+    },
+    "Version %1$@ (%2$@)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "版本 %1$@（%2$@）"
+          }
+        }
+      }
+    },
+    "Version %@ is available." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有新版本 %@。"
+          }
+        }
+      }
+    },
+    "Version %@ is ready to install." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "版本 %@ 已下载，可以安装。"
           }
         }
       }

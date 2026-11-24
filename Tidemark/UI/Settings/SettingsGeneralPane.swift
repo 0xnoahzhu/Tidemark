@@ -3,7 +3,7 @@ import os
 import ServiceManagement
 import SwiftUI
 
-/// Settings › General: appearance, Liquid Glass and login item. The language follows the system's (`Localizer`).
+/// Settings › General: appearance, Liquid Glass, login item and updates. The language follows the system's (`Localizer`).
 struct SettingsGeneralPane: View {
     @Environment(AppModel.self) private var model
     @Environment(Localizer.self) private var localizer
@@ -28,6 +28,7 @@ struct SettingsGeneralPane: View {
                         .controlSize(SettingsLayout.controlSize)
                 }
             }
+            updatesCard
         }
         .onAppear { loginStatus = SMAppService.mainApp.status }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -95,6 +96,53 @@ struct SettingsGeneralPane: View {
         .font(.design(11))
         .foregroundStyle(Theme.ink2)
         .fixedSize()
+    }
+
+    // MARK: Updates
+
+    /// Automatic updates and the version: Install and Relaunch once a new version is downloaded, Check for Updates…
+    /// otherwise. A build that does not update itself (Debug) says so and turns both off.
+    private var updatesCard: some View {
+        let updater = AppUpdater.shared
+        return SettingsCard {
+            SettingsRow(title: tr("Update automatically", "Settings"),
+                        note: tr("Checks GitHub once a day and downloads new versions, which install when Tidemark quits.", "Settings")) {
+                Toggle(tr("Update automatically", "Settings"), isOn: Binding(
+                    get: { updater.updatesAutomatically },
+                    set: { updater.setUpdatesAutomatically($0) }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .controlSize(SettingsLayout.controlSize)
+                .disabled(!updater.isAvailable)
+            }
+            SettingsRow(title: tr("Software Update", "Settings"), note: Self.updateNote(updater)) {
+                Group {
+                    if updater.isReadyToInstall {
+                        Button(tr("Install and Relaunch", "Settings")) { updater.installAndRelaunch() }
+                    } else {
+                        Button(tr("Check for Updates…", "Settings")) { updater.checkForUpdates() }
+                    }
+                }
+                .buttonStyle(DesignButtonStyle(height: 26, cornerRadius: 7, horizontalPadding: 10))
+                .disabled(!updater.isAvailable)
+            }
+        }
+    }
+
+    /// `Version 1.1.0 is ready to install.`, `Version 1.1.0 is available.`, or this build's version and build number.
+    static func updateNote(_ updater: AppUpdater, versionAndBuild: String = versionAndBuild) -> String {
+        guard updater.isAvailable else { return tr("This build does not update itself.", "Settings") }
+        guard let version = updater.newVersion else { return versionAndBuild }
+        return updater.isReadyToInstall
+            ? trf("Version %@ is ready to install.", "Settings", version)
+            : trf("Version %@ is available.", "Settings", version)
+    }
+
+    /// `Version 1.1.0 (22)`
+    static var versionAndBuild: String {
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return trf("Version %1$@ (%2$@)", "Settings", version, build)
     }
 
     // MARK: Login item

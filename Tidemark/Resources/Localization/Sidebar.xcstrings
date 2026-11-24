@@ -276,6 +276,16 @@
         }
       }
     },
+    "Settings… · Tidemark %@ is available" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置… · Tidemark %@ 可以更新了"
+          }
+        }
+      }
+    },
     "Site Probe" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -294,6 +304,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本机"
+          }
+        }
+      }
+    },
+    "Tidemark %@ is available" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidemark %@ 可以更新了"
           }
         }
       }
